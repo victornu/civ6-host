@@ -1,0 +1,307 @@
+"""Shared preparation of the exact XP1 saved inputs and executable.
+
+No engine execution or profile admission occurs here. The qualifier and the
+persistent session use these same source checks and private input copies.
+"""
+import hashlib
+import json
+import shutil
+from pathlib import Path
+from .paths import resource_root
+from .provenance import installed_source_pins
+from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+
+REPO = Path(__file__).resolve().parents[3]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+SAVED_LOAD_HOST = ('work/native-host-xp1-jobs-build01/civ6rl-native-python.exe',
+                   '09b7a2e1f049120d8483e01c81859d2796d0cd7882897587f66980c27a4ec7a6')
+
+
+SAVED_LOAD_BUILD = ('work/native-host-xp1-jobs-build01/build.json',
+                    'a3f0dea1be0bd59f66d8e02615997da766c189e2f6ff561215bd7dee4feb2b8b')
+
+
+SAVED_LOAD_MANIFEST = (REPO/'native/profiles/xp1-jobs/source-manifest.json',
+                       '75d2965e3d9602c7f9a576157de45bd04b54e1467d7c5d0dd73b72ace63c9052')
+
+
+SAVED_LOAD_CLOSURE_ENV = 'CIV6_HOST_XP1_SAVED_LOAD_CLOSURE_SHA'
+
+
+SAVED_UI_HOST = ('work/native-host-xp1-ui-build01/civ6rl-native-python.exe',
+                 '949949ddca0ec61a55e3368bf062f46fcdb4b2f7dc52f25a49acc4758664224f')
+
+
+SAVED_UI_BUILD = ('work/native-host-xp1-ui-build01/build.json',
+                  '842ee9a916b247e23c68e55fed10e6edb00413ce4762b9fe706baa018c074010')
+
+
+SAVED_UI_MANIFEST = (REPO/'native/profiles/xp1-ui/source-manifest.json',
+                     '6da2aba65afe87cb8c304eb2a0b59d83a511d330a5e51a6ca07686360dd9449a')
+
+
+def saved_load_pin(pins, path, expected=None):
+    from civ6_host.runtime.resource_resolution import resolve_path
+    path = resolve_path(Path(path)).resolve()
+    with path.open('rb') as stream:
+        actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if expected is not None and actual != expected:
+        raise ValueError('Saved Load source/build/input changed: '+str(path))
+    if str(path) in pins and pins[str(path)] != actual:
+        raise ValueError('Saved Load pin identity changed: '+str(path))
+    pins[str(path)] = actual
+    return path
+
+
+def saved_load_build_pins(pins, *, ui=False, core_sha256=XP1_CORE_SHA256):
+    if type(ui) is not bool:raise ValueError('Native build selection must be explicit')
+    if core_sha256 == XP2_CORE_SHA256:
+        if not ui:raise ValueError('Shared XP2 sessions require the qualified UI host build')
+        from .xp2_session_inputs import XP2_UI_HOST
+        from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA
+        from .xp2_ui_binding_source import UI_COMPONENT_SHA
+        executable=saved_load_pin(pins,resource_root()/XP2_UI_HOST[0],XP2_UI_HOST[1])
+        build=verify_source_build(executable,required_components={
+            'gamecore_python_host.c':XP2_HOST_COMPONENT_SHA,
+            'script_core_ui_binding_profiles.inc':UI_COMPONENT_SHA})
+        for name, expected in build['build_dependencies'].items():
+            saved_load_pin(pins,resource_root()/name,expected)
+        return executable
+    if core_sha256 != XP1_CORE_SHA256:raise ValueError('Unknown saved session build engine')
+    host,build_ref,manifest_ref = ((SAVED_UI_HOST,SAVED_UI_BUILD,SAVED_UI_MANIFEST) if ui
+                                 else (SAVED_LOAD_HOST,SAVED_LOAD_BUILD,SAVED_LOAD_MANIFEST))
+    if ui:
+        from .source_build_identity import verify_source_build
+        executable = saved_load_pin(pins, resource_root()/host[0], host[1])
+        verified = verify_source_build(executable, required_components={
+            'script_core_bindings_xp1.inc': '1ec54d12e6c014a8ba9b2f97e68edf7ad2d775e9129a16eaa092db2159affc9f'})
+        if tuple(verified['build_reference']) != build_ref:
+            for path, expected in verified['build_dependencies'].items():
+                saved_load_pin(pins, resource_root()/path, expected)
+            return executable
+    profile='xp1-official-ui-bindings' if ui else 'xp1-explicit-job-core'
+    paths = [saved_load_pin(pins, resource_root()/name, expected)
+             for name, expected in (host,build_ref,manifest_ref)]
+    build = json.loads(paths[1].read_bytes())
+    manifest = json.loads(paths[2].read_bytes())
+    if (build['profile'] != profile
+            or build['source_manifest_sha256'] != manifest_ref[1]
+            or build['executable']['sha256'] != host[1]
+            or manifest['profile'] != build['profile']):
+        raise ValueError('Saved Load native build/profile identity differs')
+    for row in manifest['sources']:
+        saved_load_pin(pins, REPO/row['path'], row['sha256'])
+    for row in build['sources']:
+        saved_load_pin(pins, row['path'], row['sha256'])
+        saved_load_pin(pins, row['source_path'], row['sha256'])
+    return paths[0]
+
+
+def saved_load_private_icu(fixture, pins, private):
+    """The existing copier owns DBs; copy ICU without changing its metadata."""
+    value = json.loads(fixture.read_bytes())
+    icu = value['localization_bootstrap']['icu_data']
+    source = saved_load_pin(pins, icu['path'], icu['sha256'])
+    target = fixture.parent/'icudt56l.dat'
+    if target.exists() or source == target:
+        raise ValueError('Saved Load ICU needs a new independent private copy')
+    shutil.copyfile(source, target)
+    saved_load_pin(pins, source, icu['sha256'])
+    saved_load_pin(pins, target, icu['sha256'])
+    icu['path'] = str(target)
+    fixture.write_text(json.dumps(value, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+    private['manifest_sha256'] = digest(fixture.read_bytes())
+    private['icu_copy'] = dict(source_path=str(source), copy_path=str(target), sha256=icu['sha256'])
+
+
+def prepare_sources(captured, package, *, postload160, publish_cache,
+                    close_loaded, observe_player, unit_commands, core_sha256=XP1_CORE_SHA256):
+    """Pin actual source dependencies for the requested retained owner phases."""
+    flags = (postload160, publish_cache, close_loaded, observe_player, unit_commands)
+    if any(type(flag) is not bool for flag in flags):
+        raise ValueError('XP1 source phases require exact Boolean values')
+    if ((publish_cache or close_loaded) and not postload160
+            or observe_player and not (publish_cache and close_loaded)
+            or unit_commands and not observe_player):
+        raise ValueError('XP1 requested phases lack their required owners')
+    if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
+        raise ValueError('Unknown captured session source engine')
+    if core_sha256 == XP2_CORE_SHA256:
+        from .xp2_session_inputs import xp2_saved_load_source_dependencies
+        from .xp2_bundle_inputs import validate_candidate_inputs
+        if not (postload160 and publish_cache and close_loaded and observe_player):
+            raise ValueError('Shared XP2 preparation requires the full observed loaded lifecycle')
+        validate_candidate_inputs(captured.inputs,captured)
+        pins={}
+        for group in (installed_source_pins(),captured.dependencies,
+                xp2_saved_load_source_dependencies(postload160=True,observe_player=True)):
+            for name,expected in group.items():saved_load_pin(pins,resource_root()/name,expected)
+        from .stdout_transport_profiles import source_dependencies as stdout_dependencies
+        for name,expected in stdout_dependencies(core_sha256=core_sha256).items():saved_load_pin(pins,name,expected)
+        if unit_commands:
+            for name,expected in command_source_dependencies(core_sha256).items():
+                saved_load_pin(pins,name,expected)
+            from .xp1_loaded_lifetime import source_dependencies as lifetime_dependencies
+            for name,expected in lifetime_dependencies(core_sha256,postload=True,continuation=True).items():
+                saved_load_pin(pins,name,expected)
+        saved_load_pin(pins,package['path'],package['sha256'])
+        return pins,saved_load_build_pins(pins,ui=True,core_sha256=core_sha256)
+    pins = {}
+    for name, expected in installed_source_pins().items():
+        saved_load_pin(pins, name, expected)
+    for name, expected in captured.dependencies.items():
+        saved_load_pin(pins, resource_root()/name, expected)
+    from .native.native_xp1_context_init import PROOF_PINS as context_proofs, SOURCE_PINS as context_sources
+    for name, expected in (*context_proofs.values(), *context_sources.items()):
+        saved_load_pin(pins, resource_root()/name, expected)
+    from .xp1_prepare import source_dependencies as prepare_dependencies
+    for name, expected in prepare_dependencies():
+        saved_load_pin(pins, resource_root()/name, expected)
+    from .native.native_host_slot48 import PINNED_EVIDENCE_SHA256 as lock_proof
+    saved_load_pin(pins, resource_root()/'evidence/native-host-slot48'/(lock_proof + '.json'), lock_proof)
+    from .native import native_checkpoint_configuration_normalization as normalization
+    for folder, expected in (
+        ('native-checkpoint-empty-string-normalization', normalization.PROOF_SHA256),
+        ('native-checkpoint-configuration-stream-v3', normalization.PROVIDER_PROOF_SHA256),
+    ):
+        saved_load_pin(pins, resource_root()/'evidence'/folder/(expected + '.json'), expected)
+    from civ6_host.runtime.stdout_transport_profiles import source_dependencies as stdout_dependencies
+    for name, expected in stdout_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.xp1_load_capability import source_dependencies
+    for name, expected in source_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.application_mirror_profiles import source_dependencies as mirror_dependencies
+    for name, expected in mirror_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.xp1_load_options import source_dependencies as options_dependencies
+    for name, expected in options_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.xp1_saved_load_logger import source_dependencies as logger_dependencies
+    for name, expected in logger_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.a0_emergencies_updated import source_dependencies as publication_event_dependencies
+    for name, expected in publication_event_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.a0_notification_scope_source import source_dependencies as notification_dependencies
+    for name, expected in notification_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    from civ6_host.runtime.xp1_absent_event_families import source_dependencies as absent_event_dependencies
+    for name, expected in absent_event_dependencies().items():
+        saved_load_pin(pins, name, expected)
+    if postload160:
+        from civ6_host.runtime.xp1_postload_candidate import source_dependencies as post160_dependencies
+        for name, expected in post160_dependencies().items():
+            saved_load_pin(pins, name, expected)
+    if publish_cache:
+        from civ6_host.runtime.xp1_cache_publication import source_dependencies as publication_dependencies
+        for name, expected in publication_dependencies().items():
+            saved_load_pin(pins, name, expected)
+    if close_loaded:
+        from civ6_host.runtime.a0_district_removed import source_dependencies as district_dependencies
+        for name, expected in district_dependencies().items():
+            saved_load_pin(pins, name, expected)
+        from civ6_host.runtime.xp1_loaded_lifetime import source_dependencies as lifetime_dependencies
+        for name, expected in lifetime_dependencies().items():
+            saved_load_pin(pins, name, expected)
+    if observe_player:
+        from civ6_host.runtime.xp1_ui_binding import source_dependencies as ui_dependencies
+        for name,expected in ui_dependencies().items():saved_load_pin(pins,name,expected)
+    if unit_commands:
+        from civ6_host.runtime.action_transport_profiles import source_dependencies as transport_dependencies
+        from civ6_host.runtime.unit_operation_ui_profile import source_dependencies as unit_dependencies
+        from civ6_host.runtime.xp1_log_event_profile import source_dependencies as event_dependencies
+        from civ6_host.runtime.found_unit_event_profiles import source_dependencies as found_event_dependencies
+        from civ6_host.runtime.foundation_event_profile import source_dependencies as foundation_dependencies
+        from civ6_host.runtime.city_scalar_event_profiles import source_dependencies as city_scalar_dependencies
+        from civ6_host.runtime.xp1_private_notification_profile import source_dependencies as private_dependencies
+        from civ6_host.runtime.turn_unit_event_profile import source_dependencies as turn_unit_dependencies
+        from civ6_host.runtime.xp1_turn_profile import source_dependencies as turn_dependencies
+        from civ6_host.runtime.xp1_host_thread_gate import source_dependencies as thread_dependencies
+        from civ6_host.runtime.xp1_host_slot78 import source_dependencies as slot78_dependencies
+        from civ6_host.runtime.placement_event_profile import source_dependencies as placement_dependencies
+        from civ6_host.runtime.combat_event_profile import source_dependencies as combat_dependencies
+        from civ6_host.runtime.improvement_change_profile import source_dependencies as improvement_change_dependencies
+        from civ6_host.runtime.placement_inventory_profile import source_dependencies as inventory_dependencies
+        from civ6_host.runtime.xp1_unit_attack_profile import source_dependencies as attack_dependencies
+        from civ6_host.runtime.district_damage_profile import source_dependencies as district_damage_dependencies
+        for dependencies in (transport_dependencies(),unit_dependencies(),event_dependencies(),found_event_dependencies(),foundation_dependencies(),city_scalar_dependencies(),private_dependencies(),turn_unit_dependencies(),turn_dependencies(),thread_dependencies(),slot78_dependencies(),placement_dependencies(),combat_dependencies(),improvement_change_dependencies(),inventory_dependencies(),attack_dependencies(),district_damage_dependencies()):
+            for name,expected in dependencies.items():saved_load_pin(pins,name,expected)
+    saved_load_pin(pins, package['path'], package['sha256'])
+    executable = saved_load_build_pins(pins,ui=observe_player)
+    return pins, executable
+
+
+def command_source_dependencies(core_sha256):
+    """Initial saved action graph only; later XP1 families retain their own joins."""
+    if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
+        raise ValueError('Unknown saved command source engine')
+    from importlib import import_module
+    references = {}
+
+    def collect(dependencies):
+        for path, expected in dependencies.items():
+            if references.setdefault(path, expected) != expected:
+                raise ValueError('Conflicting saved command source pin: '+str(path))
+
+    for name in ('action_transport_profiles','unit_operation_ui_profile',
+            'xp1_log_event_profile','found_unit_event_profiles','foundation_event_profile',
+            'city_scalar_event_profiles','xp1_private_notification_profile',
+            'turn_unit_event_profile','xp1_turn_profile','xp1_host_thread_gate','xp1_host_slot78',
+            'xp1_absent_event_families','xp2_history_event_profile','xp2_turn_event_profile'):
+        module=import_module('civ6_host.runtime.'+name)
+        collect(module.source_dependencies(core_sha256=core_sha256))
+    if core_sha256==XP2_CORE_SHA256:
+        from .xp1_unit_attack_profile import source_dependencies as attack_dependencies
+        collect(attack_dependencies(core_sha256=core_sha256))
+        from .xp2_natural_wonder_source import source_dependencies as wonder_dependencies
+        collect(wonder_dependencies())
+        from .xp2_world_unit_event_source import source_dependencies as input_event_dependencies
+        collect(input_event_dependencies())
+        from .xp2_production_queue_event_source import source_dependencies as queue_event_dependencies
+        collect(queue_event_dependencies())
+        from .xp2_placement_event_source import source_dependencies as placement_event_dependencies
+        collect(placement_event_dependencies())
+        from .xp2_host_slot20_source import source_dependencies as achievement_dependencies
+        collect(achievement_dependencies())
+        from .improvement_change_profile import source_dependencies as improvement_dependencies
+        collect(improvement_dependencies(core_sha256=core_sha256))
+        from .xp2_feature_reveal_source import source_dependencies as feature_dependencies
+        collect(feature_dependencies())
+        from .district_damage_profile import source_dependencies as district_dependencies
+        collect(district_dependencies(core_sha256=core_sha256))
+        from .combat_event_profile import source_dependencies as combat_dependencies
+        collect(combat_dependencies(core_sha256=core_sha256))
+    pins = {}
+    for path, expected in references.items():
+        saved_load_pin(pins, path, expected)
+    return pins
+
+
+def _write_once(path, value):
+    data = (json.dumps(value, indent=2, sort_keys=True, default=str) + '\n').encode()
+    with path.open('xb') as stream:
+        stream.write(data)
+    return {'path':str(path),'bytes':len(data),'sha256':digest(data)}
+
+
+def prepare_private_fixture(run, captured, pins):
+    """Use the existing DB copier and one private ICU copy per new process."""
+    from .native.native_probe import prepare_init_fixture_copies
+    fixture_source = run/'source-fixture.json'
+    _write_once(fixture_source, captured.fixture)
+    isolation = prepare_init_fixture_copies(fixture_source, 1, isolation_root=run)
+    private = isolation['workers'][0]
+    fixture = Path(private['manifest_path']).resolve()
+    saved_load_private_icu(fixture, pins, private)
+    saved_load_pin(pins, fixture_source)
+    saved_load_pin(pins, fixture, private['manifest_sha256'])
+    for row in private['databases'].values():
+        saved_load_pin(pins, row['source_path'], row['sha256'])
+        saved_load_pin(pins, row['copy_path'], row['sha256'])
+    return fixture, isolation

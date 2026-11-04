@@ -1,0 +1,248 @@
+{
+  "schema": "civ6-host.native-source.v1",
+  "profile": "retained-xp1-host42",
+  "origin_build": {
+    "path": "work/native-script-services-host42-xp1/build.json",
+    "sha256": "ad153d93af4f39cccd4fc9aa338e03e3c87c626d4ee584225571b26738e05b9c"
+  },
+  "sources": [
+    {
+      "origin": "work/native-script-services-host42-xp1/script_include.inc",
+      "path": "native/script_include.inc",
+      "build_path": "script_include.inc",
+      "bytes": 5353,
+      "sha256": "7692a3fa690c45e50614a70dd8e255291a36ec1cca9f4dea41ec7bdae6e427e6",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_core_bindings.inc",
+      "path": "native/script_core_bindings.inc",
+      "build_path": "script_core_bindings.inc",
+      "bytes": 4747,
+      "sha256": "77a750aa17b5c78f5d1e4813007637374259b5b46492c8fbccc0e3b090b113a5",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_ui_attach.inc",
+      "path": "native/script_ui_attach.inc",
+      "build_path": "script_ui_attach.inc",
+      "bytes": 2017,
+      "sha256": "a7ad6783cc7fa0c1826dcbefbecc59daaa5fb011ee1a7b7dfe5fc64ba15a0196",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_ui_enums.inc",
+      "path": "native/script_ui_enums.inc",
+      "build_path": "script_ui_enums.inc",
+      "bytes": 17513,
+      "sha256": "28a92b635c90b94c6703edc4afbb44e8bed5c68c4d66459244b91bae2175b8d6",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_libraries.inc",
+      "path": "native/script_libraries.inc",
+      "build_path": "script_libraries.inc",
+      "bytes": 3520,
+      "sha256": "5319014f7ebe9bee9c57743d5a867842e6cb2d50e7205666d0bd7059d7b80365",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_library_names.inc",
+      "path": "native/script_library_names.inc",
+      "build_path": "script_library_names.inc",
+      "bytes": 1193,
+      "sha256": "18c584e8425db0ecf80661536632251272efe3493211aade362cfb381c1b4c20",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_event_dispatch.inc",
+      "path": "native/profiles/retained/script_game_event_dispatch.inc",
+      "build_path": "script_game_event_dispatch.inc",
+      "bytes": 5852,
+      "sha256": "0c55a4d154ac9456206df67dc610ceb9982e4fb3247e35fc223e4dc2f8ff7c77",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_events.inc",
+      "path": "native/script_game_events.inc",
+      "build_path": "script_game_events.inc",
+      "bytes": 2061,
+      "sha256": "cd1f3eea2d28d820598fbd6105a1dad55d20b52b062685a34eaf088f48507c99",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_events_full.inc",
+      "path": "native/script_game_events_full.inc",
+      "build_path": "script_game_events_full.inc",
+      "bytes": 8824,
+      "sha256": "228b8679a930eb180990ce92e1237d35cf98337298c04c9c6a4f06bd03b41e69",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_event_aggregators.inc",
+      "path": "native/script_game_event_aggregators.inc",
+      "build_path": "script_game_event_aggregators.inc",
+      "bytes": 7904,
+      "sha256": "c9c385462d83ba35b5f23898d310ba3f437313aedeb56dd125f1d8c6b8e375e7",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_aux_events.inc",
+      "path": "native/script_aux_events.inc",
+      "build_path": "script_aux_events.inc",
+      "bytes": 9712,
+      "sha256": "b3ba8748e28015ad4a1b972010dac2a67603243c11474651d4e44036d4a3a20b",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_events.inc",
+      "path": "native/script_events.inc",
+      "build_path": "script_events.inc",
+      "bytes": 3196,
+      "sha256": "d035e629fdb2790e8ed8ec2b8bcb46c87819225fa34778fc4e2301a975e3aeeb",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_aux_a8.inc",
+      "path": "native/profiles/retained/script_aux_a8.inc",
+      "build_path": "script_aux_a8.inc",
+      "bytes": 10208,
+      "sha256": "21b89785adfb92234038b00ce2f07bbd6714e400511cdb73fb36e8845b572ad8",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_aux_a0.inc",
+      "path": "native/profiles/retained/script_aux_a0.inc",
+      "build_path": "script_aux_a0.inc",
+      "bytes": 3187,
+      "sha256": "a5f138c98c10ad0ac618e0438848446013448bbe04c59344d7f71f7ce16b76a0",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_execution.inc",
+      "path": "native/script_execution.inc",
+      "build_path": "script_execution.inc",
+      "bytes": 4717,
+      "sha256": "6814c0c29e82d491e3ff2bb9f50bff73636b255d2e94464ef1fbbb0971dd8766",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_locale.inc",
+      "path": "native/script_locale.inc",
+      "build_path": "script_locale.inc",
+      "bytes": 11874,
+      "sha256": "aafc7b358bab7700b7a5b0f5b4a817d7351e083267daa727c6c3510253c1d481",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_diagnostics.inc",
+      "path": "native/script_diagnostics.inc",
+      "build_path": "script_diagnostics.inc",
+      "bytes": 7702,
+      "sha256": "18db4c4fcf1b7f13df6bd964b558b8de6c144ab2af9c000495f9e3b45bd18474",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/telemetry_profile.h",
+      "path": "native/telemetry_profile.h",
+      "build_path": "telemetry_profile.h",
+      "bytes": 2503,
+      "sha256": "783f914467c7960940debe59c7815f351dc66491fe1c0211b82b9c41e363abd8",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/gamecore_python_host.c",
+      "path": "native/profiles/xp1/gamecore_python_host.c",
+      "build_path": "gamecore_python_host.c",
+      "bytes": 98088,
+      "sha256": "6810282c65679ce8525c97383017c9e82b7bed033b09a54921dd801b1c3eb54a"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_core_bindings_xp1.inc",
+      "path": "native/profiles/xp1/script_core_bindings_xp1.inc",
+      "build_path": "script_core_bindings_xp1.inc",
+      "bytes": 1770,
+      "sha256": "73572fe77dbc76f497dad3db40de5bda071fef7dd8556773c62239763ac26b67"
+    }
+  ],
+  "reference_executable": {
+    "name": "civ6rl-native-python.exe",
+    "bytes": 116736,
+    "sha256": "962ff8ca95ffed4fbaf40f0a0c37c47dd7d9c27b0bfc25beb4ae5dc76a2cfd0c",
+    "canonical_metadata_fields": [
+      {
+        "name": "COFF.TimeDateStamp",
+        "offset": 264,
+        "bytes": 4,
+        "value": 1792018843
+      },
+      {
+        "name": "ExportDirectory.TimeDateStamp",
+        "offset": 104164,
+        "bytes": 4,
+        "value": 4294967295
+      },
+      {
+        "name": "DebugDirectory[0].TimeDateStamp",
+        "offset": 98836,
+        "bytes": 4,
+        "value": 1792018843
+      }
+    ],
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "size": 60928,
+        "offset": 1024,
+        "sha256": "fcecffdac956c3b45bb0bac26163bcfaf2b27a11c7ecf8be757193183b122b02"
+      },
+      {
+        "name": ".rdata",
+        "rva": 65536,
+        "size": 48128,
+        "offset": 61952,
+        "sha256": "350ba5456988f23f612a9f4a213d444d83c73ec60f9b0da110c34377a4496350"
+      },
+      {
+        "name": ".data",
+        "rva": 114688,
+        "size": 512,
+        "offset": 110080,
+        "sha256": "75e80e3df03924ce47a630652826c5440e383cda1f43a6ca255d51d49df109bb"
+      },
+      {
+        "name": ".pdata",
+        "rva": 8732672,
+        "size": 4096,
+        "offset": 110592,
+        "sha256": "d9018e97024b794d45b81c978f99bdfbc25a900c22c91eed01db83eeff3cd2a7"
+      },
+      {
+        "name": ".reloc",
+        "rva": 8736768,
+        "size": 2048,
+        "offset": 114688,
+        "sha256": "355e213158d6106861f44af307bf751ef9aadb93afcb3cff5a221641577db66d"
+      }
+    ]
+  },
+  "toolchain": {
+    "compiler_version_directory": "14.33.31629",
+    "sdk": "10.0.19041.0",
+    "python_version": "3.12",
+    "flags": [
+      "/nologo",
+      "/W4",
+      "/O2",
+      "/MD",
+      "/fp:strict",
+      "/std:c11"
+    ],
+    "link_flags": [
+      "/SUBSYSTEM:CONSOLE",
+      "kernel32.lib"
+    ]
+  },
+  "scope": "XP1 Lua API prototype profile using the retained XP1 GameCore native binder. No complete XP1 saved Load, application NewGame, official data bundle, DLC breadth or production training qualification."
+}

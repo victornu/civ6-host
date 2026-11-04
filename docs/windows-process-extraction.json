@@ -1,0 +1,60 @@
+{
+  "schema": "civ6-host.source-extraction.v1",
+  "component": "windows_process_runtime",
+  "status": "extracted_support_primitives_only",
+  "source": {
+    "path": "../../civ6-rl-lab/civ6rl/native_probe.py",
+    "sha256": "8d6d1cbc1c84e473f7036e3fefb27eb38a161e64c2c1ea0492c6ddc72f2c7dbb",
+    "references": [
+      {"symbol": "MemoryCounters", "line": 443},
+      {"symbol": "MemoryStatus", "line": 451},
+      {"symbol": "BasicLimit", "line": 458},
+      {"symbol": "IoCounters", "line": 465},
+      {"symbol": "ExtendedLimit", "line": 470},
+      {"symbol": "Windows.__init__ Win32 declarations", "line": 485},
+      {"symbol": "Windows.memory", "line": 511},
+      {"symbol": "Windows.available", "line": 521},
+      {"symbol": "Windows.job", "line": 545},
+      {"symbol": "job termination call", "line": 1547},
+      {"symbol": "job handle closure", "line": 1562}
+    ]
+  },
+  "destinations": [
+    {
+      "path": "src/civ6_host/runtime/windows_process.py",
+      "sha256": "ca38fc177565079547213b7f22db121dcd25a1c9e0bbc22477cc7d124f59714e",
+      "symbols": ["MemoryCounters", "MemoryStatus", "BasicLimit", "IoCounters", "ExtendedLimit", "WindowsProcessRuntime"]
+    },
+    {
+      "path": "src/civ6_host/runtime/__init__.py",
+      "sha256": "bc3e615db4939903d93fa4f9e5f46eca0fae14eb51e40418cf039da745a0f720",
+      "symbols": ["WindowsProcessRuntime"]
+    },
+    {
+      "path": "tests/test_windows_process.py",
+      "sha256": "c24bd3681d1c945472786786de3ab52e9e3c791f921ea71c365915cd0916c237",
+      "symbols": ["WindowsProcessExtractionTests"]
+    }
+  ],
+  "transformations": [
+    "Copied only the ctypes layouts and Windows process-memory, system-memory, and Job Object API bindings needed for bounded process supervision.",
+    "Renamed the source Windows helper class to WindowsProcessRuntime to give the extracted package a scoped public name.",
+    "Preserved the source memory counter fields and returned keys, GlobalMemoryStatusEx fields, Job Object information class 9, kill-on-job-close flag 0x2000, per-process-memory flag 0x100, and per-process commit limit assignment.",
+    "Added terminate_job and close_job methods around the exact TerminateJobObject and CloseHandle APIs used directly by the source supervisor; both return the underlying Win32 success result.",
+    "Kept WinDLL loading inside WindowsProcessRuntime.__init__; importing civ6_host or civ6_host.runtime does not load Windows DLLs.",
+    "Left the source lab unchanged. Did not extract GameCore loading, module inventory, exception hooks, probes, fixtures, captured data, or diagnostics."
+  ],
+  "compatibility": {
+    "source_behavior_changed": false,
+    "client_or_contracts_changed": false,
+    "torch_or_learner_dependency": false,
+    "gamecore_launch_or_probe_performed": false,
+    "independent_backend_ready": false,
+    "note": "This is a reusable process-control primitive extraction, not an independently runnable GameCore backend."
+  },
+  "validation": {
+    "tests_added": ["package import defers WinDLL loading", "non-Windows construction rejects before DLL loading", "no learner or GameCore imports", "fake Win32 API verifies Job flags, memory cap, termination, and closure", "fake Win32 API verifies failed setup closes the handle and preserves the setup error"],
+    "tests_run": false,
+    "reason": "Grouped extraction validation is owned by the parent task; no native process or test suite was run here."
+  }
+}

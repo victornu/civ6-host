@@ -1,0 +1,262 @@
+{
+  "schema": "civ6-host.native-source.v1",
+  "profile": "xp2-explicit-job-core-with-script-services",
+  "sources": [
+    {
+      "origin": "work/native-script-services-host42-xp1/script_include.inc",
+      "path": "native/script_include.inc",
+      "build_path": "script_include.inc",
+      "bytes": 5353,
+      "sha256": "7692a3fa690c45e50614a70dd8e255291a36ec1cca9f4dea41ec7bdae6e427e6",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_core_bindings.inc",
+      "path": "native/script_core_bindings.inc",
+      "build_path": "script_core_bindings.inc",
+      "bytes": 4747,
+      "sha256": "77a750aa17b5c78f5d1e4813007637374259b5b46492c8fbccc0e3b090b113a5",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_ui_attach.inc",
+      "path": "native/script_ui_attach.inc",
+      "build_path": "script_ui_attach.inc",
+      "bytes": 2017,
+      "sha256": "a7ad6783cc7fa0c1826dcbefbecc59daaa5fb011ee1a7b7dfe5fc64ba15a0196",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_ui_enums.inc",
+      "path": "native/script_ui_enums.inc",
+      "build_path": "script_ui_enums.inc",
+      "bytes": 17513,
+      "sha256": "28a92b635c90b94c6703edc4afbb44e8bed5c68c4d66459244b91bae2175b8d6",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_libraries.inc",
+      "path": "native/script_libraries.inc",
+      "build_path": "script_libraries.inc",
+      "bytes": 3520,
+      "sha256": "5319014f7ebe9bee9c57743d5a867842e6cb2d50e7205666d0bd7059d7b80365",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_library_names.inc",
+      "path": "native/script_library_names.inc",
+      "build_path": "script_library_names.inc",
+      "bytes": 1193,
+      "sha256": "18c584e8425db0ecf80661536632251272efe3493211aade362cfb381c1b4c20",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_event_dispatch.inc",
+      "path": "native/script_game_event_dispatch.inc",
+      "build_path": "script_game_event_dispatch_legacy.inc",
+      "bytes": 8683,
+      "sha256": "6c666a6f5e8d0702c47f3ed3a5f6ca66037eccb8963ce394b61777e9bf49d73b",
+      "shared_from": "native/source-manifest.json",
+      "qualification": "unqualified_map_argument_transport",
+      "change": "Retained exact bytes under an explicit include alias."
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_events.inc",
+      "path": "native/script_game_events.inc",
+      "build_path": "script_game_events.inc",
+      "bytes": 2061,
+      "sha256": "cd1f3eea2d28d820598fbd6105a1dad55d20b52b062685a34eaf088f48507c99",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_events_full.inc",
+      "path": "native/script_game_events_full.inc",
+      "build_path": "script_game_events_full_legacy.inc",
+      "bytes": 8824,
+      "sha256": "228b8679a930eb180990ce92e1237d35cf98337298c04c9c6a4f06bd03b41e69",
+      "shared_from": "native/source-manifest.json",
+      "change": "Unchanged component staged under exact legacy alias."
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_game_event_aggregators.inc",
+      "path": "native/script_game_event_aggregators.inc",
+      "build_path": "script_game_event_aggregators.inc",
+      "bytes": 7904,
+      "sha256": "c9c385462d83ba35b5f23898d310ba3f437313aedeb56dd125f1d8c6b8e375e7",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "project-owned category/NULL transport; parent source row retained in integration receipt",
+      "path": "native/profiles/xp1-postload/script_aux_events.inc",
+      "build_path": "script_aux_events.inc",
+      "bytes": 11784,
+      "sha256": "9bc2180fc31e7d4591db05605df0673234e055743714a6997ade9dccac9944b7"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_events.inc",
+      "path": "native/script_events.inc",
+      "build_path": "script_events.inc",
+      "bytes": 3196,
+      "sha256": "d035e629fdb2790e8ed8ec2b8bcb46c87819225fa34778fc4e2301a975e3aeeb",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_aux_a0.inc",
+      "path": "native/script_aux_a0.inc",
+      "build_path": "script_aux_a0_legacy.inc",
+      "bytes": 5191,
+      "sha256": "ebb8d1ae93cb737037aae18975f56af39423d843c016c272ac71398ea20a4b67",
+      "change": "Unchanged component staged under exact legacy alias."
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_execution.inc",
+      "path": "native/script_execution.inc",
+      "build_path": "script_execution.inc",
+      "bytes": 4717,
+      "sha256": "6814c0c29e82d491e3ff2bb9f50bff73636b255d2e94464ef1fbbb0971dd8766",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "outputs/civ6-rl-lab/native/script_context_notify.inc pre-oracle production prefix",
+      "path": "native/script_context_notify.inc",
+      "build_path": "script_context_notify.inc",
+      "bytes": 2515,
+      "sha256": "c7001dfecee4a8513e47011b938f4ba91bd4718a675ec613386165a1b4a76c2b",
+      "shared_from": "outputs/civ6-rl-lab/native/script_context_notify.inc",
+      "source_sha256": "4806f9c630cc03179308acee44de7b4e696660be3cf7b0b927ba923b1474dc2c",
+      "change": "Verbatim prefix before Differential test; excludes script_context_notify_bytes and oracle."
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_locale.inc",
+      "path": "native/script_locale.inc",
+      "build_path": "script_locale.inc",
+      "bytes": 11874,
+      "sha256": "aafc7b358bab7700b7a5b0f5b4a817d7351e083267daa727c6c3510253c1d481",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/script_diagnostics.inc",
+      "path": "native/script_diagnostics.inc",
+      "build_path": "script_diagnostics.inc",
+      "bytes": 7702,
+      "sha256": "18db4c4fcf1b7f13df6bd964b558b8de6c144ab2af9c000495f9e3b45bd18474",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "work/native-script-services-host42-xp1/telemetry_profile.h",
+      "path": "native/telemetry_profile.h",
+      "build_path": "telemetry_profile.h",
+      "bytes": 2503,
+      "sha256": "783f914467c7960940debe59c7815f351dc66491fe1c0211b82b9c41e363abd8",
+      "shared_from": "native/source-manifest.json"
+    },
+    {
+      "origin": "XP2 script-context source composition plus exact XP2 job-profile selector",
+      "path": "native/profiles/xp2-jobs/gamecore_python_host.c",
+      "build_path": "gamecore_python_host.c",
+      "bytes": 101694,
+      "sha256": "268a43bc7e06b383adfa13d2c084d2d7966ca8ffc9782044a0103ca36967f4f7",
+      "derived_from": "native/profiles/xp1-jobs/gamecore_python_host.c",
+      "change": "Adds job profile ID 3 without altering Base/XP1 selectors; retains all XP2 script-context/API/mutable-map source rows from parent manifest."
+    },
+    {
+      "origin": "authored XP1-only official UI binder; unchanged prior XP1 game binder prefix",
+      "path": "native/profiles/xp1-ui/script_core_bindings_xp1.inc",
+      "build_path": "script_core_bindings_xp1_legacy.inc",
+      "bytes": 3990,
+      "sha256": "1ec54d12e6c014a8ba9b2f97e68edf7ad2d775e9129a16eaa092db2159affc9f",
+      "derived_from": "native/profiles/xp1/script_core_bindings_xp1.inc",
+      "change": "Unchanged legacy bytes staged under explicit include alias, reused by the new wrapper."
+    },
+    {
+      "path": "native/profiles/xp2-script-api/script_core_bindings_xp1.inc",
+      "bytes": 251,
+      "sha256": "0b23390765c5917580baf79723d6c897457774fea1d357533c68a98de9246c27",
+      "origin": "authored profile-selected protected API registration",
+      "build_path": "script_core_bindings_xp1.inc"
+    },
+    {
+      "path": "native/script_core_binding_profiles.inc",
+      "bytes": 2981,
+      "sha256": "433439165e1376da8d087a55ac23cf0fb043859d9a2c735d3d5f7f8dee4b1d35",
+      "origin": "authored profile-selected protected API registration",
+      "build_path": "script_core_binding_profiles.inc"
+    },
+    {
+      "path": "native/profiles/xp2-mutable-map/script_game_event_dispatch.inc",
+      "build_path": "script_game_event_dispatch.inc",
+      "bytes": 392,
+      "sha256": "834ef03bef26a54514a571ce3a45fc977bd30cbcbaadfec8e78785c2d2a4edab",
+      "origin": "Original project-owned explicit XP2 protected mutable map bridge"
+    },
+    {
+      "path": "native/profiles/xp2-mutable-map/script_game_event_result_map.inc",
+      "build_path": "script_game_event_result_map.inc",
+      "bytes": 12146,
+      "sha256": "b90214047bf68869cfd13c214d7791c2fc6df5c2c61a7fef1106468bc1a65edd",
+      "origin": "Original project-owned explicit XP2 protected mutable map bridge"
+    },
+    {
+      "path": "native/profiles/xp2-script-contexts/script_aux_a0.inc",
+      "build_path": "script_aux_a0.inc",
+      "bytes": 305,
+      "sha256": "3f961c1b74b06cdad7091e4e6240f71f19e75837d754d3f554623f1c4e99a5fa",
+      "origin": "Original authored scoped-state bridge; retained algorithms otherwise unchanged"
+    },
+    {
+      "path": "native/profiles/xp2-script-contexts/script_aux_a8.inc",
+      "build_path": "script_aux_a8.inc",
+      "bytes": 10717,
+      "sha256": "a31eee3b17833265a43cbd57a193adf59ec538baf6b4a133ee1a34970b6402e1",
+      "origin": "Original authored scoped-state bridge; retained algorithms otherwise unchanged"
+    },
+    {
+      "path": "native/profiles/xp2-script-contexts/script_game_events_full.inc",
+      "build_path": "script_game_events_full.inc",
+      "bytes": 409,
+      "sha256": "bf720cb18e4b032cb5aa90d0b8987c351a98424259b0fcf333a94cb88c7ad655",
+      "origin": "Original authored scoped-state bridge; retained algorithms otherwise unchanged"
+    },
+    {
+      "path": "native/profiles/xp2-script-contexts/script_event_state_scope.inc",
+      "build_path": "script_event_state_scope.inc",
+      "bytes": 1636,
+      "sha256": "cc882df725189f7e83a0f06bf43f3ff6d1395e0ba52d76871413a20b423b474a",
+      "origin": "Original authored scoped-state bridge; retained algorithms otherwise unchanged"
+    },
+    {
+      "path": "native/profiles/xp2-script-contexts/script_event_state_diagnostic.inc",
+      "build_path": "script_event_state_diagnostic.inc",
+      "bytes": 1687,
+      "sha256": "0bb560c5d3a0e6c9283e9d0833f1d5f65db8ed45230faa1fc46b725a2d845cec",
+      "origin": "Original authored scoped-state bridge; retained algorithms otherwise unchanged"
+    }
+  ],
+  "toolchain": {
+    "compiler_version_directory": "14.33.31629",
+    "sdk": "10.0.19041.0",
+    "python_version": "3.12",
+    "flags": [
+      "/nologo",
+      "/W4",
+      "/O2",
+      "/MD",
+      "/fp:strict",
+      "/std:c11"
+    ],
+    "link_flags": [
+      "/SUBSYSTEM:CONSOLE",
+      "kernel32.lib"
+    ]
+  },
+  "scope": "Additive composition of the exact XP2 scoped script/context/mutable-map source profile with explicit job core profile ID 3. It preserves the existing XP2 script headers/modules and remains an unqualified source build.",
+  "qualification": "unqualified_source_build",
+  "parent_manifest": {
+    "path": "native/profiles/xp2-script-contexts/source-manifest.json",
+    "sha256": "7f20ba44d9d2aeac94ebd7264847032b2bb6d52b63aeeb1f97aa2624b722f394"
+  },
+  "artifact": {
+    "name": "civ6rl-native-python.exe"
+  },
+  "change": "Replaces only the host C source with a derived XP2-jobs variant that preserves Base profile 1 and XP1 profile 2, and adds XP2 profile 3 -> GameCore_XP2_FinalRelease.dll / execute RVA 0x536B00 / completion byte +0xF0. XP2 script API and scoped event/map sources remain those of the parent manifest. No build or runtime qualification is claimed."
+}

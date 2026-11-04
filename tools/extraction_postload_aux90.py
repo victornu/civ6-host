@@ -1,0 +1,10 @@
+"""Insert only the explicit generic AUX category/NULL Python transport."""
+METHOD = '    def dispatch_aux_event_category_null(self, name: bytes, *, category, arguments=None):\n        """Protected generic category lookup; only a real missing entry skips."""\n        if (type(category) is not int or category not in (1, 2)\n                or type(name) is not bytes or not name or len(name) > 255\n                or b\'\\x00\' in name or not name.isascii() or arguments is not None):\n            raise ValueError(\'Unverified AUX category/NULL dispatch request\')\n        dispatch = getattr(self.host, \'LAB_Aux90DispatchCategoryNull\', None)\n        if not callable(dispatch):\n            raise ValueError(\'Native AUX category/NULL dispatcher export is unavailable\')\n        if self.lua[\'gettop\'](self.root):\n            raise RuntimeError(\'AUX category dispatch requires an empty root stack\')\n        outcome = C.c_uint32(0)\n        dispatch.argtypes = [C.c_void_p, C.c_uint32, C.c_char_p, C.c_void_p, C.POINTER(C.c_uint32)]\n        dispatch.restype = C.c_int\n        status = dispatch(self.root, category, name, None, C.byref(outcome))\n        self._status(self.root, status, \'protected AUX category/NULL dispatch\')\n        if self.lua[\'gettop\'](self.root):\n            raise RuntimeError(\'AUX category dispatch left a nonempty root stack\')\n        meanings = {1: \'category_nil\', 2: \'event_nil\', 3: \'call_nil\', 4: \'call_returned\'}\n        if outcome.value not in meanings:\n            raise RuntimeError(\'Native AUX category dispatcher returned an unknown outcome\')\n        return meanings[outcome.value]\n\n'
+
+def parameterize(name, raw):
+    if name != 'civ6rl.native_script_runtime':
+        return raw
+    anchor = '    def dispatch_game_event_result(self, name: bytes, arguments, *, method, output_initial=0):'
+    if raw.count(anchor) != 1:
+        raise ValueError('AUX category dispatcher extraction boundary changed')
+    return raw.replace(anchor, METHOD + anchor)

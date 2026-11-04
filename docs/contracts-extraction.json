@@ -1,0 +1,63 @@
+{
+  "schema": "civ6-host.contract-extraction.v1",
+  "status": "extracted-local-contracts-not-release-qualification",
+  "source_repository": "../civ6-rl-lab",
+  "destination_repository": "civ6-host",
+  "dependency_policy": {
+    "allowed": "Python standard library only",
+    "forbidden": ["civ6rl", "torch", "numpy", "learner state", "reward", "private/native payloads"]
+  },
+  "contracts": [
+    {
+      "module": "plot_display990",
+      "schema": "civ6rl.plot_display990.v1",
+      "source": "civ6rl/learning/plot_display990.py",
+      "source_sha256": "488a773bf5990791064465d783344d1b02c3eab8ad22232db9d86e7bea579ff7",
+      "destination": "src/civ6_host/contracts/plot_display990.py",
+      "destination_sha256": "a4f54ac233ccd6bd2c32f49f5d4566a75c071f7fb65fba0f78ca4a6e25821c74",
+      "public_api": ["SCHEMA", "SOURCE_SHA256", "CAPABILITY_SOURCE_SHA256", "MAX_PLOTS", "YIELDS", "YIELD_TYPES", "YIELD_GROUPS", "DISTRICT_STATUSES", "public_number", "validate_and_index"],
+      "imports": ["math", "re"],
+      "transformations": ["Module description renamed for host ownership.", "Removed actor-only MAP_CATEGORICAL_FIELDS and MAP_DISPLAY_CHANNELS constants.", "Removed numeric_features actor projection; validation and its pins are otherwise unchanged."]
+    },
+    {
+      "module": "production_info988",
+      "schema": "civ6rl.native_production_info988.v1",
+      "source": "civ6rl/learning/production_info988.py",
+      "source_sha256": "9d9137655eb7a8d148312eb42297e15992f46dbebecdc78839fb52592f57d6f0",
+      "destination": "src/civ6_host/contracts/production_info988.py",
+      "destination_sha256": "5077e8f6ea6f6bd3aa7e34571dcbc3de9b81876b70bf2559eb67dae5cd071c9b",
+      "public_api": ["SCHEMA", "PROOF_SHA256", "PANEL_SHA256", "TOOLTIP_SHA256", "PRODUCTION_KINDS", "MAX_ROWS", "quote_key", "key_for_action", "validate", "validate_and_index"],
+      "imports": ["re"],
+      "transformations": ["Module description rewritten to remove actor-feature framing.", "Removed ACTION_PRODUCTION_FEATURES and public_features actor projection.", "Quote validation, candidate joins and source pins are otherwise unchanged."]
+    },
+    {
+      "module": "research_info983",
+      "schema": "civ6rl.native_research_info983.v1",
+      "source": "civ6rl/learning/research_info983.py",
+      "source_sha256": "d29baaca1f3a2a5cb5b58b3a88a5a50c9e9fc22129f32b43acfc5364222884f1",
+      "destination": "src/civ6_host/contracts/research_info983.py",
+      "destination_sha256": "0657bb1b1d8b7d70fc257c02f154ff523de0fa81cdc45be7a46ee3925e0eb223",
+      "public_api": ["SCHEMA", "MAX_CHOICES", "validate"],
+      "imports": ["collections.abc.Mapping"],
+      "transformations": ["Module description changed to host ownership; validation implementation is otherwise byte-for-byte identical."]
+    },
+    {
+      "module": "yield_display982",
+      "schema": "civ6rl.native_yield_display982.v1",
+      "source": "civ6rl/learning/yield_display982.py",
+      "source_sha256": "8aadfea04593c1aaaa16f7839248e0f1f90fde2c21724b80b90526c8c8949fbe",
+      "destination": "src/civ6_host/contracts/yield_display982.py",
+      "destination_sha256": "a34b0e829d2bbc0932440efd6954f7dcf8247a7aee5ffe8743745f5ceef0bf6c",
+      "public_api": ["SCHEMA", "GLOBAL_YIELDS", "CITY_YIELDS", "public_number", "validate"],
+      "imports": ["math", "re", "collections.abc.Mapping"],
+      "transformations": ["Module description changed to host ownership; validation implementation is otherwise byte-for-byte identical."]
+    }
+  ],
+  "tests": {
+    "path": "tests/test_contract_extraction.py",
+    "scope": "Small golden acceptance and refusal fixtures for each extracted validator plus stdlib-only import boundary.",
+    "executed": false
+  },
+  "historical_sources_modified": false,
+  "not_claimed": ["native runtime extraction", "ABI qualification", "game compatibility certification", "release readiness"]
+}

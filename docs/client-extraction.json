@@ -1,0 +1,62 @@
+{
+  "schema": "civ6-host.client-extraction.v1",
+  "status": "client_extracted_native_backend_still_in_lab",
+  "package": "civ6-host-client",
+  "version": "0.1.0a1",
+  "protocol_schema": "civ6rl.hotseat_action_session923.v1",
+  "runtime_backend_contract": [
+    "reset",
+    "request",
+    "abort"
+  ],
+  "public_api": [
+    "HotseatClient.reset",
+    "HotseatClient.observe",
+    "HotseatClient.act",
+    "HotseatClient.view",
+    "HotseatClient.close",
+    "HotseatClient.abort"
+  ],
+  "source_repository": "../civ6-rl-lab",
+  "sources": [
+    {
+      "path": "civ6rl/native_action_session.py",
+      "bytes": 54222,
+      "sha256": "5e843f56f09f17a9368eb7b3ccc4a3ce48b2f9d01e1db06c006e568abdbba060"
+    },
+    {
+      "path": "civ6rl/native_hotseat_session.py",
+      "bytes": 12474,
+      "sha256": "9d3e978b7e67d96a3276273ec26fc7ee0a0da0b81993547f4cf3c303e5ab5962"
+    },
+    {
+      "path": "civ6rl/native_saved_actions.py",
+      "bytes": 46925,
+      "sha256": "e445e9ef8b2ea8421ed6a86bc1404d6a91ebca992831396b58ae09d81673dac0"
+    },
+    {
+      "path": "civ6rl/native_saved_session.py",
+      "bytes": 28771,
+      "sha256": "92591eb3015090834a90f41704736f97702fdf6a2b2b367f02886dc722e7db89"
+    },
+    {
+      "path": "civ6rl/native_saved_session_protocol.py",
+      "bytes": 7576,
+      "sha256": "8051050fdf5c365281cce26a9b4b92f38780d2ba32aa47d95cc0ea043c9139a8"
+    }
+  ],
+  "transformations": [
+    "Extract caller envelope construction and explicit catalogue-selection semantics into a stdlib-only client.",
+    "Preserve the hotseat wire schema, identity, sequence and digest conventions; do not rename historical schemas.",
+    "Let the existing native backend validate full actions, expanded policy assignments, legality, provenance and resource limits.",
+    "Reuse host-owned public validators for research, production, plot and yield fields.",
+    "Project detached player views without raw native victory/host callback evidence or private sidecars.",
+    "Abort on uncertain transport/application outcome without replaying an action.",
+    "No native runtime imports, learner imports or strategy selection."
+  ],
+  "limitations": [
+    "Current backend still requires the historical lab runtime and its local resources.",
+    "Not a network server authentication or remote transport implementation.",
+    "No simultaneous scheduling, complete action-space claim, DLC qualification or training-readiness claim."
+  ]
+}

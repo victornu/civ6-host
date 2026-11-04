@@ -1,0 +1,207 @@
+{
+  "schema": "civ6-host.native-source.v1",
+  "profile": "retained-base-host41",
+  "origin_build": {
+    "path": "work\\native-script-services-host41\\build.json",
+    "sha256": "f1548b72e5bab47c2bdb70fe9e51b07959a327bf3461cbdb1d48e46035dbbe83"
+  },
+  "sources": [
+    {
+      "origin": "work\\native-script-services-host41\\gamecore_python_host.c",
+      "path": "native/gamecore_python_host.c",
+      "bytes": 98048,
+      "sha256": "377e91581b4c13db986446084607d1b269a39e5284e163c1e7d0866a64d68d64"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_include.inc",
+      "path": "native/script_include.inc",
+      "bytes": 5353,
+      "sha256": "7692a3fa690c45e50614a70dd8e255291a36ec1cca9f4dea41ec7bdae6e427e6"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_core_bindings.inc",
+      "path": "native/script_core_bindings.inc",
+      "bytes": 4747,
+      "sha256": "77a750aa17b5c78f5d1e4813007637374259b5b46492c8fbccc0e3b090b113a5"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_ui_attach.inc",
+      "path": "native/script_ui_attach.inc",
+      "bytes": 2017,
+      "sha256": "a7ad6783cc7fa0c1826dcbefbecc59daaa5fb011ee1a7b7dfe5fc64ba15a0196"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_ui_enums.inc",
+      "path": "native/script_ui_enums.inc",
+      "bytes": 17513,
+      "sha256": "28a92b635c90b94c6703edc4afbb44e8bed5c68c4d66459244b91bae2175b8d6"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_libraries.inc",
+      "path": "native/script_libraries.inc",
+      "bytes": 3520,
+      "sha256": "5319014f7ebe9bee9c57743d5a867842e6cb2d50e7205666d0bd7059d7b80365"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_library_names.inc",
+      "path": "native/script_library_names.inc",
+      "bytes": 1193,
+      "sha256": "18c584e8425db0ecf80661536632251272efe3493211aade362cfb381c1b4c20"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_game_event_dispatch.inc",
+      "path": "native/profiles/retained/script_game_event_dispatch.inc",
+      "bytes": 5852,
+      "sha256": "0c55a4d154ac9456206df67dc610ceb9982e4fb3247e35fc223e4dc2f8ff7c77",
+      "build_path": "script_game_event_dispatch.inc"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_game_events.inc",
+      "path": "native/script_game_events.inc",
+      "bytes": 2061,
+      "sha256": "cd1f3eea2d28d820598fbd6105a1dad55d20b52b062685a34eaf088f48507c99"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_game_events_full.inc",
+      "path": "native/script_game_events_full.inc",
+      "bytes": 8824,
+      "sha256": "228b8679a930eb180990ce92e1237d35cf98337298c04c9c6a4f06bd03b41e69"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_game_event_aggregators.inc",
+      "path": "native/script_game_event_aggregators.inc",
+      "bytes": 7904,
+      "sha256": "c9c385462d83ba35b5f23898d310ba3f437313aedeb56dd125f1d8c6b8e375e7"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_aux_events.inc",
+      "path": "native/script_aux_events.inc",
+      "bytes": 9712,
+      "sha256": "b3ba8748e28015ad4a1b972010dac2a67603243c11474651d4e44036d4a3a20b"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_events.inc",
+      "path": "native/script_events.inc",
+      "bytes": 3196,
+      "sha256": "d035e629fdb2790e8ed8ec2b8bcb46c87819225fa34778fc4e2301a975e3aeeb"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_aux_a8.inc",
+      "path": "native/profiles/retained/script_aux_a8.inc",
+      "bytes": 10208,
+      "sha256": "21b89785adfb92234038b00ce2f07bbd6714e400511cdb73fb36e8845b572ad8",
+      "build_path": "script_aux_a8.inc"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_aux_a0.inc",
+      "path": "native/profiles/retained/script_aux_a0.inc",
+      "bytes": 3187,
+      "sha256": "a5f138c98c10ad0ac618e0438848446013448bbe04c59344d7f71f7ce16b76a0",
+      "build_path": "script_aux_a0.inc"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_execution.inc",
+      "path": "native/script_execution.inc",
+      "bytes": 4717,
+      "sha256": "6814c0c29e82d491e3ff2bb9f50bff73636b255d2e94464ef1fbbb0971dd8766"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_locale.inc",
+      "path": "native/script_locale.inc",
+      "bytes": 11874,
+      "sha256": "aafc7b358bab7700b7a5b0f5b4a817d7351e083267daa727c6c3510253c1d481"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\script_diagnostics.inc",
+      "path": "native/script_diagnostics.inc",
+      "bytes": 7702,
+      "sha256": "18db4c4fcf1b7f13df6bd964b558b8de6c144ab2af9c000495f9e3b45bd18474"
+    },
+    {
+      "origin": "work\\native-script-services-host41\\telemetry_profile.h",
+      "path": "native/telemetry_profile.h",
+      "bytes": 2503,
+      "sha256": "783f914467c7960940debe59c7815f351dc66491fe1c0211b82b9c41e363abd8"
+    }
+  ],
+  "reference_executable": {
+    "name": "civ6rl-native-python.exe",
+    "bytes": 116224,
+    "sha256": "2b938551555af92ef37bbda8631d0a90c585c3e89c9d7710d0758e85e2b01334",
+    "canonical_metadata_fields": [
+      {
+        "name": "COFF.TimeDateStamp",
+        "offset": 264,
+        "bytes": 4,
+        "value": 1791857564
+      },
+      {
+        "name": "ExportDirectory.TimeDateStamp",
+        "offset": 103652,
+        "bytes": 4,
+        "value": 4294967295
+      },
+      {
+        "name": "DebugDirectory[0].TimeDateStamp",
+        "offset": 98324,
+        "bytes": 4,
+        "value": 1791857564
+      }
+    ],
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "size": 60416,
+        "offset": 1024,
+        "sha256": "a4cfdf64bf931939a77654e13e774c0a13d0da22355e84d7a7ff52480163468e"
+      },
+      {
+        "name": ".rdata",
+        "rva": 65536,
+        "size": 48128,
+        "offset": 61440,
+        "sha256": "09f6215a32ab1f36f86dbd6b03e74cf6f0d4e43c7c1b0541a7bf10330f81f2b2"
+      },
+      {
+        "name": ".data",
+        "rva": 114688,
+        "size": 512,
+        "offset": 109568,
+        "sha256": "75e80e3df03924ce47a630652826c5440e383cda1f43a6ca255d51d49df109bb"
+      },
+      {
+        "name": ".pdata",
+        "rva": 8732672,
+        "size": 4096,
+        "offset": 110080,
+        "sha256": "a748408e8934e7e0667a223504990b3a544e27a8dc13fe4c477e7dbfc280d004"
+      },
+      {
+        "name": ".reloc",
+        "rva": 8736768,
+        "size": 2048,
+        "offset": 114176,
+        "sha256": "355e213158d6106861f44af307bf751ef9aadb93afcb3cff5a221641577db66d"
+      }
+    ]
+  },
+  "toolchain": {
+    "compiler_version_directory": "14.33.31629",
+    "sdk": "10.0.19041.0",
+    "python_version": "3.12",
+    "flags": [
+      "/nologo",
+      "/W4",
+      "/O2",
+      "/MD",
+      "/fp:strict",
+      "/std:c11"
+    ],
+    "link_flags": [
+      "/SUBSYSTEM:CONSOLE",
+      "kernel32.lib"
+    ]
+  },
+  "scope": "Own executable-owned platform exports and Python embedding; no official GameCore binaries or data included; preserves the retained Base scheduling limitations."
+}

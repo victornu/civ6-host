@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "runtime_build"
+backend-path = ["."]
+
+[project]
+name = "civ6-host-runtime"
+version = "0.1.0a1"
+description = "Extracted Windows GameCore host runtime; private official resources required"
+requires-python = ">=3.12,<3.13"
+dependencies = ["civ6-host-client==0.1.0a1"]
+classifiers = ["Operating System :: Microsoft :: Windows"]
+
+[project.optional-dependencies]
+capture = ["psutil==7.1.0; sys_platform == 'win32'"]
+verification = ["pefile==2024.8.26"]
+
+[tool.setuptools]
+package-dir = {"" = "../../src"}
+license-files = ["LICENSE-pydt-civ6-save-parser.txt"]
+
+[tool.setuptools.packages.find]
+where = ["../../src"]
+include = ["civ6_host.runtime*"]
+
+[tool.setuptools.package-data]
+"civ6_host.runtime" = ["source-map.json"]

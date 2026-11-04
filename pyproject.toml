@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "civ6-host-client"
+version = "0.1.0a1"
+description = "Model-independent client and public contracts for the Civ6 native host"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["civ6_host", "civ6_host.contracts*"]

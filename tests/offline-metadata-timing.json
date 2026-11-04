@@ -1,0 +1,6 @@
+{
+  "repetitions": 106,
+  "elapsed_seconds": 0.0030798999941907823,
+  "native_execution": false,
+  "scope": "static receipt access only; owner guard mocked; not native callback throughput"
+}
