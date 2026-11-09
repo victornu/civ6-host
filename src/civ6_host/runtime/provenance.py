@@ -98,12 +98,29 @@ def installed_source_pins():
 
 
 def _audit_historical_by_default():
-    from .resource_resolution import configured_reference
-    if configured_reference() is None:
-        return True
     from .capture_admission import _COMPATIBLE_PRODUCERS, configured_reference as configured_capture
+    from .resource_resolution import configured_reference
     capture = configured_capture()
     if capture is None:
+        return True
+    from .xp2_bbg_inputs import prepared_reference as bbg_prepared_reference, registered_reference
+    if capture == bbg_prepared_reference():
+        # This handoff checks its exact capture, installed sources and the
+        # historical dependencies actually used by its saved-Load worker.
+        return False
+    registered = registered_reference()
+    if registered is not None:
+        from .capture_package import MAX_MANIFEST_BYTES, SCHEMA, _read_stable_bytes
+        raw, digest, _ = _read_stable_bytes(Path(capture['path']), MAX_MANIFEST_BYTES, 'BBG package manifest')
+        if digest != capture['sha256']:
+            raise ValueError('Registered BBG package manifest hash differs')
+        manifest = json.loads(raw)
+        if (manifest.get('schema') == SCHEMA and manifest.get('input_profile') == 'xp2-lan'
+                and manifest.get('origin') == dict(zip(('path', 'sha256'), registered))):
+            # The package reader still checks every file. prepare_sources and
+            # the child closure audit the historical sources used by this Load.
+            return False
+    if configured_reference() is None:
         return True
     # The retained XP2 package has a fixed identity. Its full input admission
     # and per-source checks still run in the parent and worker.

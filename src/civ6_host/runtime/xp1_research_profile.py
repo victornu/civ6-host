@@ -61,11 +61,13 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_initial_choice_source import source_dependencies as selected
-        return selected('research')
+        return selected('research', execution_image=execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown research source engine")
+    if execution_image is not None:
+        raise ValueError('XP1 research source does not accept an XP2 execution image')
     from .xp1_status_profiles import source_dependencies as status_dependencies
     proof=verify_source();pins=dict(status_dependencies())
     for row in ({'path':SOURCE[0],'sha256':SOURCE[1]},*proof['references']):
@@ -79,11 +81,12 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return pins
 
 
-def verify_live(core_base,read,core_sha256=XP1_CORE_SHA256):
+def verify_live(core_base,read,core_sha256=XP1_CORE_SHA256,*,execution_image=None):
     """Check relocated code bytes and public slots, without calling the engine."""
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_initial_choice_source import verify_live as selected
-        return selected(core_base,read,'research')
+        return selected(core_base,read,'research',execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected research image requires the XP2 source ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown research live source engine")
     if type(core_base) is not int or core_base<=0 or not callable(read):
         raise ValueError('Live research source requires exact module/read binding')
@@ -184,7 +187,9 @@ def bind_owner(owner,core,read):
                 or existing.source_sha256!=selected_source[1] or existing.core_sha256!=core_sha):
             raise ValueError('XP1 research source receipt belongs to another lifetime')
         return existing
-    verify_live(core._handle,read,core_sha256=core_sha)
+    image=getattr(core,'_civ6_host_execution_image',None)
+    verify_live(core._handle,read,core_sha256=core_sha,
+                **({'execution_image':image} if image is not None else {}))
     result=VerifiedResearchSource(owner,core,core._handle,selected_source[1],core_sha)
     owner._xp1_research_source_receipt=result
     return result

@@ -12,12 +12,12 @@ from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resou
 import hashlib
 import json
 from pathlib import Path
-from civ6_host.runtime.native.native_context_notify import verify_loaded_host
+from civ6_host.runtime.native.native_context_notify import verify_loaded_host, verify_captured_executable_source
 CAPTURE_SHA = '69e00f16001ac95c747d634039323dcfa802735073c7d5cdf3cad700ed4711bd'
 
 class RetainedScriptContexts:
 
-    def __init__(self, runtime, *, project_root):
+    def __init__(self, runtime, *, project_root, execution_image=None):
         runtime.registry._check()
         if runtime.closed or runtime.context_owner is not None:
             raise RuntimeError('A live unowned runtime is required')
@@ -26,8 +26,7 @@ class RetainedScriptContexts:
         if hashlib.sha256(data).hexdigest() != CAPTURE_SHA:
             raise ValueError('Context lifetime source capture changed')
         source = json.loads(data)['source']
-        if hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(source['path']))).read_bytes()).hexdigest() != source['sha256']:
-            raise ValueError('Installed context lifetime source changed')
+        verify_captured_executable_source(source, execution_image=execution_image)
         verify_loaded_host(runtime.host)
         self.runtime = runtime
         self._token = object()

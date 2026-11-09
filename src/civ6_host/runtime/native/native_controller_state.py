@@ -24,7 +24,9 @@ def prepare_session_controller(owner):
         return state
     if code is not None or type(state) is not TurnBeginAuxiliaryState or state.controller_initialized is not False or (state.controller_byte_0d is not None) or state.turn_values_by_thread or (type(state.service_flags) is not int) or (state.service_flags != 0):
         raise RuntimeError('Native controller installation requires an untouched shared state')
-    owner.native_controller_code = NativeControllerCode()
+    execution_image = getattr(getattr(owner, 'core', None), '_civ6_host_execution_image', None)
+    owner.native_controller_code = (NativeControllerCode() if execution_image is None else
+                                   NativeControllerCode(execution_image=execution_image))
     events.turn_begin_state = NativeControllerTurnState(owner.native_controller_code, owner.emit)
     owner.emit('native_session_controller_bound', source_sha256=SOURCE_SHA, original_constructor_executed=False, synthetic_turn_event=False, core_memory_written=False, full_exe_controller_lifecycle=False, eligible_for_training=False)
     return events.turn_begin_state

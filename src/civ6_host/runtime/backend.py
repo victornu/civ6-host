@@ -79,7 +79,7 @@ class NetworkBackend:
 
     def __init__(self, *, resources, official_bundle, prepared_capture=None,
                  private_resources=None, administrative_information=False,
-                 public_display_diagnostic=False, **options):
+                 public_display_diagnostic=False, public_display_source=None, **options):
         if type(administrative_information) is not bool:
             raise ValueError('administrative_information must be an exact Boolean')
         if official_bundle is None:
@@ -88,6 +88,8 @@ class NetworkBackend:
         from .native.network_session import NativeNetworkSession
         if options.get('input_profile', 'lan') in ('xp1-lan','xp2-lan'):
             options['prepared_capture'] = prepared_capture
+        if public_display_source is not None:
+            options['public_display_source'] = public_display_source
         self._session = NativeNetworkSession(official_bundle=official_bundle,
             public_display_diagnostic=public_display_diagnostic, **options)
         self._display_projection_enabled = public_display_diagnostic
@@ -109,8 +111,7 @@ class NetworkBackend:
                 from .city_growth import SOURCE as growth_source
                 pins={'production':production_source[1],'growth':growth_source[1]}
         if public_display_diagnostic:
-            from .player_display_toppanel import SOURCE_SHA256
-            pins['display'] = SOURCE_SHA256
+            pins['display'] = self._session.public_display_source
         if pins:
             from .information_store import InformationStore
             self._information_store = InformationStore(pins)

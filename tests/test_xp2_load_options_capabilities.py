@@ -29,8 +29,24 @@ def rendered_performance():
 
 
 class XP2OptionsCapabilityTests(unittest.TestCase):
+    def test_performance_selector_uses_captured_abi_with_explicit_runtime_identity(self):
+        from civ6_host.runtime.execution_images import select, known_path
+        image=select('xp2-gamecore-current-092abfbb',
+                     core_path=known_path('xp2-gamecore-current-092abfbb'))
+        b=self.backend()
+        b.profile=NS(core_sha256=image.image_sha256,
+                     source_core_sha256=image.reference_core_sha256)
+        fallback=Mock(side_effect=AssertionError('XP1 fallback must not handle XP2'))
+        self.assertEqual(selected.performance_select(options._LoadOptionsBorrower(b),
+            resource_root(),fallback),selected.performance_profile()[1])
+        fallback.assert_not_called()
+        b.profile=NS(core_sha256=image.image_sha256,source_core_sha256='unknown')
+        with self.assertRaisesRegex(ValueError,'Unknown Performance'):
+            selected.performance_select(options._LoadOptionsBorrower(b),resource_root(),fallback)
+
     def backend(self):
-        b=NS(profile=NS(core_sha256=XP2_CORE_SHA256), owner=NS(), captured_bundle=object(),
+        from civ6_host.runtime.xp2_saved_init import REFERENCE
+        b=NS(profile=NS(core_sha256=XP2_CORE_SHA256), owner=NS(), captured_bundle=NS(reference=REFERENCE),
              busy=True,destroyed=False,stage='prepared',prefix=None,check_thread=Mock(),
              core=NS(_handle=0x180000000),runtime=NS(read=Mock()))
         return b

@@ -135,16 +135,23 @@ def source():
 verify_source=source
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .a0_family_source import verify_pinned_files
     from .foundation_facade_profiles import source_dependencies as query_dependencies
-    p=source();pins=query_dependencies(core_sha256=XP2_CORE_SHA256)
-    for ref in [dict(path=SOURCE[0],sha256=SOURCE[1]),p['generator'],*p['references'].values(),*p['images'].values()]:
+    p=source();pins=query_dependencies(core_sha256=XP2_CORE_SHA256,execution_image=execution_image)
+    image_refs=tuple(p['images'].values())
+    refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),p['generator'],*p['references'].values()]
+    if execution_image is None:refs.extend(image_refs)
+    for ref in refs:
         path=str(resolve_path(resource_root()/ref['path']).resolve())
         if path in pins and pins[path]!=ref['sha256']:raise ValueError('XP2 district source dependency conflict')
         pins[path]=ref['sha256']
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                                             provenance_images=image_refs)
     verify_pinned_files(pins)
     return pins
 
@@ -177,7 +184,7 @@ def verify_once(core,read):
 
 
 @lru_cache(maxsize=1)
-def event_profile():
+def _event_profile():
     from .a0_family_source import A0FamilyProfile
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     p=source()
@@ -190,6 +197,13 @@ def event_profile():
     return A0FamilyProfile(MappingProxyType({kind:frozenset((record,)) for kind,record in KINDS.items()}),SIZES,SOURCE[1])
 
 
+def event_profile(*,execution_image=None):
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+    return _event_profile()
+
+
 @dataclass(frozen=True)
 class VerifiedSource:
     owner:object
@@ -198,7 +212,7 @@ class VerifiedSource:
     proof_sha256:str
 
 
-def bind_owner(owner,core,read):
+def bind_owner(owner,core,read,*,execution_image=None):
     owner.check_thread()
     if owner.core is not core or owner.load_abi.core_sha256!=XP2_CORE_SHA256:
         raise ValueError('XP2 district source owner mismatch')
@@ -206,9 +220,11 @@ def bind_owner(owner,core,read):
     if old is not None and (type(old) is not VerifiedSource or old.owner is not owner or old.core is not core
             or old.base!=core._handle or old.proof_sha256!=SOURCE[1]):
         raise ValueError('XP2 district source lifetime changed')
-    source_dependencies();verify_once(core,read)
+    if execution_image is None:
+        execution_image=getattr(core,'_civ6_host_execution_image',None)
+    source_dependencies(execution_image=execution_image);verify_once(core,read)
     if old is None:owner._xp2_district_damage_source=VerifiedSource(owner,core,core._handle,SOURCE[1])
-    return event_profile()
+    return event_profile(execution_image=execution_image)
 
 
 def decode_fields(kind,fields,read):

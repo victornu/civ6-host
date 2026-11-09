@@ -33,6 +33,9 @@ class DeferredService(DeferredHostQueue):
         self.cache_core_sha256,self.read,self.emit=core_sha256,read,emit
         self.thread=threading.get_ident()
         self.pending=[];self._sequence=self.consumed_count=self.consumed_bytes=0
+        # Shared consumer-facing ledger used by action-origin continuation.
+        # XP2 type-132 production/consumption is deliberately not admitted yet.
+        self.pending_diplomacy_statements=[]
         self.consumed_digest=hashlib.sha256()
         self.host_notification_counter=self.host_metadata_counter=0
         self.cache_update_callback_pair=None
@@ -98,7 +101,16 @@ class DeferredService(DeferredHostQueue):
                         raise ValueError('Deferred consumption is out of sequence')
                     kind=int.from_bytes(record[4:8],'little')
                     started = perf_counter()
-                    if kind==0x113:
+                    if kind==132:
+                        if getattr(self,'diplomacy_statement_receiver',None) is not self:
+                            raise RuntimeError('XP2 diplomacy statement record type 132 refused: '
+                                'XP2 RequestSession-to-FC731E25 producer binding and statement '
+                                'field/post-hook profile are not admitted on this receiver')
+                        if loaded_lifetime is not None:
+                            raise ValueError('Statement consumption is not qualified after native Unload')
+                        from .a0_diplomacy_statement import consume
+                        consume(self,record,sequence)
+                    elif kind==0x113:
                         if not cache_scope_open and self.cache_core_sha256 == XP2_CORE_SHA256:
                             from .xp2_preload_source import cache_dispatch_scope
                             scopes.enter_context(cache_dispatch_scope(self.base, self.context, self.read))
@@ -194,6 +206,9 @@ class DeferredService(DeferredHostQueue):
         if (self._draining_empty_receivers or self.pending or self._sequence!=self.consumed_count
                 or self.host_notification_counter or self.host_metadata_counter):
             raise RuntimeError('Deferred service still has pending work or an open scope')
+        statement=getattr(self,'statement_consumer',None)
+        if self.pending_diplomacy_statements or statement is not None and (statement.busy or statement.poisoned):
+            raise RuntimeError('Deferred service still has an explicit pending diplomacy choice')
         if (self.combat_map_registry is not None and
                 (self.combat_map_registry.entries or self.combat_map_registry.poisoned)
                 or self.combat_receiver is not None and

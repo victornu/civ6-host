@@ -84,13 +84,24 @@ def verify_source():
     return p
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .xp1_saved_load_logger import source_dependencies as logger_sources
-    p=verify_source();refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),*p['images'].values(),*p['references']]
-    return {**history.source_dependencies(),**logger_sources(),
-            **{str(resolve_path(resource_root()/r['path']).resolve()):r['sha256'] for r in refs}}
+    p=verify_source();refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),*p['references']]
+    history_pins=history.source_dependencies()
+    pins={**history_pins,
+          **logger_sources(),
+          **{str(resolve_path(resource_root()/r['path']).resolve()):r['sha256'] for r in refs}}
+    if execution_image is None:
+        pins.update({str(resolve_path(resource_root()/r['path']).resolve()):r['sha256']
+                     for r in p['images'].values()})
+    else:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                                             provenance_images=(*history.verify_source()[0]['images'].values(),
+                                                                *p['images'].values()))
+    return pins
 
 
 def receiver_row():

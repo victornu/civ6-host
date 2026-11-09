@@ -167,7 +167,7 @@ def source_sha(core_sha256, retained):
     return SOURCE[1]
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .a0_family_source import verify_pinned_files
     from .paths import resource_root
     from .resource_resolution import resolve_path
@@ -175,17 +175,25 @@ def source_dependencies():
     from .xp2_unit_orders_source import source_dependencies as orders
     from .xp1_visibility_cache_gate import source_dependencies as cache
     p = source(); pins = {}
-    for dependencies in (configuration(), orders(), cache(core_sha256=XP2_CORE_SHA256)):
+    for dependencies in (configuration(), orders(execution_image=execution_image),
+                         cache(core_sha256=XP2_CORE_SHA256, execution_image=execution_image)):
         for path, digest in dependencies.items():
             key = str(Path(path).resolve())
             if key in pins and pins[key] != digest:
                 raise ValueError('Conflicting XP2 combat source dependency')
             pins[key] = digest
-    for ref in (dict(path=SOURCE[0], sha256=SOURCE[1]), p['image'], *p['references'].values()):
+    refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), *p['references'].values()]
+    if execution_image is None:
+        refs.append(p['image'])
+    for ref in refs:
         key = str(resolve_path(resource_root() / ref['path']).resolve())
         if key in pins and pins[key] != ref['sha256']:
             raise ValueError('Conflicting XP2 combat source dependency')
         pins[key] = ref['sha256']
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins = materialize_runtime_source_pins(
+            pins, execution_image=execution_image, provenance_images=(p['image'],))
     verify_pinned_files(pins)
     return pins
 
@@ -224,11 +232,14 @@ class BoundCombatSource:
     guarded_read_spans: int
 
 
-def bind_owner(backend, core, read):
+def bind_owner(backend, core, read, *, execution_image=None):
     backend.check_thread()
     if backend.core is not core or backend.load_abi.core_sha256 != XP2_CORE_SHA256:
         raise ValueError('XP2 combat source has a foreign native owner')
     from .xp2_unit_orders_source import bind_owner as bind_query_manager
+    if execution_image is None:
+        execution_image = getattr(core, '_civ6_host_execution_image', None)
+    source_dependencies(execution_image=execution_image)
     query_receipt = bind_query_manager(backend, core, read)
     prior = getattr(backend, '_xp2_combat_source', None)
     if prior is not None:

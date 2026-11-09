@@ -1,0 +1,105 @@
+{
+  "schema": "civ6-host.locale-source-overlay.v1",
+  "source_reference": {
+    "path": "work/host-simultaneous/city-management/locale-length-source-v2.json",
+    "sha256": "25eb41e58ab92390e0a5cb7f92bdca79a72be594264f70c461197571d3c0cf4f"
+  },
+  "files": [
+    {
+      "name": "locale_arguments967.c",
+      "sha256": "dd77fea76204b37ec27be8e97887e13c6c6b3c15cb1ebcb05a057f6fdfe93ef8"
+    },
+    {
+      "name": "script_locale.inc",
+      "sha256": "80a2b6a2a7bfa6ff07ff476c412e6de6e576f00a04907f222e05689ed0dbec17"
+    }
+  ],
+  "changes": [
+    {
+      "name": "?lua_createtable@@YAXPEAUlua_State@@HH@Z",
+      "reference_rva": "0x3cb60",
+      "current_rva": "0x31820"
+    },
+    {
+      "name": "?lua_getfield@@YAXPEAUlua_State@@HPEBD@Z",
+      "reference_rva": "0x3cbd0",
+      "current_rva": "0x3a4c0"
+    },
+    {
+      "name": "?lua_setfield@@YAXPEAUlua_State@@HPEBD@Z",
+      "reference_rva": "0x3d560",
+      "current_rva": "0x3ad80"
+    },
+    {
+      "name": "?PushBoolean@LuaState@LuaPlus@@QEAA?AVLuaStackObject@2@_N@Z",
+      "reference_rva": "0x1a9f0",
+      "current_rva": "0x18b60"
+    },
+    {
+      "name": "?PushString@LuaState@LuaPlus@@QEAA?AVLuaStackObject@2@PEBD@Z",
+      "reference_rva": "0x1ade0",
+      "current_rva": "0x18f50"
+    },
+    {
+      "name": "?PushLString@LuaState@LuaPlus@@QEAA?AVLuaStackObject@2@PEBD_K@Z",
+      "reference_rva": "0x1ace0",
+      "current_rva": "0x18e50"
+    },
+    {
+      "name": "?hks_pushnamedcclosure@@YAXPEAUlua_State@@P6AH0@ZHPEBDH@Z",
+      "reference_rva": "0x2eeb0",
+      "current_rva": "0x2cfb0"
+    },
+    {
+      "name": "?lua_cpcall@@YAHPEAUlua_State@@P6AH0@ZPEAX@Z",
+      "reference_rva": "0x16620",
+      "current_rva": "0x14720"
+    },
+    {
+      "name": "?lua_pcall@@YAHPEAUlua_State@@HHH@Z",
+      "reference_rva": "0x3d490",
+      "current_rva": "0x3ac80"
+    },
+    {
+      "name": "?lua_touserdata@@YAPEAXPEAUlua_State@@H@Z",
+      "reference_rva": "0x3d620",
+      "current_rva": "0x3ae30"
+    },
+    {
+      "name": "?lua_type@@YAHPEAUlua_State@@H@Z",
+      "reference_rva": "0x3d630",
+      "current_rva": "0x3ae40"
+    },
+    {
+      "name": "?lua_error@@YAHPEAUlua_State@@@Z",
+      "reference_rva": "0x3cbb0",
+      "current_rva": "0x31a00"
+    },
+    {
+      "name": "?lua_gettop@@YAHPEAUlua_State@@@Z",
+      "reference_rva": "0x3d280",
+      "current_rva": "0x175f0"
+    },
+    {
+      "name": "?luaL_checknumber@@YANPEAUlua_State@@H@Z",
+      "reference_rva": "0x3bda0",
+      "current_rva": "0x39650"
+    },
+    {
+      "name": "?luaL_error@@YAHPEAUlua_State@@PEBDZZ",
+      "reference_rva": "0x33220",
+      "current_rva": "0x39910"
+    },
+    {
+      "name": "?lua_newuserdata@@YAPEAXPEAUlua_State@@_K@Z",
+      "reference_rva": "0x3d420",
+      "current_rva": "0x33140"
+    },
+    {
+      "name": "?luaL_checklstring@@YAPEBDPEAUlua_State@@HPEA_K@Z",
+      "reference_rva": "0x3bd90",
+      "current_rva": "0x14800"
+    }
+  ],
+  "algorithm_bytes_unchanged_after_guard_normalization": true
+}

@@ -432,12 +432,17 @@ class NativeSavedSession:
         if self.job:
             self.win.kernel.CloseHandle(self.job)
             self.job = None
+        pipe_cleanup_errors = []
         if process is not None:
-            for pipe in (process.stdin, process.stdout, process.stderr):
-                pipe.close()
+            from civ6_host.runtime.supervisor_cleanup import close_reaped_process_pipes
+            pipe_cleanup_errors = close_reaped_process_pipes(process)
+            if pipe_cleanup_errors and self.error is None:
+                self.error = 'Native pipe cleanup failed: ' + repr(pipe_cleanup_errors)
+                self.stop_reason = self.stop_reason or 'pipe_cleanup_failed'
         self.command_log.close()
         unchanged = {name: sha(ROOT / name) == digest for name, digest in self.pins.items()}
         self.report = dict(schema='civ6rl.saved_session913.supervisor.v1', pid=process.pid if process else None, exit_code=process.returncode if process else None, reaped=process is not None and process.poll() is not None, job_assigned=job_assigned, elapsed_seconds=time.perf_counter() - self.started, timeout_seconds=self.lifetime_seconds, memory_limit_bytes=MEMORY_LIMIT, stdout_limit_bytes=self.stdout_limit_bytes, stop_reason=self.stop_reason, error=self.error, timed_out=self.stop_reason == 'lifetime_limit', close_context=self.close_context, memory_samples=self.samples, sampled_memory_peaks=self.peak, source_unchanged=unchanged, stdout_native_records=self.stdout_native_records, reset_timings_seconds=dict(self.reset_timings_seconds), reset_resource_samples=copy.deepcopy(self.reset_resource_samples), reset_timing_scopes={'reset_total_seconds': 'parent reset inclusive total', 'parent_preflight_seconds': 'non-overlapping parent validation and resource check', 'fixture_prepare_total_seconds': 'inclusive; contains fixture_prepare_subphases_seconds', 'closure_pin_and_write_seconds': 'non-overlapping parent closure pinning and write', 'child_spawn_to_initial_response_seconds': 'inclusive; child startup through first response', 'initial_response_validation_seconds': 'non-overlapping parent identity/protocol validation'}, episode_id=self.protocol.identity.episode_id if self.protocol else None, last_sequence=self.protocol.sequence if self.protocol else None, game_executable_launched=False, normal_destroy_called=False, termination_inferred_from_process_exit=False, strategic_training_ready=False)
+        self.report['pipe_cleanup_errors'] = pipe_cleanup_errors
         write_json(self.run / 'supervisor.json', self.report)
         self.finished = True
 

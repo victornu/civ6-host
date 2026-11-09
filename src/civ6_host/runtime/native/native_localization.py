@@ -18,8 +18,13 @@ def validate_localization(manifest):
     locale = settings.get('locale')
     explicit = 'official_bundle' in manifest or 'official_export' in settings
     if explicit:
-        from civ6_host.runtime.native.native_official_bundle import validate_localization_fixture
-        validate_localization_fixture(manifest)
+        from civ6_host.runtime import xp2_bbg_inputs
+        reference = manifest.get('official_bundle')
+        if manifest.get('input_profile') == 'xp2-lan' and xp2_bbg_inputs.is_reference(reference):
+            xp2_bbg_inputs.validate_localization_fixture(manifest)
+        else:
+            from civ6_host.runtime.native.native_official_bundle import validate_localization_fixture
+            validate_localization_fixture(manifest)
     elif locale != 'en_US':
         raise ValueError('This diagnostic bootstrap only validates locale en_US')
     if type(settings.get('dictionary_flag')) is not bool:
@@ -39,11 +44,20 @@ def validate_localization(manifest):
             raise ValueError('Invalid localization database fixture')
     return settings
 
-def initialize_localization(host, dll_directory):
-    settings = validate_localization(host.manifest)
+def _localization_library_path(dll_directory, shared_dependency_profile=None):
     path = _resolve_resource_path(Path(dll_directory)) / 'Localization_FinalRelease.dll'
-    if sha256(path) != LOCALIZATION_SHA256:
-        raise ValueError('Unrecognized Localization DLL')
+    if shared_dependency_profile is None:
+        if sha256(path) != LOCALIZATION_SHA256:
+            raise ValueError('Unrecognized Localization DLL')
+        return path
+    from civ6_host.runtime.native.native_shared_dependency_profiles import NativeSharedDependencyProfile
+    if type(shared_dependency_profile) is not NativeSharedDependencyProfile:
+        raise ValueError('Expected the explicit XP2 shared dependency profile')
+    return shared_dependency_profile.verify_library_path('Localization_FinalRelease.dll', path)
+
+def initialize_localization(host, dll_directory, *, shared_dependency_profile=None):
+    settings = validate_localization(host.manifest)
+    path = _localization_library_path(dll_directory, shared_dependency_profile)
     library = C.WinDLL(str(path))
     host.localization_library = library
     create = getattr(host.database, CREATE_CONNECTION)
@@ -57,7 +71,7 @@ def initialize_localization(host, dll_directory):
     initialize = getattr(library, INITIALIZE)
     initialize.argtypes = [C.c_wchar_p, C.c_void_p, C.c_char_p, C.c_bool, C.c_void_p]
     initialize.restype = C.c_bool
-    host.emit('before_localization_initialize', locale=settings['locale'], dictionary_flag=settings['dictionary_flag'], dictionary_flag_semantics=('captured native lookup SQL: strict' if settings['dictionary_flag'] else 'captured native lookup SQL: priorities') if 'official_export' in settings else 'unresolved native boolean; explicit diagnostic profile', dll_sha256=LOCALIZATION_SHA256, icu_sha256=ICU_SHA256)
+    host.emit('before_localization_initialize', locale=settings['locale'], dictionary_flag=settings['dictionary_flag'], dictionary_flag_semantics=('captured native lookup SQL: strict' if settings['dictionary_flag'] else 'captured native lookup SQL: priorities') if 'official_export' in settings else 'unresolved native boolean; explicit diagnostic profile', dll_sha256=sha256(path), reference_dll_sha256=LOCALIZATION_SHA256, icu_sha256=ICU_SHA256)
     result = initialize(settings['icu_data']['path'], connection, settings['locale'].encode('ascii'), settings['dictionary_flag'], None)
     host.localization_initialized = bool(result)
     host.emit('localization_initialize_result', return_value=bool(result))
@@ -75,8 +89,13 @@ def initialize_localization(host, dll_directory):
         raise RuntimeError(f'Native localization selected a different language: {actual!r}')
     host.emit('localization_initialized', current_language=actual.decode('ascii'), game_created=False, native_turns_executed=0)
 
-def finish_localization(host):
+def finish_localization(host, *, shared_dependency_profile=None):
     """Destroy dictionary/results before releasing the borrowed DB connection."""
+    if shared_dependency_profile is not None:
+        from civ6_host.runtime.native.native_shared_dependency_profiles import NativeSharedDependencyProfile
+        if type(shared_dependency_profile) is not NativeSharedDependencyProfile:
+            raise ValueError('Expected the explicit XP2 shared dependency profile')
+        shared_dependency_profile.verify_library_path('Localization_FinalRelease.dll', host.localization_library._name)
     shutdown = getattr(host.localization_library, '?Shutdown@Localization@@YA_NXZ')
     shutdown.argtypes, shutdown.restype = ([], C.c_bool)
     result = shutdown()

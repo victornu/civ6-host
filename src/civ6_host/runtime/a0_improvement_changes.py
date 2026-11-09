@@ -16,8 +16,9 @@ def enable(owner,backend):
         raise ValueError('Improvement/route callbacks require the original idle prepared saved owner')
     from .improvement_change_profile import bind_owner,event_profile
     from .native.native_deferred_empty_profile import validate_empty_profile_record
-    bind_owner(backend,backend.core,owner.read)
-    profile=event_profile(core_sha256=backend.load_abi.core_sha256)
+    execution_image=getattr(backend.core,'_civ6_host_execution_image',None)
+    bind_owner(backend,backend.core,owner.read,execution_image=execution_image)
+    profile=event_profile(core_sha256=backend.load_abi.core_sha256,execution_image=execution_image)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('Improvement/route callbacks overlap an existing producer')
     for kind,size in profile.record_sizes.items():

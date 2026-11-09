@@ -102,9 +102,18 @@ class _BoundWorldOwner:
         self._check()[1].world_input_prompts = value
 
     def control(self, *, empty):
-        if not self.active or empty is not True:
+        if empty is not True:
             raise ValueError('World input requires the active empty-control boundary')
-        b, _, _, _ = self._check()
+        b, continuation, _, _ = self._check()
+        if not self.active:
+            # The selected popup performs two read-only control snapshots in
+            # the existing query attempt. It must not impersonate an action.
+            from .xp2_world_war import source_pin
+            selected=getattr(self.saved,'war_source_sha256',None)
+            if (b.load_abi.core_sha256!=XP2_CORE_SHA256 or selected is None
+                    or not any(prompt is not None for prompt in continuation.world_input_prompts.values())):
+                raise ValueError('World input control query requires the selected pending XP2 war popup')
+            source_pin(selected,'xp2-lan')
         return b.control(empty=True)
 
     def emit(self, stage, **payload):
@@ -186,8 +195,14 @@ def apply(saved, action, before):
     from .native import native_world_input as world
     publication_count = t.publication_count
     try:
+        options = {}
+        war_enabled = b.load_abi.core_sha256 == XP2_CORE_SHA256 and getattr(saved, 'war_source_sha256', None) is not None
+        if war_enabled:
+            from functools import partial
+            from .xp2_world_war import request_source
+            options['request_source_reader'] = partial(request_source, saved)
         observed = world.apply(owner, action, before['turn'], before,
-            core_sha256=b.load_abi.core_sha256, snapshot_reader=_snapshot)
+            core_sha256=b.load_abi.core_sha256, snapshot_reader=_snapshot, **options)
         _check_catalogue(saved, catalogue, active=True)
         receipt = owner.receipt
         if (type(receipt) is not dict or receipt.get('action') != action
@@ -204,12 +219,25 @@ def apply(saved, action, before):
             status = 'completed'
             submitted = False
         else:
-            if type(request) is not dict or request.get('status') not in ('request','noop','unsupported'):
+            statuses = ('request','noop','unsupported','war_prompt') if war_enabled else ('request','noop','unsupported')
+            if type(request) is not dict or request.get('status') not in statuses:
                 raise RuntimeError('World click reached an unqualified result branch')
+            if request['status'] == 'war_prompt':
+                from civ6_host.contracts.xp2_war_confirmation import validate_prompt
+                expected = dict(attacking_player=before['player_id'],
+                    defending_player=request['defender_player_id'], war_type=request['war_type'])
+                validate_prompt(expected, before['player_id'])
+                if t.world_input_prompts.get(before['player_id']) != expected:
+                    raise RuntimeError('The official war prompt was not retained by its owner')
             submitted = request['status'] == 'request'
             status = 'refused' if request['status'] == 'unsupported' else 'completed'
+            qualified_operations = {'MOVE_TO'}
+            if b.load_abi.core_sha256 == XP2_CORE_SHA256:
+                from .xp2_world_input_source import verify_swap_source
+                verify_swap_source()
+                qualified_operations.add('SWAP_UNITS')
             if (request.get('native_callback_invoked') is not submitted
-                    or submitted and request.get('operation_name') != 'MOVE_TO'):
+                    or submitted and request.get('operation_name') not in qualified_operations):
                 raise RuntimeError('World-input transmission differs from its qualified candidate')
         if (receipt.get('archive_delivered') is not submitted
                 or t.publication_count != publication_count + int(submitted)):

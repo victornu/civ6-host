@@ -23,13 +23,15 @@ def _source():
     return path, proof
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     path, proof = _source()
     promotions.verify_source()
-    return {str(path.resolve()): SOURCE[1],
+    pins = {str(path.resolve()): SOURCE[1],
             str(resolve_path(promotions.PROOF_PATH).resolve()): promotions.PROOF_SHA,
             **{str(resolve_path(Path(row['path'])).resolve()): row['sha256']
                for row in proof['official_ui']}}
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 def _bind(saved, *, active):
@@ -81,5 +83,13 @@ def catalogue(saved, observation):
 
 def apply(saved, action, observation):
     _bind(saved, active=True)
+    continuation = saved.continuation
+    feedback = continuation.trade_feedback
+    after_delivery = None
+    if feedback is not None:
+        def after_delivery():
+            delivered = continuation.flush_trade_feedback()
+            if delivered:
+                saved.emit('xp2_bbg_trade_gameplay_delivered', feedback=delivered)
     return promotions.apply(saved, saved.prefix, action, observation['turn'], observation,
-                            player_id=observation['player_id'])
+                            player_id=observation['player_id'], after_delivery=after_delivery)

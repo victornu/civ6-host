@@ -174,17 +174,24 @@ def verify_xp1_once(core,base,read,root,*,core_sha256=XP1_SHA256):
     core._civ6_host_foundation_facade_verification=key
 
 
-def source_dependencies(*,core_sha256=XP1_SHA256):
+def source_dependencies(*,core_sha256=XP1_SHA256,execution_image=None):
     """Resolve the closed native source set for one exact facade engine."""
     if core_sha256==XP2_SHA256:
         from .xp2_foundation_query_source import source_dependencies as selected
-        pins=selected()
+        pins=selected(execution_image=execution_image)
         from .xp2_turn_notification_source import source_dependencies as turn_dependencies
         for path,sha in turn_dependencies().items():
             if path in pins and pins[path]!=sha:
                 raise ValueError('Conflicting XP2 foundation query dependency')
             pins[path]=sha
+        if execution_image is not None:
+            from .runtime_source_dependencies import materialize_runtime_source_pins
+            pins=materialize_runtime_source_pins(pins,execution_image=execution_image)
+            from .a0_family_source import verify_pinned_files
+            verify_pinned_files(pins)
         return pins
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires XP2 foundation facade ABI')
     if core_sha256!=XP1_SHA256:
         raise ValueError('Unknown foundation facade source engine')
     from .a0_family_source import _path,verify_pinned_files

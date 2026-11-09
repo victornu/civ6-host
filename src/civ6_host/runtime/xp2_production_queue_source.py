@@ -175,20 +175,27 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return proof
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .xp1_production_profile import source_dependencies as production
     proof = verify_source()
-    result = dict(production(core_sha256=XP2_CORE_SHA256))
+    result = dict(production(core_sha256=XP2_CORE_SHA256,
+                             execution_image=execution_image))
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), proof['image'], proof['extractor'],
             proof['capture_manifest'], *proof['references'],
             *proof['official_ui_sources'].values(), *proof['captured_ui_witnesses']]
     for ref in refs:
+        if ref is proof['image'] and execution_image is not None:
+            continue
         path = resolve_path(resource_root()/ref['path']).resolve()
         if (hashlib.sha256(path.read_bytes()).hexdigest() != ref['sha256']
                 or str(path) in result and result[str(path)] != ref['sha256']):
             raise ValueError('XP2 queue dependency changed: ' + str(path))
         result[str(path)] = ref['sha256']
-    return result
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(
+        result, execution_image=execution_image,
+        provenance_images=(proof['image'],),
+    )
 
 
 def verify_live(base, read):
@@ -224,13 +231,12 @@ class VerifiedQueueSource:
 
 def _check_receipt(owner, core, receipt):
     from .native.native_official_load import OfficialLoadBackend
-    from .xp2_bundle_inputs import REFERENCE
     if (type(owner) is not OfficialLoadBackend or owner.core is not core
             or owner.load_abi.core_sha256 != XP2_CORE_SHA256
             or type(receipt) is not VerifiedQueueSource or receipt.owner is not owner
             or receipt.core is not core or receipt.base != core._handle
             or receipt.inputs is not owner.inputs or receipt.bundle is not owner.captured_bundle
-            or receipt.bundle.inputs is not receipt.inputs or receipt.bundle.reference != REFERENCE
+            or receipt.bundle.inputs is not receipt.inputs
             or receipt.source_sha256 != SOURCE[1] or receipt.core_sha256 != XP2_CORE_SHA256):
         raise ValueError('XP2 queue source belongs to another saved lifetime')
 
@@ -248,11 +254,12 @@ def bind_owner(owner, core, read):
     if old is not None:
         _check_receipt(owner, core, old)
         return old
-    from .xp2_bundle_inputs import validate_candidate_inputs
+    from .captured_saved_load import validate_candidate_inputs
     from .xp1_production_profile import bind_owner as bind_production
     validate_candidate_inputs(owner.inputs, owner.captured_bundle)
     bind_production(owner, core, read)
-    source_dependencies()
+    execution_image = getattr(core, '_civ6_host_execution_image', None)
+    source_dependencies(execution_image=execution_image)
     receipt = VerifiedQueueSource(owner, core, core._handle, owner.inputs, owner.captured_bundle,
                                  SOURCE[1], XP2_CORE_SHA256, verify_live(core._handle, read))
     owner._xp2_production_queue_source_receipt = receipt

@@ -6,11 +6,12 @@ all backend RPCs globally. It does not schedule actors or resolve turns.
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from types import SimpleNamespace
 from uuid import UUID
 
-from .client import ProtocolError, _ENVELOPE, _digest, _public_contracts
+from .client import InformationUnavailable, ProtocolError, _ENVELOPE, _digest, _public_contracts
 from .contracts import network_turn
 from .contracts import policies
 from .contracts.session_result import project_terminal_result, require_same_terminal_result
@@ -21,10 +22,6 @@ _SESSION_FIELDS = {'game_mode', 'turn_phase', 'turn', 'local_player_id',
                    'human_player_ids', 'active_human_player_ids'}
 _COMMAND_FIELDS = {'status', 'reason', 'requested_action'}
 _STATUSES = {'none', 'completed', 'refused', 'submitted', 'pending'}
-
-
-class InformationUnavailable(RuntimeError):
-    """The requested information is not present at this cached native boundary."""
 
 
 def _player_id(value):
@@ -57,7 +54,7 @@ def _validate_session(value):
     return copy.deepcopy(value)
 
 
-def _validate_command(value):
+def _validate_command(value, observation=None):
     if type(value) is not dict or set(value) != _COMMAND_FIELDS:
         raise ProtocolError('Unexpected command-result fields')
     if type(value['status']) is not str or value['status'] not in _STATUSES:
@@ -66,6 +63,33 @@ def _validate_command(value):
         raise ProtocolError('Invalid command-result reason')
     if value['requested_action'] is not None and type(value['requested_action']) is not dict:
         raise ProtocolError('Invalid requested action')
+    if (value['requested_action'] is not None and value['requested_action'].get('kind')
+            in ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')):
+        from .contracts import espionage
+        if type(observation) is not dict:
+            raise ProtocolError('Espionage receipt lacks its decision observation')
+        try:
+            espionage.validate_action(value['requested_action'],
+                                      observation['width'], observation['height'])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProtocolError('Invalid requested espionage action: ' + str(exc)) from exc
+    if (value['requested_action'] is not None and value['requested_action'].get('kind')
+            in ('spy_renew', 'spy_completion_dismiss')):
+        from .contracts import spy_completion
+        if type(observation) is not dict:
+            raise ProtocolError('Spy completion receipt lacks its decision observation')
+        try:
+            spy_completion.validate_action(value['requested_action'],
+                                           observation['width'], observation['height'])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProtocolError('Invalid requested spy completion action: ' + str(exc)) from exc
+    if (value['requested_action'] is not None
+            and (type(value['requested_action'].get('kind')) is str and value['requested_action'].get('kind').startswith('congress_'))):
+        from .contracts import world_congress
+        try:
+            world_congress.validate_action(value['requested_action'])
+        except ValueError as exc:
+            raise ProtocolError('Invalid requested Congress action: ' + str(exc)) from exc
     return copy.deepcopy(value)
 
 
@@ -74,11 +98,16 @@ class SessionClient:
 
     turn_mode = 'simultaneous'
 
-    def __init__(self, backend, *, allow_administrative=False):
+    def __init__(self, backend, *, allow_administrative=False, war_source_sha256=None):
         if type(allow_administrative) is not bool:
             raise ValueError('allow_administrative must be an exact Boolean')
+        if (war_source_sha256 is not None
+                and (type(war_source_sha256) is not str
+                     or re.fullmatch('[0-9a-f]{64}', war_source_sha256) is None)):
+            raise ValueError('war_source_sha256 must be a lowercase SHA-256 digest or None')
         self._backend = backend
         self._allow_administrative = allow_administrative
+        self._war_source_sha256 = war_source_sha256
         self._owner = threading.get_ident()
         self._reply = None
         self._closed = True
@@ -125,7 +154,8 @@ class SessionClient:
             raise ProtocolError('Foreign or out-of-order global RPC response')
 
         session = _validate_session(response['session'])
-        command = _validate_command(response['command_result'])
+        command = _validate_command(response['command_result'],
+                                    None if prior_view is None else prior_view['observation'])
         if operation != 'reset':
             if session['local_player_id'] != self._episode_local_player:
                 raise ProtocolError('LAN session changed its local player identity')
@@ -200,14 +230,22 @@ class SessionClient:
             ended = result['terminated'] or result['truncated']
             if len(set(ids)) != len(ids) or (ended and candidates):
                 raise ProtocolError('Duplicate or closed native choices')
-            if decisions.get('schema') in network_turn.SUPPORTED_SCHEMAS:
+            if (decisions.get('schema') in network_turn.SUPPORTED_SCHEMAS
+                    or network_turn.is_world_war_decisions(decisions)
+                    or network_turn.is_diplomacy_decisions(decisions)):
                 network_turn.validate_catalogue(decisions,
                     SimpleNamespace(episode_id=episode, game_generation=generation),
                     response['sequence'], observation['turn'], player_id=pid,
-                    actions_closed=ended, observation=observation)
+                    actions_closed=ended, observation=observation,
+                    expected_war_source_sha256=self._war_source_sha256)
                 if decisions['turn_controls']['active'] != (pid in session['active_human_player_ids']):
                     raise ProtocolError('Actor activity differs from native session state')
-            _public_contracts(decisions, observation, ended)
+                if network_turn.is_diplomacy_decisions(decisions):
+                    from .player_view import validate_player_map
+                    validate_player_map(decisions['player_map'],observation)
+            if not (network_turn.is_world_war_decisions(decisions)
+                    or network_turn.is_diplomacy_decisions(decisions)):
+                _public_contracts(decisions, observation, ended)
             if (decisions.get('schema') in network_turn.WORK_SCHEMAS
                     and decisions.get('unit_work_state') is not None):
                 from .contracts.unit_work_state import validate as validate_work_state
@@ -229,9 +267,19 @@ class SessionClient:
                           if row['candidate_id'] == request['selection']['candidate_id'])
             if chosen.get('kind') == 'policies':
                 candidate = policies.choose(chosen['slots'], request['selection']['parameters']['assignments'],
-                                            requested_player, prior_view['decisions']['turn'])
+                                            requested_player, prior_view['decisions']['turn'],
+                                            allow_relocation=(prior_view['decisions'].get('schema') in
+                                                network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS),
+                                            allow_unchanged=(prior_view['decisions'].get('schema') in
+                                                network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS))
                 if _digest(requested_action) != _digest(dict(kind='policies', candidate=candidate)):
                     raise ProtocolError('Policy choice was substituted')
+            elif (type(chosen.get('kind')) is str and chosen.get('kind').startswith('congress_')):
+                from .contracts import world_congress
+                selected = world_congress.choose(prior_view['decisions']['world_congress'],
+                    chosen, request['selection'].get('parameters'))
+                if _digest(requested_action) != _digest(selected):
+                    raise ProtocolError('Congress choice was substituted')
             elif _digest(requested_action) != _digest(chosen):
                 raise ProtocolError('Requested action differs from the selected actor choice')
 
@@ -345,7 +393,7 @@ class SessionClient:
         Python process or a remote transport's authorization mechanism.
         """
         self._check_owner()
-        from .contracts.information import PUBLIC_GROUPS, project, required_fields
+        from .contracts.information import PUBLIC_GROUPS, envelope, project, required_fields
         if type(group) is not str or (group not in PUBLIC_GROUPS
                 and not (group == 'turn_horizon' and channel == 'administrative')):
             raise ValueError('Unsupported information group')
@@ -371,6 +419,11 @@ class SessionClient:
         if group == 'economy' and channel == 'administrative':
             required.add('research_progress')
         if any(field not in decisions or decisions[field] is None for field in required):
+            if (decisions.get('schema') in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS
+                    and not decisions['native_command_permissions']['allow_strategic']
+                    and group in ('production', 'combat')):
+                raise InformationUnavailable(group + ' information is unavailable: '
+                    + network_turn.NATIVE_STRATEGIC_READER_UNAVAILABLE)
             raise InformationUnavailable(group + ' information is unavailable at this waiting/modal boundary')
         if group=='combat':
             if decisions.get('schema') not in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
@@ -418,6 +471,14 @@ class SessionClient:
             'production': ('production','production_info','production_current'),
             'growth': ('city_growth',),
             'strategic_resources': ('strategic_resources',),
+            'diplomacy': ('diplomacy_overview',),
+            'trade': ('trade_routes', 'trade_origins'),
+            'espionage': ('espionage',),
+            'spy_completion': ('spy_completion',),
+            'world_congress': ('world_congress',),
+            'world_congress_review': ('world_congress_review',),
+            'native_command_permissions': ('native_command_permissions',),
+            'world_congress_active_effects': ('world_congress_active_effects',),
             'combat': ('unit_attacks','queued_orders'),
             'unit_work': ('unit_work_state','unit_work_info','unit_work'),
         }[group]
@@ -429,11 +490,7 @@ class SessionClient:
             sources['display_projection'] = data['schema']
         if 'schema' in decisions:
             sources['decision_catalogue'] = decisions['schema']
-        return copy.deepcopy(dict(
-            schema='civ6-host.information.v1', group=group, channel=channel,
-            episode_id=response['episode_id'], game_generation=response['game_generation'],
-            player_id=pid, sequence=response['sequence'], turn=observation['turn'],
-            native_decision_id=decisions['decision_id'], source_contracts=sources, data=data))
+        return envelope(response, group, channel, data, sources)
 
     def _actor_view(self, response):
         if (getattr(self._backend, '_display_projection_enabled', False) is not True
@@ -505,7 +562,17 @@ class SessionClient:
             if type(parameters) is not dict or set(parameters) != {'assignments'}:
                 raise ProtocolError('Explicit policy assignments required')
             try:
-                policies.choose(action['slots'], parameters['assignments'], pid, decisions['turn'])
+                policies.choose(action['slots'], parameters['assignments'], pid, decisions['turn'],
+                    allow_relocation=(decisions.get('schema') in
+                        network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS),
+                    allow_unchanged=(decisions.get('schema') in
+                        network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS))
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+        elif (type(action.get('kind')) is str and action.get('kind').startswith('congress_')):
+            from .contracts import world_congress
+            try:
+                world_congress.choose(decisions['world_congress'], action, parameters)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
         elif parameters is not None:
@@ -514,6 +581,22 @@ class SessionClient:
         if parameters is not None:
             selection['parameters'] = parameters
         return self._send('act', pid, selection, prior_view=prior_view)
+
+    def congress_ballot_draft(self, player_id, parameters):
+        """Prepare an unsent complete ballot from this actor's cached view."""
+        self._check_owner()
+        pid = _player_id(player_id)
+        view = self._views.get(pid)
+        if self._closed or view is None:
+            raise ProtocolError('No current Congress view for this actor')
+        from .contracts import world_congress
+        value = view['decisions'].get('world_congress')
+        if value is None:
+            raise InformationUnavailable('Public Congress information is unavailable')
+        try:
+            return world_congress.ballot_draft(value, parameters)
+        except ValueError as exc:
+            raise ProtocolError(str(exc)) from exc
 
     @property
     def session_state(self):

@@ -90,13 +90,20 @@ def _profile_and_pins(root):
     return p, pins
 
 
-def source_dependencies(root=None):
+def source_dependencies(root=None, *, execution_image=None):
     root = _root(root)
     p, pins = _profile_and_pins(root)
     image = Path(p['image']['path']).resolve()
-    if hashlib.sha256(image.read_bytes()).hexdigest() != XP2_CORE_SHA256:
-        raise ValueError('XP2 action image changed')
+    if str(image) != p['image']['path']:
+        raise ValueError('XP2 action image path is not canonical')
     pins[str(image)] = XP2_CORE_SHA256
+    from .execution_images import runtime_source_pins
+    pins = runtime_source_pins(pins, execution_image=execution_image)
+    expected_image_sha256 = pins[str(image)]
+    if hashlib.sha256(image.read_bytes()).hexdigest() != expected_image_sha256:
+        if execution_image is None:
+            raise ValueError('XP2 action image changed')
+        raise ValueError('XP2 action image differs from its explicit source/runtime pin')
     return pins
 
 
@@ -159,9 +166,10 @@ def verify_owners(base, context, read, *, host_pointer, auxiliary_pointer):
 
 def verify_host_build():
     from .profile_script_binding import _current_executable
-    from .source_build_identity import verify_source_build
-    return verify_source_build(_current_executable(),
-        required_components={'gamecore_python_host.c': HOST_COMPONENT_SHA})
+    from .source_build_identity import verify_source_build, xp2_component_requirements
+    executable = _current_executable()
+    return verify_source_build(executable, required_components=xp2_component_requirements(
+        executable, {'gamecore_python_host.c': HOST_COMPONENT_SHA}))
 
 
 def verify_log_binding(core, read, recorder):

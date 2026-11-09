@@ -47,12 +47,16 @@ def main():
                         {'op','player_id','decision_id','candidate_id','parameters'}):
                     response=client.act(command['player_id'],command['decision_id'],
                         command['candidate_id'],command.get('parameters'))
+                elif operation=='information' and set(command)=={'op','group','player_id'}:
+                    response=client.information(command['group'],player_id=command['player_id'])
+                elif operation=='congress_ballot_draft' and set(command)=={'op','player_id','parameters'}:
+                    response=client.congress_ballot_draft(command['player_id'],command['parameters'])
                 elif operation=='session' and set(command)=={'op'}:
                     response=client.session_state
                 elif operation=='command_result' and set(command)=={'op'}:
                     response=client.command_result
                 else:
-                    raise ValueError('Use an explicit actor for LAN observe/poll/act; reset/close/session/command_result take no actor')
+                    raise ValueError('Use an explicit actor for LAN observe/poll/act; information requires group/player_id; congress_ballot_draft requires player_id/parameters; reset/close/session/command_result take no actor')
             elif operation in ('reset','observe','close') and set(command)=={'op'}:
                 response=getattr(client,operation)()
             elif operation=='act' and set(command) in (

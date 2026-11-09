@@ -73,10 +73,12 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_combat_event_source import source_dependencies as xp2_dependencies
-        return xp2_dependencies()
+        return xp2_dependencies(execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires XP2 world-text ABI')
     if core_sha256!=XP1_CORE_SHA256:
         raise ValueError('World-text source dependencies require exact XP1 or XP2')
     from .paths import resource_root
@@ -92,7 +94,12 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return pins
 
 
-def event_profile(core_sha256=XP1_CORE_SHA256):
+def event_profile(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires XP2 world-text ABI')
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
     from .a0_family_source import A0FamilyProfile
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     verify_source(core_sha256)
@@ -107,13 +114,17 @@ def event_profile(core_sha256=XP1_CORE_SHA256):
                            MappingProxyType({RECORD_TYPE: RECORD_SIZE}), source_sha)
 
 
-def bind_owner(backend, core, read):
+def bind_owner(backend, core, read, *, execution_image=None):
     if backend.load_abi.core_sha256==XP2_CORE_SHA256:
         from .xp2_combat_event_source import bind_owner as bind_xp2
         if backend.core is not core:
             raise ValueError('XP2 world-text has a foreign native owner')
-        bind_xp2(backend,core,read)
-        return event_profile(XP2_CORE_SHA256)
+        if execution_image is None:
+            execution_image=getattr(core,'_civ6_host_execution_image',None)
+        bind_xp2(backend,core,read,execution_image=execution_image)
+        return event_profile(XP2_CORE_SHA256,execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires XP2 world-text ABI')
     backend.check_thread()
     if backend.core is not core or backend.load_abi.core_sha256 != XP1_CORE_SHA256:
         raise ValueError('XP1 world-text has a foreign native owner')

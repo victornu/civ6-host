@@ -2,7 +2,7 @@
 
 The factory, typed payloads, Call/TestAll semantics and protected HKS dispatch
 are retained implementations. Engine/caller admission remains separate. This
-service supports DWORD and boolean arguments; unknown methods still terminate
+service supports source-qualified typed arguments; unknown methods still terminate
 through the native host guard. It does not replace missing gameplay listeners.
 """
 from __future__ import annotations
@@ -32,7 +32,26 @@ class _OwnedArguments(NativeScriptArguments):
         if self.owner.map_factory is not None:
             self._bind_payload(self._payloads[address],0x10,C.c_uint32,
                 [C.c_void_p,C.c_void_p],lambda obj,source:self._append_map(address,obj,source))
+        if self.owner.string_reader is not None:
+            self._bind_payload(self._payloads[address],0x30,C.c_uint32,
+                [C.c_void_p,C.c_void_p,C.c_size_t],
+                lambda obj,source,size:self._append_string(address,obj,source,size))
         return address
+
+    def _append_string(self, address, this, source, size):
+        from .script_event_strings import StringArgument, MAX_STRING_BYTES, MAX_TOTAL_STRING_BYTES
+        payload = self._get_live(address)
+        if (this != address or type(size) is not int or not 0 <= size <= MAX_STRING_BYTES
+                or (size and not source) or len(payload.values) >= 64):
+            raise ValueError('Invalid counted script string argument')
+        total = sum(len(v.raw) for v in payload.values if isinstance(v, StringArgument)) + size
+        if total > MAX_TOTAL_STRING_BYTES:
+            raise ValueError('Aggregate script string byte budget exceeded')
+        raw = self.owner.string_reader(source, size) if size else b''
+        if type(raw) is not bytes or len(raw) != size:
+            raise ValueError('Incomplete native script string read')
+        payload.values.append(StringArgument(raw))
+        return len(payload.values) - 1
 
     def _append_map(self,address,this,source):
         payload=self._get_live(address)
@@ -65,6 +84,7 @@ class ScriptEventService(NativeGameEventCallbacks):
             map_factory.check()
         self.host, self.runtime, self.emit = host, runtime, host.emit
         self.map_factory=map_factory
+        self.string_reader = None
         self.thread, self.closed, self.dispatch_depth = threading.get_ident(), False, 0
         table = C.addressof(host.aux_vtable)
         bindings = getattr(host, '_slot_bindings', {})
@@ -105,6 +125,17 @@ class ScriptEventService(NativeGameEventCallbacks):
 
     def game_event_test_all(self, *args):
         return self._dispatch(super().game_event_test_all, *args)
+
+    def install_string_arguments(self, core, *, read):
+        """Explicit current-image extension; legacy services keep their payload ABI."""
+        from .script_event_strings import verify_live, require_string_transport
+        self._check()
+        if (self.string_reader is not None or self.dispatch_depth
+                or self.script_arguments.live_count or not callable(read)):
+            raise ValueError('String arguments need an idle, unextended script owner')
+        require_string_transport(self.runtime)
+        self.string_source = verify_live(core, read)
+        self.string_reader = read
 
     def install_mutable_map_result(self, core, *, core_sha256, read):
         """Explicitly own source-qualified XP2 AUX68; default slots stay unchanged."""
@@ -150,12 +181,15 @@ class ScriptEventService(NativeGameEventCallbacks):
             values = (() if arguments is None or type(arguments) is int and arguments == 0
                       else self.script_arguments.arguments(arguments))
             result = self.mutable_map_dispatcher.dispatch(name, values, destination)
+            from .script_event_strings import StringArgument
             self.emit('native_game_event_mutable_map_dispatched',
                       gameplay_event_name=name.decode('utf-8', 'replace'),
                       argument_count=len(values), result_non_nil=result.valid,
                       result_truthiness=result.truthiness, native_status=result.status,
                       phase=result.phase, protected_call_success=result.status == 0,
                       destination_borrowed=True, destination_cloned=False,
+                      string_arguments=[dict(index=i,bytes=len(v.raw),raw_hex=v.raw.hex())
+                                        for i,v in enumerate(values) if isinstance(v,StringArgument)],
                       eligible_for_training=False)
             return result.valid
         except BaseException:

@@ -15,11 +15,13 @@ EXPORTS = {'newstate': ('?lua_newstate@@YAPEAUlua_State@@P6APEAXPEAX0_K1@Z0@Z', 
 SCRIPT = b'local t={9,2,5}; local function add(x) return x+33 end; return add(t[1])'
 ERROR_SCRIPT = b'local missing; return missing()'
 
-def bind_kernel(library):
-    api = bind(library)
+def bind_kernel(library, *, shared_dependency_profile=None):
+    api = bind(library, shared_dependency_profile=shared_dependency_profile)
+    selected_rvas = None if shared_dependency_profile is None else shared_dependency_profile.havok_export_rvas
     for key, (name, rva, arguments, result) in EXPORTS.items():
         function = getattr(library, name)
-        if C.cast(function, C.c_void_p).value != library._handle + rva:
+        expected_rva = rva if selected_rvas is None else selected_rvas.get(name)
+        if type(expected_rva) is not int or C.cast(function, C.c_void_p).value != library._handle + expected_rva:
             raise RuntimeError(f'Unexpected Havok kernel export: {key}')
         function.argtypes, function.restype = (arguments, result)
         api[key] = function

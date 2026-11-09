@@ -24,7 +24,7 @@ from civ6_host.contracts.action_budget import LAN_EVENT_LINE_BYTES
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 
-def xp1_loaded_close_evidence(run, report, pins, *, core_sha256=XP1_CORE_SHA256):
+def xp1_loaded_close_evidence(run, report, pins, *, core_sha256=XP1_CORE_SHA256, official_bundle=None):
     """Read-only receipt authentication for one already reaped expansion session.
 
     This does not rerun the engine, rewrite retained supervisors or replace the
@@ -32,7 +32,7 @@ def xp1_loaded_close_evidence(run, report, pins, *, core_sha256=XP1_CORE_SHA256)
     """
     from civ6_host.runtime.xp1_loaded_lifetime import SOURCE, validate_jobs_shutdown
     from civ6_host.runtime.captured_session_profile import select
-    candidate=select(core_sha256).candidate
+    candidate=select(core_sha256, official_bundle=official_bundle).candidate
     REFERENCE=candidate.reference
     engine = 'xp2' if core_sha256 == XP2_CORE_SHA256 else 'xp1'
     unload_rva='0x4be690'
@@ -200,19 +200,55 @@ class NativeNetworkSession(NativeActionSession):
     def __init__(self, run_root=None, *, official_bundle=None, round_limit=8,
                  lifetime_seconds=45, stdout_limit_mib=64, checkpoint=None,
                  checkpoint_on_close=False, privileged_critic_diagnostic=False,
+                 foundation_legality_diagnostic=False,
+                 governors_diagnostic=False,
+                 diplomacy_overview_diagnostic=False,
+                 trade_diagnostic=False,
+                 espionage_diagnostic=False,
+                 world_congress_diagnostic=False,
+                 world_congress_review_diagnostic=False,
                  ui_profile=None, episode_budget=None, _admitted_bundle=None,
                  forced_endturn_diagnostic=False, production_queue_diagnostic=False,
                  city_focus_diagnostic=False, city_management_diagnostic=False,
                  multiturn_movement_diagnostic=False, movement_information_diagnostic=False,
                  unit_order_cancel_diagnostic=False, movement_ui_probe=None,
                  world_input_diagnostic=False, input_profile='lan',
-                 prepared_capture=None, public_display_diagnostic=False, **options):
+                 prepared_capture=None, public_display_diagnostic=False,
+                 public_display_source=None, war_source_sha256=None,
+                 execution_image_profile=None, checkpoint_compatibility=None,
+                 command_profile_diagnostic=False, **options):
         if type(input_profile) is not str or input_profile not in ('lan', 'xp1-lan', 'xp2-lan'):
             raise ValueError('Unknown captured network input profile')
+        self.execution_image = None
+        if execution_image_profile is not None:
+            if input_profile != 'xp2-lan' or type(execution_image_profile) is not str:
+                raise ValueError('An execution image requires an explicit XP2 profile name')
+            from civ6_host.runtime.execution_images import known_path, select
+            self.execution_image = select(execution_image_profile,
+                core_path=known_path(execution_image_profile))
+        if (type(command_profile_diagnostic) is not bool
+                or command_profile_diagnostic and (
+                    input_profile != 'xp2-lan' or self.execution_image is None)):
+            raise ValueError('Command profiling requires an explicit XP2 execution image')
+        self.command_profile_diagnostic = command_profile_diagnostic
+        if checkpoint_compatibility is not None:
+            if (checkpoint_compatibility != 'xp2-reference-abi-to-selected-runtime.v1'
+                    or self.execution_image is None or checkpoint is None):
+                raise ValueError('Checkpoint compatibility requires an explicit image and checkpoint')
+        self.checkpoint_compatibility = checkpoint_compatibility
+        from civ6_host.runtime.xp2_world_war import source_pin
+        self.war_source_sha256 = source_pin(war_source_sha256, input_profile)
         if (type(public_display_diagnostic) is not bool
                 or (public_display_diagnostic and input_profile != 'xp2-lan')):
             raise ValueError('Public display requires the explicit XP2 diagnostic')
         self.public_display_diagnostic = public_display_diagnostic
+        if public_display_source is not None and not public_display_diagnostic:
+            raise ValueError('A display source requires the explicit public display capability')
+        if public_display_diagnostic:
+            from civ6_host.runtime.player_display_toppanel import selected_source
+            self.public_display_source = selected_source(public_display_source)
+        else:
+            self.public_display_source = None
         self.input_profile = input_profile
         self.prepared_capture = None
         if input_profile in ('xp1-lan','xp2-lan'):
@@ -234,8 +270,28 @@ class NativeNetworkSession(NativeActionSession):
             raise ValueError('LAN administrative options require exact Boolean values')
         if type(forced_endturn_diagnostic) is not bool:
             raise ValueError('LAN forced-EndTurn option requires an exact Boolean value')
-        if privileged_critic_diagnostic:
-            raise ValueError('LAN sessions do not expose privileged critic state')
+        if privileged_critic_diagnostic and input_profile != 'xp2-lan':
+            raise ValueError('The LAN critic diagnostic requires the exact BBG XP2 capture')
+        if (type(foundation_legality_diagnostic) is not bool
+                or (foundation_legality_diagnostic and input_profile != 'xp2-lan')):
+            raise ValueError('Foundation legality requires the explicit XP2 diagnostic')
+        if (type(governors_diagnostic) is not bool
+                or (governors_diagnostic and input_profile != 'xp2-lan')):
+            raise ValueError('Governors require the explicit XP2 diagnostic')
+        if (type(diplomacy_overview_diagnostic) is not bool
+                or diplomacy_overview_diagnostic and (
+                    input_profile != 'xp2-lan' or not governors_diagnostic
+                    or self.execution_image is None or self.war_source_sha256 is None)):
+            raise ValueError('Initial diplomacy requires current XP2, its receiver and the complete v32 query group')
+        if type(trade_diagnostic) is not bool or trade_diagnostic and not diplomacy_overview_diagnostic:
+            raise ValueError('Trade requires the complete current XP2 diplomacy query group')
+        if type(espionage_diagnostic) is not bool or espionage_diagnostic and not trade_diagnostic:
+            raise ValueError('Espionage requires the complete current XP2 trade query group')
+        if type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not espionage_diagnostic:
+            raise ValueError('World Congress requires the complete current XP2 espionage group')
+        if (type(world_congress_review_diagnostic) is not bool
+                or world_congress_review_diagnostic and not world_congress_diagnostic):
+            raise ValueError('Congress review requires the explicit current XP2 Congress group')
         if ui_profile is not None:
             raise ValueError('LAN sessions do not accept a Hotseat UI profile')
         if episode_budget is not None:
@@ -282,26 +338,47 @@ class NativeNetworkSession(NativeActionSession):
         self.movement_information_diagnostic = movement_information_diagnostic
         self.unit_order_cancel_diagnostic = unit_order_cancel_diagnostic
         self.world_input_diagnostic = world_input_diagnostic
+        self.privileged_critic_diagnostic = privileged_critic_diagnostic
+        self.foundation_legality_diagnostic = foundation_legality_diagnostic
+        self.governors_diagnostic = governors_diagnostic
+        self.diplomacy_overview_diagnostic = diplomacy_overview_diagnostic
+        self.trade_diagnostic = trade_diagnostic
+        self.espionage_diagnostic = espionage_diagnostic
+        self.world_congress_diagnostic = world_congress_diagnostic
+        self.world_congress_review_diagnostic = world_congress_review_diagnostic
         from civ6_host.runtime.network_checkpoint import normalize, manifest, verify_resume_head
         self.network_checkpoint_ref = normalize(checkpoint) if checkpoint is not None else None
         self.checkpoint_on_close = checkpoint_on_close
         self._last_actor_id = None
         if input_profile in ('xp1-lan','xp2-lan'):
             from civ6_host.runtime.captured_session_profile import for_family
-            candidate = for_family(input_profile).candidate
+            candidate = for_family(input_profile, official_bundle=self.official_bundle).candidate
             if self.official_bundle != candidate.reference:
-                raise ValueError('XP1 session requires its exact retained official capture')
+                raise ValueError('Expansion session requires its exact retained official capture')
+            from civ6_host.runtime import xp2_bbg_inputs as bbg
+            if privileged_critic_diagnostic and candidate.reference != bbg.REFERENCE:
+                raise ValueError('The LAN critic diagnostic requires the exact BBG XP2 capture')
+            if foundation_legality_diagnostic or governors_diagnostic:
+                from civ6_host.runtime.captured_session_profile import require_bbg_capture
+                require_bbg_capture(candidate.reference, execution_image=self.execution_image)
+            if candidate.reference == bbg.REFERENCE and self.prepared_capture != bbg.prepared_reference():
+                raise ValueError('BBG session requires its exact local recovered handoff')
             if self.network_checkpoint_ref is not None:
                 verify_resume_head(self.network_checkpoint_ref, official_bundle=self.official_bundle,
-                                   core_sha256=candidate.core_sha256)
+                    core_sha256=candidate.core_sha256,
+                    **({'execution_image': self.execution_image,
+                        'checkpoint_compatibility': self.checkpoint_compatibility}
+                       if self.execution_image is not None else {}))
         elif self.network_checkpoint_ref is not None:
             manifest(self.network_checkpoint_ref, official_bundle=self.official_bundle)
 
     def _initial_protocol(self, identity, closure):
         if self.input_profile in ('xp1-lan','xp2-lan'):
             from civ6_host.runtime.captured_session_profile import for_family
+            candidate = for_family(self.input_profile, official_bundle=self.official_bundle).candidate
             return NetworkProtocol(identity, self.nonce, round_limit=closure['rounds'],
-                initial_turn=closure['initial_turn'],core_sha256=for_family(self.input_profile).candidate.core_sha256)
+                initial_turn=closure['initial_turn'],core_sha256=candidate.core_sha256,
+                war_source_sha256=closure.get('war_source_sha256'))
         return self.protocol_class(identity, self.nonce, round_limit=closure['rounds'])
 
     @contextmanager
@@ -364,7 +441,7 @@ class NativeNetworkSession(NativeActionSession):
         from civ6_host.runtime.native.native_probe import Windows
         from civ6_host.runtime.capture_candidates import consume_input_handoff
         from civ6_host.runtime.captured_session_profile import for_family
-        selected=for_family(self.input_profile)
+        selected=for_family(self.input_profile, official_bundle=self.official_bundle)
         from civ6_host.runtime.xp1_session_inputs import (
             prepare_sources, prepare_private_fixture, saved_load_pin,
             SAVED_LOAD_CLOSURE_ENV)
@@ -380,7 +457,10 @@ class NativeNetworkSession(NativeActionSession):
             try:
                 verify_installation()
                 package = copy.deepcopy(self.prepared_capture)
-                captured = consume_input_handoff(self.input_profile,package)
+                execution_options = ({'execution_image': self.execution_image}
+                                     if self.execution_image is not None else {})
+                captured = consume_input_handoff(self.input_profile, package,
+                    official_bundle=self.official_bundle, **execution_options)
                 if captured.reference != selected.candidate.reference or self.official_bundle != captured.reference:
                     raise ValueError('XP1 prepared inputs differ from the requested official capture')
                 self._set_bundle_initial_turn(captured.initial_turn)
@@ -454,8 +534,9 @@ class NativeNetworkSession(NativeActionSession):
             return result
         try:
             from civ6_host.runtime.captured_session_profile import for_family
+            candidate = for_family(self.input_profile, official_bundle=self.official_bundle).candidate
             evidence = xp1_loaded_close_evidence(self.run, report, self.pins,
-                core_sha256=for_family(self.input_profile).candidate.core_sha256)
+                core_sha256=candidate.core_sha256, official_bundle=self.official_bundle)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             # A clean process exit is insufficient. Make a missing/corrupted
             # receipt visible to the shared request(close) result check.
@@ -485,7 +566,7 @@ class NativeNetworkSession(NativeActionSession):
             return True
         if self.input_profile in ('xp1-lan','xp2-lan'):
             from civ6_host.runtime.captured_session_profile import for_family
-            REFERENCE=for_family(self.input_profile).candidate.reference
+            REFERENCE=for_family(self.input_profile, official_bundle=self.official_bundle).candidate.reference
             if self.input_profile=='xp2-lan':
                 from civ6_host.runtime.xp2_unit_orders_source import SOURCE, TRANSPORT_SOURCE, UI_SOURCE
             else:
@@ -507,21 +588,40 @@ class NativeNetworkSession(NativeActionSession):
         return True
 
     def _configure_closure(self, closure):
+        compatibility = getattr(self, 'checkpoint_compatibility', None)
+        if compatibility is not None:
+            closure['checkpoint_compatibility'] = compatibility
         if self.input_profile in ('xp1-lan','xp2-lan'):
             from importlib import import_module
             from civ6_host.runtime.xp1_session_inputs import saved_load_pin
             from civ6_host.runtime.captured_session_profile import for_family
-            selected=for_family(self.input_profile)
+            selected=for_family(self.input_profile, official_bundle=self.official_bundle)
+            image = getattr(self, 'execution_image', None)
+            execution_options = {'execution_image': image} if image is not None else {}
             # No Base catalogue/provider admission. These authored adapters and
             # their private source evidence supplement the shared native phases.
             saved_load_pin(closure['pins'], Path(__file__))
+            if self.command_profile_diagnostic:
+                from civ6_host.runtime import command_profiling
+                closure['command_profile_diagnostic'] = True
+                saved_load_pin(closure['pins'], Path(command_profiling.__file__))
+            if self.privileged_critic_diagnostic:
+                from civ6_host.runtime import xp2_bbg_critic
+                closure['privileged_critic_diagnostic'] = True
+                for path in xp2_bbg_critic.source_files():
+                    saved_load_pin(closure['pins'], path)
+            if self.foundation_legality_diagnostic:
+                from civ6_host.runtime.xp2_foundation_legality import pin_sources
+                pin_sources(closure['pins'], **execution_options)
+                closure['foundation_legality_diagnostic'] = True
             for name in ('workers.network_worker', 'xp1_session_view', 'xp1_session_result',
                          'xp1_status_profiles', 'xp1_session_admission'):
                 module = import_module('civ6_host.runtime.'+name)
                 saved_load_pin(closure['pins'], Path(module.__file__))
                 if name != 'workers.network_worker':
-                    dependencies=(module.source_dependencies() if name=='xp1_session_admission'
-                        else module.source_dependencies(core_sha256=selected.candidate.core_sha256))
+                    dependencies=(module.source_dependencies(**execution_options) if name=='xp1_session_admission'
+                        else module.source_dependencies(core_sha256=selected.candidate.core_sha256,
+                                                        **execution_options))
                     for path, expected in dependencies.items():
                         saved_load_pin(closure['pins'], path, expected)
             if self.city_focus_diagnostic or self.city_management_diagnostic:
@@ -530,12 +630,61 @@ class NativeNetworkSession(NativeActionSession):
                 closure.update(city_focus_diagnostic=self.city_focus_diagnostic,
                     city_management_diagnostic=self.city_management_diagnostic)
                 requested(closure)
-                for path,expected in city_dependencies(selected.candidate.core_sha256).items():
+                for path,expected in city_dependencies(selected.candidate.core_sha256,
+                        official_bundle=self.official_bundle,**execution_options).items():
                     saved_load_pin(closure['pins'],path,expected)
             if self.input_profile=='xp2-lan':
+                from civ6_host.runtime.source_build_identity import CURRENT_STRINGS_BUILD_PROFILE
+                if image is not None and image.native_host_build.profile_id == CURRENT_STRINGS_BUILD_PROFILE:
+                    from civ6_host.runtime import script_event_strings
+                    saved_load_pin(closure['pins'], Path(script_event_strings.__file__))
+                    for path, digest in script_event_strings.source_dependencies(execution_image=image).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if self.war_source_sha256 is not None:
+                    from civ6_host.runtime import xp2_world_war_display
+                    closure['war_source_sha256'] = self.war_source_sha256
+                    for path, expected in xp2_world_war_display.source_dependencies(**execution_options).items():
+                        saved_load_pin(closure['pins'], Path(path), expected)
+                if self.governors_diagnostic:
+                    from civ6_host.runtime import xp2_governors
+                    closure['governors_diagnostic'] = True
+                    for path, expected in xp2_governors.source_dependencies(
+                            execution_image=self.execution_image).items():
+                        saved_load_pin(closure['pins'], path, expected)
+                if getattr(self, 'diplomacy_overview_diagnostic', False):
+                    from civ6_host.runtime.xp2_diplomacy_overview import source_dependencies
+                    closure['diplomacy_overview_diagnostic'] = True
+                    for path, digest in source_dependencies(execution_image=self.execution_image).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'trade_diagnostic', False):
+                    from civ6_host.runtime import xp2_bbg_trade_feedback, xp2_trade
+                    closure['trade_diagnostic'] = True
+                    for module in (xp2_trade, xp2_bbg_trade_feedback):
+                        for path, digest in module.source_dependencies(execution_image=self.execution_image).items():
+                            saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'espionage_diagnostic', False):
+                    from civ6_host.runtime import xp2_espionage
+                    closure['espionage_diagnostic'] = True
+                    for path, digest in xp2_espionage.source_dependencies(
+                            execution_image=self.execution_image).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'world_congress_diagnostic', False):
+                    from civ6_host.runtime.xp2_world_congress_source import source_dependencies
+                    closure['world_congress_diagnostic'] = True
+                    for path, digest in source_dependencies(execution_image=self.execution_image).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                review_requested = getattr(self, 'world_congress_review_diagnostic', False)
+                if (type(review_requested) is not bool
+                        or review_requested and getattr(self, 'world_congress_diagnostic', False) is not True):
+                    raise ValueError('Congress review closure requires its exact Boolean parent group')
+                if review_requested:
+                    from civ6_host.runtime.xp2_world_congress_review import source_dependencies
+                    closure['world_congress_review_diagnostic'] = True
+                    for path, digest in source_dependencies(execution_image=self.execution_image).items():
+                        saved_load_pin(closure['pins'], path, digest)
                 if self.public_display_diagnostic:
                     from civ6_host.runtime.player_display_toppanel import pin_display_closure
-                    pin_display_closure(closure)
+                    pin_display_closure(closure,self.public_display_source)
                 if closure.get('resume_checkpoint') is not None:
                     raise ValueError('XP2 cannot inherit a historical Base checkpoint')
                 from civ6_host.runtime.xp2_unit_orders_source import SOURCE, TRANSPORT_SOURCE, UI_SOURCE
@@ -544,9 +693,11 @@ class NativeNetworkSession(NativeActionSession):
                 if self.checkpoint_on_close or self.network_checkpoint_ref is not None:
                     from civ6_host.runtime.xp1_checkpoint_profile import source_dependencies
                     from civ6_host.runtime.network_checkpoint import configure_closure
-                    for path,expected in source_dependencies(core_sha256=selected.candidate.core_sha256).items():
+                    for path,expected in source_dependencies(core_sha256=selected.candidate.core_sha256,
+                                                            **execution_options).items():
                         saved_load_pin(closure['pins'],path,expected)
-                    configure_closure(closure, self.network_checkpoint_ref, validate_fields=True)
+                    configure_closure(closure, self.network_checkpoint_ref, validate_fields=True,
+                                      **execution_options)
                 return
             # The XP1 family is now exposed through its source-qualified v5
             # catalogue, not an inherited Base diagnostic flag. The view's
@@ -590,7 +741,9 @@ class NativeNetworkSession(NativeActionSession):
             return None
         from civ6_host.runtime.network_checkpoint import reference, manifest
         ref = reference(path)
-        manifest(ref, official_bundle=self.official_bundle)
+        image=getattr(self,'execution_image',None)
+        manifest(ref, official_bundle=self.official_bundle,
+                 **({'execution_image':image} if image is not None else {}))
         return ref
 
     def command(self, operation, player_id=None):

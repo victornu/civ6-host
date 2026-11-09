@@ -71,10 +71,9 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
 def expected_major_ids(owner):
     core_sha256=getattr(getattr(owner,'load_abi',None),'core_sha256',XP1_CORE_SHA256)
     if core_sha256==XP2_CORE_SHA256:
-        from .xp2_bundle_inputs import REFERENCE as xp2_reference,validate_candidate_inputs as validate_xp2
+        from .captured_saved_load import validate_candidate_inputs as validate_xp2
         validate_xp2(owner.inputs,owner.captured_bundle)
-        if (owner.captured_bundle.reference!=xp2_reference or owner.inputs is not owner.captured_bundle.inputs
-                or owner.loaded_readback!=owner.captured_bundle.expected_readback
+        if (owner.loaded_readback!=owner.captured_bundle.expected_readback
                 or type(owner.loaded_roster) is not bytes):
             raise ValueError('XP2 +160 requires its captured loaded readback')
         fields=tuple(map(int,owner.loaded_roster.decode('ascii').split('|')))

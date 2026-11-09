@@ -79,10 +79,12 @@ def _proof():
     return proof
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     proof = _proof()
-    return {str(resolve_path(resource_root() / SOURCE[0]).resolve()): SOURCE[1],
+    pins = {str(resolve_path(resource_root() / SOURCE[0]).resolve()): SOURCE[1],
             str(resolve_path(Path(proof['panel']['path'])).resolve()): proof['panel']['sha256']}
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 def _bind(saved):

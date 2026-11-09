@@ -70,10 +70,13 @@ def source_profile(backend=None, *, core_sha256=XP1_CORE_SHA256):
 
 
 def _candidate_spec(backend):
-    core = getattr(getattr(backend, 'profile', None), 'core_sha256', XP1_CORE_SHA256)
+    profile = getattr(backend, 'profile', None)
+    core = getattr(profile, 'source_core_sha256',
+                   getattr(profile, 'core_sha256', XP1_CORE_SHA256))
     if core == XP2_CORE_SHA256:
-        from .xp2_bundle_inputs import REFERENCE as reference, validate_candidate_inputs as validate
-        from .xp2_saved_init import DATABASE_PINS as databases, database_input_binding as binding
+        from .captured_saved_load import validate_candidate_inputs as validate
+        from .xp2_saved_init import input_identity, database_input_binding as binding
+        reference, databases = input_identity(backend.captured_bundle)
         from .xp2_load_options_capability_profile import SOURCE as source
         return core, reference, validate, databases, binding, 'xp2-lan', source, source
     if core == XP1_CORE_SHA256:
@@ -85,7 +88,8 @@ def _owner(backend, application, captured_bundle):
     from .native.native_application_configuration import NativeApplicationConfiguration
     core, reference, *_ = _candidate_spec(backend)
     if (getattr(backend, '_saved_load_candidate', False) is not True
-            or backend.profile.core_sha256 != core
+            or getattr(backend.profile, 'source_core_sha256',
+                       getattr(backend.profile, 'core_sha256', None)) != core
             or backend.captured_bundle is not captured_bundle
             or backend.inputs is not captured_bundle.inputs or captured_bundle.reference != reference
             or backend.owner is not application or type(application) is not NativeApplicationConfiguration

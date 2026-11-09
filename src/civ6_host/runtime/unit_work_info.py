@@ -11,7 +11,7 @@ _XP2_PANEL_SOURCE = (
 )
 
 
-def xp2_source_dependencies():
+def xp2_source_dependencies(*, execution_image=None):
     """Pin the Base panel and the two installed XP2 replacements that include it."""
     from pathlib import Path
     from .configuration_profiles import XP2_CORE_SHA256, _source
@@ -30,10 +30,12 @@ def xp2_source_dependencies():
     game_root = resolve_path(Path(base_panel['path'])).parents[4]
     files = (ui_path, 'DLC/Expansion2/UI/Replacements/UnitPanel_Expansion1.lua',
              'DLC/Expansion2/UI/Replacements/UnitPanel_Expansion2.lua')
-    return {
+    pins = {
         str(resolve_path(ROOT / _XP2_PANEL_SOURCE[0])): _XP2_PANEL_SOURCE[1],
         **{str(resolve_path(game_root / path)): selected['sources'][path] for path in files},
     }
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 LUA = r'''

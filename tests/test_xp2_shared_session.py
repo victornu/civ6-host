@@ -27,7 +27,10 @@ class XP2SharedSession(unittest.TestCase):
             prepare.reset_mock();native.reset_mock()
             admin=NetworkBackend(**args,administrative_information=True)
             from civ6_host.runtime.xp1_unit_attack_profile import precision_reference
-            self.assertEqual(admin._information_store._pins,{'combat':precision_reference(XP2_CORE_SHA256)[1]})
+            from civ6_host.runtime.xp2_end_turn_readback import SOURCE as turn_horizon_source
+            self.assertEqual(admin._information_store._pins,{
+                'combat':precision_reference(XP2_CORE_SHA256)[1],
+                'turn_horizon':turn_horizon_source[1]})
             self.assertIs(admin._information_store,native.return_value._information_store)
             prepare.assert_called_once();native.assert_called_once()
 
@@ -46,7 +49,8 @@ class XP2SharedSession(unittest.TestCase):
                 session=f.session(input_profile='xp2-lan',
                     official_bundle=dict(zip(('path','sha256'),selected.candidate.reference)))
                 response=session.reset()
-            f.consume.assert_called_once_with('xp2-lan',f.package)
+            f.consume.assert_called_once_with('xp2-lan',f.package,
+                official_bundle=selected.candidate.reference)
             f.sources.assert_called_once_with(f.captured,f.package,postload160=True,
                 publish_cache=True,close_loaded=True,observe_player=True,unit_commands=True,
                 core_sha256=XP2_CORE_SHA256)

@@ -140,7 +140,8 @@ def performance_profile():
 
 
 def performance_select(borrower, root, xp1_source):
-    core = getattr(getattr(getattr(borrower,'backend',None),'profile',None),'core_sha256',None)
+    profile = getattr(getattr(borrower,'backend',None),'profile',None)
+    core = getattr(profile,'source_core_sha256',getattr(profile,'core_sha256',None))
     if core == XP2_CORE_SHA256:
         return performance_profile()[1]
     from .saved_load_profiles import XP1_CORE_SHA256

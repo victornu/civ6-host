@@ -60,6 +60,9 @@ def pack_arguments(arguments):
 
 def argument_evidence(arguments):
     arguments = tuple(arguments)
+    from civ6_host.runtime.script_event_strings import has_strings, argument_evidence as string_evidence
+    if has_strings(arguments):
+        return string_evidence(arguments)
     from civ6_host.runtime.script_event_maps import has_maps
     from civ6_host.runtime.script_event_maps import argument_evidence as map_evidence
     if has_maps(arguments):

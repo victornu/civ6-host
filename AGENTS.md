@@ -1,5 +1,33 @@
 # Product extraction rules
 
+## Current user priority — 9 November 2026
+
+Read and write JSON metadata with explicit UTF-8. On Windows, never use
+`Path.read_text()` without `encoding="utf-8"` for these files: repeated default
+Windows-1252 reads expanded the delivery board from kilobytes to gigabytes.
+Check metadata size before loading it; investigate a delivery board above
+1 MiB instead of repeatedly parsing or rewriting it. Keep the existing monitor's
+8 MiB hard read bound. Store historical proofs by path/hash, preserve originals
+when repairing encoding, and do not embed whole proof bodies in the board.
+
+Complete the local gameplay API across the agreed engine, content and turn-mode
+scope before working on throughput or evaluating training quality. Keep the
+existing native evidence and measured bottlenecks. Choose the next delivery by
+missing observations, choices, effects or lifecycle coverage, independently of
+what the current learner consumes. This supersedes the earlier pilot-first
+permission below. The client and learner remain separate, with public and
+privileged data isolated.
+
+## Current chat goal — 6 November 2026
+
+The active goal permits a bounded learner pilot on a qualified local GS + BBG
+7.5.1 scope before the complete host is finished. The final host/content/self-play
+scope remains intact. Keep the API model-independent and preserve existing
+native qualifications; do not repeat an unchanged successful opening or Save
+probe when the next useful continuation can exercise the required behavior.
+The learner architecture stays unchanged during host integration, and no costly
+automatic training or new desktop authorization follows from this clarification.
+
 ## Host-only completion objective — 30 October 2026
 
 The user has now explicitly approved the revised method and autonomous work:
@@ -45,6 +73,12 @@ including configuration getters. A fixture that replaces a helper does not
 qualify the helper's engine ABI. List those seams and check their selected
 profiles before the next native run; do not infer full family coverage merely
 from the outer event functions carrying an engine keyword.
+
+An observed argument value is not an ABI range. When the complete builder,
+normalizer and consumer establish the full scalar domain, admit that domain
+with its existing owner/type guards rather than limiting the adapter to the
+sampled value. Preserve the original evidence and record a scoped supplement
+for such an admission change. Never infer a wider domain from samples alone.
 
 For expansion facade queries, the retained EXE callsite is the authority for
 method slot, argument layout and consumed return width. A matching DLL hash,

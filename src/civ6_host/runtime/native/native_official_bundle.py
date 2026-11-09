@@ -47,16 +47,32 @@ def normalize_reference(reference):
     require(0 < _resolve_resource_path(path).stat().st_size <= 4 * 1024 ** 2, 'Official bundle manifest exceeds its byte bound')
     return (path.relative_to(ROOT).as_posix(), reference['sha256'])
 
-def _file(row, dependencies, *, workspace=True, maximum=128 * 1024 ** 2):
+def _file(row, dependencies, *, workspace=True, maximum=128 * 1024 ** 2, prefix_bytes=None):
+    """Authenticate every byte, optionally retaining only the requested header."""
     require(type(row) is dict and type(row.get('path')) is str and (type(row.get('bytes')) is int) and (0 < row['bytes'] <= maximum) and (type(row.get('sha256')) is str) and re.fullmatch('[0-9a-f]{64}', row['sha256']), 'Malformed or unbounded bundle file')
     path = _resolve_resource_path(ROOT / row['path']).resolve()
     require(not workspace or path.is_relative_to(ROOT / 'work'), 'Bundle file escaped private work artifacts')
-    require(_resolve_resource_path(path).is_file() and _resolve_resource_path(path).stat().st_size == row['bytes'], 'Bundle file size differs')
-    raw = _resolve_resource_path(path).read_bytes()
-    require(len(raw) == row['bytes'], 'Bundle file size changed during read')
-    require(sha(raw) == row['sha256'], 'Bundle file hash differs: ' + str(path))
+    source = _resolve_resource_path(path)
+    require(source.is_file() and source.stat().st_size == row['bytes'], 'Bundle file size differs')
+    if prefix_bytes is None:
+        raw = source.read_bytes()
+        size, digest = len(raw), sha(raw)
+    else:
+        require(type(prefix_bytes) is int and 0 <= prefix_bytes <= min(row['bytes'], 256 * 1024),
+                'Invalid bundle file prefix bound')
+        with source.open('rb') as stream:
+            raw = stream.read(prefix_bytes)
+            checksum = hashlib.sha256(raw)
+            size = len(raw)
+            while chunk := stream.read(256 * 1024):
+                size += len(chunk)
+                require(size <= row['bytes'], 'Bundle file size changed during read')
+                checksum.update(chunk)
+        digest = checksum.hexdigest()
+    require(size == row['bytes'], 'Bundle file size changed during read')
+    require(digest == row['sha256'], 'Bundle file hash differs: ' + str(path))
     if isinstance(dependencies, _LocalizationDependencyPins):
-        dependencies._record_verified(str(path), row['sha256'], len(raw))
+        dependencies._record_verified(str(path), row['sha256'], size)
     else:
         dependencies[str(path)] = row['sha256']
     return raw
@@ -470,6 +486,9 @@ class PreparedBundle:
     dependencies: dict
     expected_readback: dict
     content_profile: dict
+    # Capture provenance stays in content_profile. This optional selection is
+    # the distinct image requested for this execution, never a rewritten capture.
+    execution_image: object | None = None
 
 def _prepared_bundle_validator_digests():
     """Hash validator source bytes exactly; no timestamp-based admission."""
@@ -483,6 +502,9 @@ def _prepared_bundle_fingerprint(bundle):
         inputs = bundle.inputs
         profile = inputs.profile
         payload = dict(reference=list(bundle.reference), input_profile=profile.mode_name, profile_identity=dict(config_sha=profile.config_sha, game_sha=profile.game_sha, save_sha=profile.save_sha), inputs=dict(configuration_sha=sha(inputs.configuration), configuration_bytes=len(inputs.configuration), game_sha=sha(inputs.game), game_bytes=len(inputs.game), map_values=inputs.map_values, official_bundle=inputs.official_bundle, checkpoint=inputs.checkpoint), initial_turn=bundle.initial_turn, engine_path=str(_resolve_resource_path(bundle.engine_path).resolve()), fixture=bundle.fixture, dependencies=bundle.dependencies, expected_readback=bundle.expected_readback, content_profile=bundle.content_profile)
+        if bundle.execution_image is not None:
+            from civ6_host.runtime.execution_images import identity
+            payload['execution_image'] = identity(bundle.execution_image)
         raw = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('ascii')
         return sha(raw)
     except (AttributeError, OSError, TypeError, ValueError) as exc:
@@ -543,11 +565,33 @@ def build_content_profile(*, process, databases, localization_bootstrap, resolve
     require(type(localization_bootstrap) is dict and type(localization_bootstrap.get('locale')) is str and (0 < len(localization_bootstrap['locale']) <= 128) and (type(localization_bootstrap.get('dictionary_flag')) is bool) and (type(localization_bootstrap.get('icu_data')) is dict), 'Invalid localization bootstrap in content profile')
     icu = localization_bootstrap['icu_data']
     require(type(icu.get('sha256')) is str and re.fullmatch('[0-9a-f]{64}', icu['sha256']), 'Invalid ICU identity in content profile')
+    from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
+    current_content_v2 = type(resolved_content) is dict and 'opaque_manager_headers' in resolved_content
+    require(current_content_v2 == (process['exe_sha256'] == CURRENT_EXE_SHA),
+            'Resolved-content profile version does not match the selected executable')
+    if current_content_v2:
+        require(set(resolved_content) == {
+            'manager_address', 'provider_address', 'vector_headers_hex',
+            'active_mod_handles', 'ordered_component_handles', 'opaque_manager_headers'},
+            'Current resolved-content semantic fields differ from the v2 contract')
+    vector_names = ('active_mod_handles', 'ordered_component_handles') if current_content_v2 else ('configured_mod_handles', 'active_mod_handles', 'ordered_component_handles')
     vectors = {}
-    for name in ('configured_mod_handles', 'active_mod_handles', 'ordered_component_handles'):
+    for name in vector_names:
         value = resolved_content.get(name) if type(resolved_content) is dict else None
         require(type(value) is list and len(value) <= 65536 and all((type(item) is int and 0 <= item < 2 ** 32 for item in value)), 'Invalid resolved-content vector in content profile')
         vectors[name] = list(value)
+    opaque_headers = None
+    if current_content_v2:
+        candidate = resolved_content.get('opaque_manager_headers')
+        require(type(candidate) is dict and set(candidate) == {'manager_plus_0x1d8'}
+                and type(candidate['manager_plus_0x1d8']) is str
+                and re.fullmatch('[0-9a-f]{48}', candidate['manager_plus_0x1d8']),
+                'Invalid opaque current resolved-content manager header')
+        headers = resolved_content.get('vector_headers_hex')
+        require(type(headers) is dict and set(headers) == set(vector_names)
+                and all((type(value) is str and re.fullmatch('[0-9a-f]{48}', value) for value in headers.values())),
+                'Invalid current resolved-content vector header set')
+        opaque_headers = dict(candidate)
     require(type(gameplay_selection) is dict and type(gameplay_selection.get('selected_paths')) is list and (type(active_state) is dict) and (type(script_manifest) is dict), 'Missing selected/active gameplay source evidence')
     selected_paths = gameplay_selection['selected_paths']
     active_count = active_state.get('active_count')
@@ -558,7 +602,11 @@ def build_content_profile(*, process, databases, localization_bootstrap, resolve
     require(type(records) is list and len(records) <= 4096 and (type(files) is dict) and (len(files) <= 4096), 'Invalid selected gameplay source manifest')
     vectors_empty = all((not value for value in vectors.values()))
     scripts_empty = not selected_paths and selected_active_empty is True and (active_count == 0) and (not records) and (not files)
-    return dict(schema='civ6rl.official_content_profile.v1', engine=dict(executable_sha256=process['exe_sha256'], gamecore_sha256=process['gamecore_module']['sha256']), final_databases=database_profile, localization_bootstrap=dict(locale=localization_bootstrap['locale'], dictionary_flag=localization_bootstrap['dictionary_flag'], icu_sha256=icu['sha256']), resolved_content_vectors=vectors, gameplay_scripts=dict(selected_path_count=len(selected_paths), active_count=active_count, selected_and_active_empty=selected_active_empty, source_records=len(records), source_files=len(files)), cross_capture_equivalence_supported=bool(vectors_empty and scripts_empty), limitations=['Content identity comparison only; no game-rule or whole-game compatibility claim.', 'Nonempty resolved component handles are not persistent IDs and cannot establish cross-capture equivalence.', 'Nonempty gameplay scripts remain unsupported.'])
+    result = dict(schema='civ6rl.official_content_profile.v2' if current_content_v2 else 'civ6rl.official_content_profile.v1', engine=dict(executable_sha256=process['exe_sha256'], gamecore_sha256=process['gamecore_module']['sha256']), final_databases=database_profile, localization_bootstrap=dict(locale=localization_bootstrap['locale'], dictionary_flag=localization_bootstrap['dictionary_flag'], icu_sha256=icu['sha256']), resolved_content_vectors=vectors, gameplay_scripts=dict(selected_path_count=len(selected_paths), active_count=active_count, selected_and_active_empty=selected_active_empty, source_records=len(records), source_files=len(files)), cross_capture_equivalence_supported=bool(vectors_empty and scripts_empty and not current_content_v2), limitations=['Content identity comparison only; no game-rule or whole-game compatibility claim.', 'Nonempty resolved component handles are not persistent IDs and cannot establish cross-capture equivalence.', 'Nonempty gameplay scripts remain unsupported.'])
+    if current_content_v2:
+        result['opaque_manager_headers'] = opaque_headers
+        result['limitations'].append('Opaque current manager headers are retained as raw bytes and are not persistent content identifiers.')
+    return result
 
 def read_bundle(reference, *, input_profile):
     if input_profile not in ('xp1-lan', 'xp2-lan'):
@@ -581,6 +629,7 @@ def read_bundle(reference, *, input_profile):
     from civ6_host.runtime.workers.capture_phase1_bundle994 import _join_native_report
     from civ6_host.runtime.workers.capture_phase1_bundle994 import _content_semantics
     from civ6_host.runtime.workers.capture_phase1_bundle994 import _selection_semantics
+    from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
     from civ6_host.runtime.native.native_gameplay_empty import stable_capture_identity
     from civ6_host.runtime.native.native_gameplay_empty import SCHEMA as EMPTY_SCHEMA
     import time
@@ -659,7 +708,10 @@ def read_bundle(reference, *, input_profile):
     runtime = []
     for name in ('runtime-selections-before.json', 'runtime-selections-after.json'):
         r = artifact(name)
-        _join_native_report(r['content929'], process, 'civ6rl.official_resolved_content929.capture.v1')
+        content_capture_schema = ('civ6rl.official_resolved_content929.capture.v2'
+                                  if process['exe_sha256'] == CURRENT_EXE_SHA
+                                  else 'civ6rl.official_resolved_content929.capture.v1')
+        _join_native_report(r['content929'], process, content_capture_schema)
         content = _content_semantics(r['content929']['snapshot'], process)
         selection = _selection_semantics(r['gameplay_selection994'], process, content)
         if input_profile == 'xp1-lan':

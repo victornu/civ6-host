@@ -9,6 +9,7 @@ import json
 import os
 import sys
 from time import perf_counter
+from contextlib import nullcontext
 
 
 def _save_before_close(owner, protocol, closure, path, request, expansion, emit):
@@ -37,6 +38,33 @@ def _open_xp1(closure, path, emit, win):
     from civ6_host.runtime.provenance import verify_installation
     from civ6_host.runtime.captured_saved_load import select_load_closure
     selected=select_load_closure(closure)
+    from civ6_host.runtime.xp2_world_war import source_pin
+    war_source_sha256 = source_pin(closure.get('war_source_sha256'), selected.family)
+    governors_diagnostic = closure.get('governors_diagnostic', False)
+    initial_diplomacy = closure.get('diplomacy_overview_diagnostic', False)
+    trade_diagnostic = closure.get('trade_diagnostic', False)
+    espionage_diagnostic = closure.get('espionage_diagnostic', False)
+    world_congress_diagnostic = closure.get('world_congress_diagnostic', False)
+    world_congress_review_diagnostic = closure.get('world_congress_review_diagnostic', False)
+    if (type(initial_diplomacy) is not bool or initial_diplomacy and (
+            selected.family != 'xp2-lan' or governors_diagnostic is not True
+            or war_source_sha256 is None or 'execution_image' not in closure)):
+        raise ValueError('Initial diplomacy requires the exact current XP2 v33 closure')
+    if type(trade_diagnostic) is not bool or trade_diagnostic and not initial_diplomacy:
+        raise ValueError('Trade requires the complete current XP2 v33 closure')
+    if type(espionage_diagnostic) is not bool or espionage_diagnostic and not trade_diagnostic:
+        raise ValueError('Espionage requires the complete current XP2 trade closure')
+    if type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not espionage_diagnostic:
+        raise ValueError('World Congress requires the complete current XP2 espionage closure')
+    if (type(world_congress_review_diagnostic) is not bool
+            or world_congress_review_diagnostic and world_congress_diagnostic is not True):
+        raise ValueError('Congress review requires its exact Boolean Congress closure')
+    if type(governors_diagnostic) is not bool:
+        raise ValueError('Exact governors diagnostic option required')
+    if governors_diagnostic:
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        if selected.family != 'xp2-lan' or selected.core_sha256 != XP2_CORE_SHA256:
+            raise ValueError('Governors diagnostic requires the XP2 LAN core')
     raw = _Path(path).read_bytes()
     if digest(raw) != os.environ.get(SAVED_LOAD_CLOSURE_ENV):
         raise ValueError('XP1 private session closure changed')
@@ -59,8 +87,39 @@ def _open_xp1(closure, path, emit, win):
     from civ6_host.runtime.expansion_city_controls import requested
     city_flags=requested(closure)
     verify_installation()
+    execution_options = {}
+    if 'execution_image' in closure:
+        from civ6_host.runtime.execution_images import from_identity
+        execution_options['execution_image'] = from_identity(closure['execution_image'])
+    if trade_diagnostic:
+        from civ6_host.runtime import xp2_bbg_trade_feedback, xp2_trade
+        from civ6_host.runtime.resource_resolution import resolve_path
+        from civ6_host.runtime.captured_session_profile import require_bbg_capture
+        require_bbg_capture(selected.reference, **execution_options)
+        for module in (xp2_trade, xp2_bbg_trade_feedback):
+            for source, expected in module.source_dependencies(**execution_options).items():
+                if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                    raise ValueError('Trade source is outside the worker closure')
+    if espionage_diagnostic:
+        from civ6_host.runtime import xp2_espionage
+        from civ6_host.runtime.resource_resolution import resolve_path
+        for source, expected in xp2_espionage.source_dependencies(**execution_options).items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Espionage source is outside the worker closure')
+    if world_congress_diagnostic:
+        from civ6_host.runtime.xp2_world_congress_source import source_dependencies
+        from civ6_host.runtime.resource_resolution import resolve_path
+        for source, expected in source_dependencies(**execution_options).items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Congress source is outside the worker closure')
+    if world_congress_review_diagnostic:
+        from civ6_host.runtime.xp2_world_congress_review import source_dependencies
+        from civ6_host.runtime.resource_resolution import resolve_path
+        for source, expected in source_dependencies(**execution_options).items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Congress review source is outside the worker closure')
     if _Path(sys.executable).resolve() != saved_load_build_pins({}, ui=True,
-            core_sha256=selected.core_sha256):
+            core_sha256=selected.core_sha256, official_bundle=selected.reference, **execution_options):
         raise ValueError('XP1 session requires its exact native UI executable')
     from civ6_host.runtime.xp1_saved_load_owner import SavedLoadOwner
     from civ6_host.runtime.xp1_session_admission import bind
@@ -68,6 +127,13 @@ def _open_xp1(closure, path, emit, win):
          elapsed_seconds=perf_counter() - started, timing_scope='non-overlapping stage')
     started = perf_counter()
     saved = SavedLoadOwner.open(closure, emit, win)
+    saved.governors_diagnostic = governors_diagnostic
+    saved.diplomacy_overview_diagnostic = initial_diplomacy
+    saved.trade_diagnostic = trade_diagnostic
+    saved.espionage_diagnostic = espionage_diagnostic
+    saved.world_congress_diagnostic = world_congress_diagnostic
+    saved.world_congress_review_diagnostic = world_congress_review_diagnostic
+    saved.war_source_sha256 = war_source_sha256
     run = _Path(path).resolve().parent
     emit('xp1_saved_raw_load_observed', receipt=_write_once(run/'raw-load-result.json', saved.raw_result))
     emit('native_reset_timing', phase='saved_raw_load_inclusive_seconds',
@@ -92,6 +158,8 @@ def _open_xp1(closure, path, emit, win):
     from civ6_host.runtime.expansion_city_controls import enable
     if city_flags[0]:enable(saved,closure)
     bind(saved)
+    if trade_diagnostic:
+        xp2_bbg_trade_feedback.bind(saved)
     compare_initial = None
     if saved.inputs.checkpoint is not None:
         from civ6_host.runtime.network_checkpoint import prepare_owner
@@ -101,11 +169,65 @@ def _open_xp1(closure, path, emit, win):
     return saved, compare_initial
 
 
+def _emit_native_load_profile(owner, protocol, player_id, emit):
+    """Emit a captured Load profile only after the actual episode exists."""
+    captured = getattr(owner.backend, '_command_load_profile', None)
+    if captured is None:
+        return False
+    failed = False
+    try:
+        expected = protocol.identity
+        from civ6_host.runtime.xp1_continuation import SavedContinuation
+        if (owner.continuation is None
+                or type(owner.continuation) is not SavedContinuation
+                or owner.continuation.identity is not expected
+                or type(captured) is not dict
+                or set(captured) != {'profiler', 'wall_seconds', 'callback_failed', 'core_identity'}
+                or captured['callback_failed'] is not False):
+            raise RuntimeError('Captured native Load profile is not bound to a successful episode')
+        from civ6_host.runtime.command_profiling import CommandProfiler
+        profiler = CommandProfiler(enabled=True, emit=emit, identity=expected)
+        profiler.emit_captured(captured['profiler'], phase='load', operation='reset',
+            sequence=0, player_id=player_id, wall_seconds=captured['wall_seconds'],
+            core_identity=captured['core_identity'])
+        return True
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        try:
+            delattr(owner.backend, '_command_load_profile')
+        except BaseException:
+            if not failed:
+                raise
+
+
 def _execute_xp1(saved, action, player_id, sequence, path):
     """Requery the native family immediately before the retained command call."""
-    from civ6_host.runtime.xp1_session_view import read
+    context = getattr(saved, '_xp2_diplomacy', None)
+    if context is not None:
+        if action.get('kind') != 'diplomacy_response':
+            return dict(status='refused', reason='xp2_diplomacy_response_pending',
+                        requested_action=action)
+        from civ6_host.runtime.xp2_diplomacy import respond
+        effect = respond(saved, action, saved.continuation.observation)
+        if (type(effect) is not dict or effect.get('requested_action') != action
+                or effect.get('status') not in ('completed', 'refused')):
+            raise RuntimeError('Saved diplomacy response returned another action or status')
+        reason = effect.get('reason')
+        if effect['status'] == 'refused' and reason is None:
+            reason = effect.get('refusal_code')
+        if reason is not None and type(reason) is not str:
+            raise RuntimeError('Saved diplomacy response returned an invalid refusal reason')
+        return dict(status=effect['status'], reason=reason, requested_action=action)
+    if action.get('kind') == 'diplomacy_response':
+        return dict(status='refused', reason='xp2_diplomacy_context_not_retained',
+                    requested_action=action)
+    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    from civ6_host.runtime.xp1_session_view import read, read_turn_preflight
     from civ6_host.runtime.xp1_session_inputs import _write_once
     from copy import deepcopy
+    turn_action = action['kind'] in ('end_turn', 'force_end_turn', 'unready_turn')
     placement_action = action['kind'] in ('production_placement','production_resume')
     production_action = action['kind'] == 'production' or placement_action
     prior_production = (deepcopy(saved.continuation.explicit_production_snapshot)
@@ -122,15 +244,46 @@ def _execute_xp1(saved, action, player_id, sequence, path):
                    deepcopy(saved.continuation.explicit_city_shot_defenses))
                   if shot_action else None)
     attack_action = action['kind']=='unit_attack'
-    from civ6_host.contracts.capability_unit_attacks import project_cities
-    shape=saved.continuation.observation
-    prior_combat = ((deepcopy(saved.continuation.explicit_combat_units),
-                     project_cities(saved.continuation.explicit_combat_cities,shape['width'],shape['height']))
-                    if attack_action else None)
+    if attack_action:
+        from civ6_host.contracts.capability_unit_attacks import project_cities
+        shape = saved.continuation.observation
+        prior_combat = (deepcopy(saved.continuation.explicit_combat_units),
+                        project_cities(saved.continuation.explicit_combat_cities, shape['width'], shape['height']))
     from civ6_host.contracts.capability_world_input import WORLD_KINDS
-    prior_world=(deepcopy(saved.continuation.explicit_world_input) if action['kind'] in WORLD_KINDS else None)
-    _, observed, decisions = read(saved, player_id, sequence)
-    if action not in [row['action'] for row in decisions['candidates']]:
+    world_action = action['kind'] in WORLD_KINDS or action['kind'] == 'world_war_response'
+    prior_world=(deepcopy(saved.continuation.explicit_world_input) if world_action else None)
+    if (turn_action and saved.backend.load_abi.core_sha256 == XP2_CORE_SHA256
+            and saved.continuation.world_input_prompts.get(player_id) is None):
+        observed, available = read_turn_preflight(saved, player_id, action['kind'])
+        available = available and action == {'kind': action['kind']}
+    else:
+        _, observed, decisions = read(saved, player_id, sequence)
+        from civ6_host.contracts.world_congress import ACTION_FIELDS as CONGRESS_ACTION_FIELDS
+        if action['kind'] in CONGRESS_ACTION_FIELDS:
+            from civ6_host.runtime.xp2_world_congress import _admit
+            try:
+                _admit(decisions.get('world_congress'), action)
+                available = True
+            except (ValueError, TypeError):
+                available = False
+        elif action['kind'] == 'policies':
+            from civ6_host.contracts.policies import choose, PolicyAssignmentUnavailable
+            from civ6_host.contracts import network_turn as policy_contract
+            policy_catalogue = decisions.get('policies')
+            available = False
+            if policy_catalogue is not None and policy_catalogue['reason'] == 'available':
+                try:
+                    chosen = choose(policy_catalogue['slots'],
+                        [value & 0xffffffff for _, value in action['candidate']['assignments']],
+                        player_id, observed['turn'], allow_relocation=(decisions['schema'] in
+                            policy_contract.POLICY_RELOCATION_CAPABILITY_SCHEMAS),
+                        allow_unchanged=(decisions['schema'] in policy_contract.POLICY_RECONFIRM_CAPABILITY_SCHEMAS))
+                    available = chosen == action['candidate']
+                except PolicyAssignmentUnavailable:
+                    pass
+        else:
+            available = any(row['action'] == action for row in decisions['candidates'])
+    if not available:
         return dict(status='refused', reason='native_action_no_longer_available',
                     requested_action=action)
     if (production_action
@@ -138,7 +291,7 @@ def _execute_xp1(saved, action, player_id, sequence, path):
         return dict(status='refused', reason='native_production_state_changed', requested_action=action)
     if placement_action and prior_placements != saved.continuation.explicit_placements:
         return dict(status='refused',reason='native_placement_state_changed',requested_action=action)
-    if action['kind'] in WORLD_KINDS and prior_world!=saved.continuation.explicit_world_input:
+    if world_action and prior_world!=saved.continuation.explicit_world_input:
         return dict(status='refused',reason='native_world_input_state_changed',requested_action=action)
     if queue_action and prior_queues != saved.continuation.explicit_production_queues:
         return dict(status='refused',reason='native_production_queue_state_changed',requested_action=action)
@@ -159,15 +312,79 @@ def _execute_xp1(saved, action, player_id, sequence, path):
     result = saved.execute(action)
     if result['action'] != action:
         raise RuntimeError('XP1 native command receipt identifies another choice')
+    retained = _retain_xp2_diplomacy_if_ready(saved)
+    if action['kind'] == 'world_war_response' and result['effect'].get('status') == 'completed':
+        if result['effect'].get('pending_statement_retained') is not True and retained:
+            result['effect']['pending_statement_retained'] = True
     saved.emit('xp1_saved_unit_commands_returned',
         protocol_sequence=sequence+1,
         receipt=_write_once(_Path(path).resolve().parent/
             ('command-result-' + str(sequence+1) + '.json'), result))
-    if action['kind'] in ('end_turn','force_end_turn','unready_turn'):
+    if getattr(saved, 'world_congress_diagnostic', False):
+        effect = result.get('effect')
+        partial = (type(effect) is dict and type(effect.get('receipt')) is dict
+                   and effect['receipt'].get('partial_submission') is True)
+        if partial:
+            raise RuntimeError('Congress partial native journal retained; further model decisions refused')
+        automatic = saved.advance_congress_empty(sequence + 1)
+        if automatic is not None:
+            saved.emit('xp2_congress_automatic_phase_returned', protocol_sequence=sequence+1,
+                receipt=_write_once(_Path(path).resolve().parent/
+                    ('congress-automatic-result-'+str(sequence+1)+'.json'), automatic))
+    from civ6_host.contracts.world_congress import ACTION_FIELDS as CONGRESS_ACTION_FIELDS
+    if action['kind'] in CONGRESS_ACTION_FIELDS:
+        effect = result['effect']
+        receipt = effect.get('receipt') if type(effect) is dict else None
+        if (type(receipt) is not dict or receipt.get('action') != action
+                or effect.get('status') not in ('completed', 'refused', 'pending')):
+            raise RuntimeError('Congress confirmation returned a foreign result')
+        if effect['status'] == 'completed' and (action['kind'] != 'congress_open'
+                or receipt.get('local_presentation_completed') is not True
+                or receipt.get('simulation_request_issued') is not False):
+            raise RuntimeError('Congress native application has no qualified completion readback')
+        if effect['status'] == 'pending' and receipt.get('native_archive_delivered') is not True:
+            raise RuntimeError('Congress pending result lacks its native journal')
+        return dict(status=effect['status'], reason=effect.get('refusal_code'), requested_action=action)
+    if turn_action:
         if result['effect']['requested_action']!=action:
             raise RuntimeError('XP1 turn effect identifies another request')
         return result['effect']
-    if action['kind'] in WORLD_KINDS:
+    if action['kind'] == 'spy_completion_dismiss':
+        effect = result['effect']
+        receipt = effect.get('receipt') if type(effect) is dict else None
+        if (type(receipt) is not dict or effect.get('status') != 'completed'
+                or receipt.get('action') != action
+                or receipt.get('local_presentation_completed') is not True
+                or receipt.get('simulation_request_issued') is not False
+                or receipt.get('native_archive_delivered') is not False):
+            raise RuntimeError('Spy completion dismissal lacks its exact local presentation receipt')
+        return dict(status='completed', reason=None, requested_action=action)
+    from civ6_host.contracts.espionage import ACTION_FIELDS as ESPIONAGE_ACTION_FIELDS
+    if action['kind'] in ESPIONAGE_ACTION_FIELDS or action['kind'] == 'spy_renew':
+        effect = result['effect']
+        statuses = (('completed', 'refused', 'pending') if action['kind'] == 'spy_renew'
+                    else ('completed', 'refused', 'submitted', 'pending'))
+        if (type(effect) is not dict
+                or effect.get('status') not in statuses
+                or type(effect.get('receipt')) is not dict
+                or effect['receipt'].get('action') != action):
+            raise RuntimeError('XP2 espionage did not return the requested native receipt')
+        if effect['status'] != 'refused' and effect['receipt'].get('native_archive_delivered') is not True:
+            raise RuntimeError('XP2 espionage accepted a choice without native archive delivery')
+        if effect['status'] == 'completed' and effect['receipt'].get('native_effect_readback') is not True:
+            raise RuntimeError('XP2 espionage completion lacks native effect readback')
+        reason = effect.get('refusal_code')
+        if reason is not None and type(reason) is not str:
+            raise RuntimeError('XP2 espionage returned an invalid refusal reason')
+        return dict(status=effect['status'], reason=reason, requested_action=action)
+    from civ6_host.runtime.xp1_continuation import TRADE_KINDS
+    if action['kind'] in TRADE_KINDS:
+        effect = result['effect']
+        if (effect['status'] != 'completed' or effect['receipt']['action'] != action
+                or effect['receipt']['native_effect_readback'] is not True):
+            raise RuntimeError('XP2 trade did not return the requested native effect')
+        return dict(status='completed', reason=None, requested_action=action)
+    if world_action or action['kind'] == 'diplomacy_initiate':
         effect=result['effect']
         if effect['status'] not in ('completed','refused'):
             raise RuntimeError('XP1 world-input result has an unqualified status')
@@ -185,6 +402,23 @@ def _execute_xp1(saved, action, player_id, sequence, path):
     return dict(status='completed', reason=None, requested_action=action)
 
 
+def _retain_xp2_diplomacy_if_ready(saved):
+    """Join a delivered type-132 statement only after the owner is quiescent."""
+    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    if saved.backend.load_abi.core_sha256 != XP2_CORE_SHA256:
+        return False
+    deferred = saved.prefix.deferred_events
+    ledger = getattr(deferred, 'pending_diplomacy_statements', None)
+    if type(ledger) is not list or not ledger:
+        return False
+    if getattr(deferred, 'diplomacy_statement_receiver', None) is not deferred:
+        raise RuntimeError('Delivered XP2 diplomacy statement has no exact retained receiver')
+    if saved.backend.busy or saved.backend.stage != 'xp1-continuation-ready':
+        raise RuntimeError('XP2 diplomacy cannot be retained during an active transition')
+    from civ6_host.runtime.xp2_diplomacy import retain
+    return retain(saved)
+
+
 def _advance_xp1(saved,sequence,path):
     from civ6_host.runtime.xp1_session_inputs import _write_once
     saved.emit('before_xp1_saved_turn_update',protocol_sequence=sequence+1)
@@ -193,6 +427,30 @@ def _advance_xp1(saved,sequence,path):
         raise RuntimeError('XP1 poll did not return the explicit native update receipt')
     saved.emit('xp1_saved_turn_update_returned',protocol_sequence=sequence+1,
         receipt=_write_once(_Path(path).resolve().parent/('update-result-'+str(sequence+1)+'.json'),result))
+
+
+def _poll_xp1(saved, sequence, path):
+    """Keep the shared LAN poll from advancing through a retained modal."""
+    if getattr(saved, '_xp2_diplomacy', None) is not None:
+        return False
+    _advance_xp1(saved, sequence, path)
+    if getattr(saved, 'world_congress_diagnostic', False):
+        automatic = saved.advance_congress_empty(sequence + 1)
+        if automatic is not None:
+            from civ6_host.runtime.xp1_session_inputs import _write_once
+            saved.emit('xp2_congress_automatic_phase_returned', protocol_sequence=sequence+1,
+                receipt=_write_once(_Path(path).resolve().parent/
+                    ('congress-automatic-result-'+str(sequence+1)+'.json'), automatic))
+    return True
+
+
+def _read_xp1_outcome(saved, player_id):
+    """Read a fresh outcome, allowing only the exact retained modal context."""
+    from civ6_host.runtime.xp1_session_result import read
+    context = getattr(saved, '_xp2_diplomacy', None)
+    if context is None:
+        return read(saved, player_id=player_id)
+    return read(saved, player_id=player_id, allow_diplomacy=True)
 
 
 def main(path):
@@ -230,10 +488,45 @@ def main(path):
                 or not 1048576 <= closure['stdout_limit_bytes'] <= stdout_limit_ceiling(budget)
                 or type(closure.get('rounds')) is not int
                 or not 1 <= closure['rounds'] <= NetworkProtocol.max_round_limit
-                or closure.get('privileged_critic_diagnostic', False) is not False
+                or type(closure.get('privileged_critic_diagnostic', False)) is not bool
+                or type(closure.get('foundation_legality_diagnostic', False)) is not bool
+                or type(closure.get('governors_diagnostic', False)) is not bool
+                or type(closure.get('diplomacy_overview_diagnostic', False)) is not bool
+                or type(closure.get('trade_diagnostic', False)) is not bool
+                or type(closure.get('espionage_diagnostic', False)) is not bool
+                or type(closure.get('world_congress_diagnostic', False)) is not bool
+                or type(closure.get('world_congress_review_diagnostic', False)) is not bool
+                or type(closure.get('command_profile_diagnostic', False)) is not bool
                 or type(closure.get('checkpoint_on_close', False)) is not bool
                 or closure.get('official_bundle') is None):
             raise ValueError('Unsupported bounded LAN closure')
+        if closure.get('command_profile_diagnostic', False) and (
+                closure['input_profile'] != 'xp2-lan' or 'execution_image' not in closure):
+            raise ValueError('Command profiling requires the explicit XP2 image')
+        foundation_legality = None
+        if closure.get('foundation_legality_diagnostic', False) or closure.get('governors_diagnostic', False):
+            from civ6_host.runtime.captured_session_profile import require_bbg_capture
+            from civ6_host.runtime.execution_images import from_identity
+            family_image = (from_identity(closure['execution_image']) if 'execution_image' in closure else None)
+            if closure['input_profile'] != 'xp2-lan':
+                raise ValueError('BBG family diagnostics require the XP2 input profile')
+            require_bbg_capture(closure['official_bundle'], execution_image=family_image)
+        if closure.get('foundation_legality_diagnostic', False):
+            from civ6_host.runtime.xp2_foundation_legality import emit_readback as foundation_legality
+        if closure.get('diplomacy_overview_diagnostic', False) and (
+                closure['input_profile'] != 'xp2-lan'
+                or closure.get('governors_diagnostic') is not True
+                or 'execution_image' not in closure
+                or closure.get('war_source_sha256') is None):
+            raise ValueError('Initial diplomacy cannot fall back to another session profile')
+        if closure.get('trade_diagnostic', False) and not closure.get('diplomacy_overview_diagnostic', False):
+            raise ValueError('Trade cannot fall back to another session profile')
+        if closure.get('world_congress_diagnostic', False) and not closure.get('espionage_diagnostic', False):
+            raise ValueError('Congress requires the complete espionage chain')
+        if closure.get('world_congress_review_diagnostic', False) and closure.get('world_congress_diagnostic') is not True:
+            raise ValueError('Congress review requires the explicit Congress chain')
+        if closure.get('espionage_diagnostic', False) and not closure.get('trade_diagnostic', False):
+            raise ValueError('Espionage cannot fall back to another session profile')
         if not xp1:
             from civ6_host.runtime.captured_saved_load import validate_closure_profile
             validate_closure_profile(closure)
@@ -257,7 +550,9 @@ def main(path):
             local_player = owner.network_reference['state']['player_id']
             protocol = NetworkProtocol(require_episode(owner.prefix), closure['nonce'],
                 round_limit=closure['rounds'], initial_turn=closure['initial_turn'],
-                core_sha256=owner.backend.load_abi.core_sha256)
+                core_sha256=owner.backend.load_abi.core_sha256,
+                war_source_sha256=closure.get('war_source_sha256'))
+            _emit_native_load_profile(owner, protocol, local_player, emit)
         else:
             owner = open_official_backend(closure, emit, win)
             initial = observe_saved_player(owner)
@@ -279,13 +574,19 @@ def main(path):
                 raise ValueError('City management requires the complete focus group')
 
         if 'public_display_source' in closure:
-            display_formatter = OwnedNativeTopPanelFormatter(owner, protocol)
+            display_formatter = OwnedNativeTopPanelFormatter(owner, protocol,
+                source_sha256=closure['public_display_source'])
+
+        critic = None
+        if closure.get('privileged_critic_diagnostic', False):
+            from civ6_host.runtime.xp2_bbg_critic import CriticReadback
+            critic = CriticReadback(closure, path)
 
         def reply(operation, player_id, sequence, command, request=None,
                   command_seconds=None, trace_before=None):
             started = perf_counter()
             if xp1:
-                native = xp1_session_result.read(owner, player_id=player_id)
+                native = _read_xp1_outcome(owner, player_id)
                 rounds = native['current_game_turn'] - protocol.initial_turn
             else:
                 session = network_owner.state(owner)
@@ -336,6 +637,10 @@ def main(path):
             if display_formatter is not None and observation is not None and not result['terminated']:
                 from civ6_host.runtime.player_display_toppanel import emit_display_readback
                 emit_display_readback(display_formatter, owner, response, request, emit)
+            if critic is not None and not (result['terminated'] or result['truncated']):
+                critic.emit_ready(owner, response, emit)
+            if foundation_legality is not None and not (result['terminated'] or result['truncated']):
+                foundation_legality(owner, response, emit)
             if operation == 'close' and xp1:
                 from civ6_host.runtime.xp1_session_inputs import _write_once
                 emit('before_xp1_saved_loaded_close', completed_phase='unit_commands',
@@ -363,8 +668,30 @@ def main(path):
                      worker_trace_emit_included_in_stage_times=True)
             print(payload, flush=True)
 
+        profiler = None
+        if closure.get('command_profile_diagnostic', False):
+            from civ6_host.runtime.command_profiling import CommandProfiler
+            profiler = CommandProfiler(enabled=True, emit=emit,
+                identity=dict(episode_id=protocol.identity.episode_id,
+                              game_generation=protocol.identity.game_generation))
         none = dict(status='none', reason=None, requested_action=None)
         reply('reset', local_player, 0, none)
+        # Private administrative spy fixture hook v2.
+        # Restore/compare the untouched checkpoint first. No protocol action is
+        # added: the next ordinary observe receives the new native revision.
+        if 'private_spy_fixture' in closure:
+            import hashlib as fixture_hashlib
+            from civ6_host.runtime import private_spy_fixture
+            fixture_spec = closure['private_spy_fixture']
+            fixture_path = _Path(private_spy_fixture.__file__).resolve()
+            fixture_sha = fixture_hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+            if (not xp1 or closure['input_profile'] != 'xp2-lan'
+                    or fixture_spec['module'] != private_spy_fixture.__name__
+                    or fixture_path != _Path(fixture_spec['module_file']).resolve()
+                    or fixture_sha != fixture_spec['module_sha256']
+                    or closure['pins'].get(str(fixture_path)) != fixture_sha):
+                raise ValueError('Unpinned private spy fixture')
+            private_spy_fixture.install_fixture(owner, closure, emit)
         compare_initial = None
         for _ in range(protocol.max_commands):
             line = sys.stdin.buffer.readline(4097)
@@ -376,25 +703,30 @@ def main(path):
             command = none
             trace_before = trace_records, trace_seconds
             started = perf_counter()
-            if operation == 'act':
-                if xp1:
-                    command = _execute_xp1(owner, protocol.selected(request), pid,
-                                          protocol.sequence, path)
-                else:
-                    command = network_owner.execute(owner, protocol.selected(request),
-                        player_id=pid, sequence=protocol.sequence,
-                        rounds=protocol.rounds, round_limit=protocol.limit)
-            elif operation == 'poll':
-                if xp1:
-                    _advance_xp1(owner,protocol.sequence,path)
-                else:
-                    from civ6_host.runtime.network_turns import advance
-                    advance(owner)
-            elif operation == 'close' and closure.get('checkpoint_on_close', False):
-                _save_before_close(owner, protocol, closure, path, request, xp1, emit)
-            reply(operation, pid, request['sequence'], command, request,
-                  command_seconds=perf_counter() - started if operation in ('act', 'poll') else None,
-                  trace_before=trace_before)
+            with (profiler.measure('command', operation, request['sequence'], pid)
+                  if profiler is not None else nullcontext()):
+                if operation == 'act':
+                    if xp1:
+                        command = _execute_xp1(owner, protocol.selected(request), pid,
+                                              protocol.sequence, path)
+                    else:
+                        command = network_owner.execute(owner, protocol.selected(request),
+                            player_id=pid, sequence=protocol.sequence,
+                            rounds=protocol.rounds, round_limit=protocol.limit)
+                elif operation == 'poll':
+                    if xp1:
+                        _poll_xp1(owner,protocol.sequence,path)
+                    else:
+                        from civ6_host.runtime.network_turns import advance
+                        advance(owner)
+                elif operation == 'close' and closure.get('checkpoint_on_close', False):
+                    _save_before_close(owner, protocol, closure, path, request, xp1, emit)
+            command_seconds = perf_counter() - started
+            with (profiler.measure('response', operation, request['sequence'], pid)
+                  if profiler is not None else nullcontext()):
+                reply(operation, pid, request['sequence'], command, request,
+                      command_seconds=command_seconds if operation in ('act', 'poll') else None,
+                      trace_before=trace_before)
             if operation == 'close':
                 emit('official_session_controlled_stop', normal_destroy_called=xp1,
                      strategic_training_ready=False)

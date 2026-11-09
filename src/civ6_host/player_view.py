@@ -183,6 +183,17 @@ def _validate_map(value, observation: dict, player_id: int, turn: int,
              "player map visible rows differ from the observation")
 
 
+def validate_player_map(value, observation):
+    """Validate a public revealed map without loading the native backend."""
+    _require(type(observation) is dict, 'public map needs its visible observation')
+    pid,turn=observation.get('player_id'),observation.get('turn')
+    _int(pid,'player id',0,MAX_PLAYERS-1)
+    _int(turn,'turn',0,(1<<63)-1)
+    width,height=_validate_observation(observation,pid,turn)
+    _validate_map(value,observation,pid,turn,width,height)
+    return value
+
+
 def validate_player_view(value, *, episode_id: str, game_generation: str,
                          sequence: int, player_id: int, turn: int) -> dict:
     """Validate and detach a player view against the current hotseat boundary."""

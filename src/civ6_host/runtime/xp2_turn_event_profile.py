@@ -73,8 +73,10 @@ def source():
     return p
 
 
-def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP2_CORE_SHA256, execution_image=None):
     if core_sha256 == XP1_CORE_SHA256:
+        if execution_image is not None:
+            raise ValueError('XP1 climate source does not accept an XP2 execution image')
         return {}
     if core_sha256 != XP2_CORE_SHA256:
         raise ValueError('Unqualified climate producer engine')
@@ -100,6 +102,9 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
             if path in pins and pins[path] != digest:
                 raise ValueError('XP2 climate source dependency conflict')
             pins[path] = digest
+    if execution_image is not None:
+        from .execution_images import runtime_source_pins
+        pins = runtime_source_pins(pins, execution_image=execution_image)
     verify_pinned_files(pins)
     return pins
 
@@ -129,10 +134,10 @@ def scope_source():
     return p
 
 
-def event_profile(*, core_sha256):
+def event_profile(*, core_sha256, execution_image=None):
     if core_sha256 != XP2_CORE_SHA256:
         raise ValueError('XP2 climate family requires its exact engine')
-    source_dependencies()
+    source_dependencies(execution_image=execution_image)
     from .a0_family_source import A0FamilyProfile
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     from . import xp2_turn_event_records as records

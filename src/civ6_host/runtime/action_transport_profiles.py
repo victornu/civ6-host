@@ -45,11 +45,12 @@ def xp1_source():
     for row in p['references'].values():_source((row['path'],row['sha256']))
     return p
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_action_transport_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown action transport source engine')
+    if execution_image is not None:raise ValueError('XP1 action transport does not accept an XP2 execution image')
     from .paths import resource_root
     from .resource_resolution import resolve_path
     p=xp1_source();rows=[dict(path=SOURCE[0],sha256=SOURCE[1]),*p['references'].values()]
@@ -77,7 +78,16 @@ def verify_xp1(base,context,read):
 def transport_profile(core_sha256,core,context,read):
     if core_sha256==BASE_CORE_SHA256:return BASE
     if core_sha256==XP2_CORE_SHA256:
-        if hashlib.sha256(Path(core._name).read_bytes()).hexdigest()!=core_sha256:
+        image_path=Path(core._name).resolve()
+        selected=getattr(core,'_civ6_host_execution_image',None)
+        expected_sha256=core_sha256
+        if selected is not None:
+            from .execution_images import runtime_source_pins
+            if str(image_path)!=selected.path:
+                raise ValueError('XP2 action transport Core path differs from its execution image')
+            expected_sha256=runtime_source_pins({selected.path:core_sha256},
+                execution_image=selected)[selected.path]
+        if hashlib.sha256(image_path.read_bytes()).hexdigest()!=expected_sha256:
             raise ValueError('XP2 action transport binary changed')
         from .xp2_action_transport_source import ABI,verify_live
         verify_live(core._handle,read,family='transport',context=context)

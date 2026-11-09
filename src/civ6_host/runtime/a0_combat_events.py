@@ -19,7 +19,8 @@ def enable(owner,backend):
     from .combat_event_profile import bind_owner
     from .native.native_combat_receiver import validate_receiver_profile
     from .native.native_deferred_empty_profile import validate_empty_profile_record
-    profile=bind_owner(backend,backend.core,owner.read)
+    execution_image=getattr(backend.core,'_civ6_host_execution_image',None)
+    profile=bind_owner(backend,backend.core,owner.read,execution_image=execution_image)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('Combat callbacks overlap an installed producer')
     validate_receiver_profile(owner.empty_receiver_state)

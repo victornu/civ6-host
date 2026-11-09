@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -151,6 +152,114 @@ class CapturePackageTests(unittest.TestCase):
         self.bundle.engine_path.write_bytes(b"changed engine")
         with self.assertRaisesRegex(CapturePackageError, "external engine changed"):
             read_package(reference)
+
+    def _current_bbg_v2_bundle(self):
+        origin_path = "work/official-capture/bbg751-world-A-ui/manifest.json"
+        origin = self.source.joinpath(*origin_path.split("/"))
+        origin.parent.mkdir(parents=True)
+        origin_bytes = json.dumps({"schema": "civ6rl.phase1_capture994.v1", "capture": "ui-current"},
+                                  sort_keys=True, separators=(",", ":")).encode()
+        origin.write_bytes(origin_bytes)
+        self.bundle.reference = (origin_path, digest(origin_bytes))
+        self.bundle.dependencies[str(origin.resolve())] = digest(origin_bytes)
+        self.bundle.fixture["input_profile"] = "xp2-lan"
+        self.bundle.inputs.profile = SimpleNamespace(mode_name="LAN", config_sha="c" * 64,
+            game_sha="d" * 64, config_start=0, config_end=5, game_bytes=17)
+        self.bundle.execution_image = object()
+        core_sha = "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+        exe_sha = "d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe"
+        self.bundle.engine_path.write_bytes(b"current092")
+        self.bundle.dependencies[str(self.bundle.engine_path.resolve())] = core_sha
+        self.bundle.content_profile = {
+            "schema": "civ6rl.official_content_profile.v2",
+            "engine": {"executable_sha256": exe_sha, "gamecore_sha256": core_sha},
+            "final_databases": {role: {"sha256": row["sha256"], "size_bytes": row["size_bytes"]}
+                                for role, row in self.bundle.fixture["databases"].items()},
+            "localization_bootstrap": {"locale": "en_US", "dictionary_flag": False,
+                                        "icu_sha256": digest(b"icu bytes")},
+            "resolved_content_vectors": {"active_mod_handles": [2], "ordered_component_handles": [5]},
+            "gameplay_scripts": {"selected_path_count": 2, "active_count": 7,
+                                 "selected_and_active_empty": False, "source_records": 2,
+                                 "source_files": 2},
+            "cross_capture_equivalence_supported": False,
+            "limitations": ["Opaque current manager headers are retained as raw bytes and are not persistent content identifiers."],
+            "opaque_manager_headers": {"manager_plus_0x1d8": "a" * 48},
+        }
+        selected = {"profile_id": "xp2-gamecore-current-092abfbb", "image_sha256": core_sha,
+                    "reference_core_sha256": "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c",
+                    "path": str(self.bundle.engine_path)}
+        candidate = SimpleNamespace(family="xp2-lan", reference=self.bundle.reference,
+                                    validate_inputs=lambda inputs, bundle: None)
+        return origin_path, origin_bytes, selected, candidate
+
+    def test_registered_current_bbg_v2_keeps_capture_origin_distinct_from_package_reference(self):
+        from civ6_host.runtime import capture_candidates, xp2_bbg_inputs, execution_images, capture_package
+        origin_path, origin_bytes, selected, candidate = self._current_bbg_v2_bundle()
+        registered = candidate.reference
+        with patch.object(capture_candidates, "select_private_candidate", return_value=candidate), \
+             patch.object(xp2_bbg_inputs, "registered_reference", return_value=registered), \
+             patch.object(execution_images, "identity", return_value=selected), \
+             patch.object(execution_images, "verify", return_value=None), \
+             patch.object(capture_package, "_hash_file", side_effect=lambda path:
+                 (selected["image_sha256"], Path(path).stat().st_size)
+                 if Path(path) == Path(selected["path"])
+                 else (hashlib.sha256(Path(path).read_bytes()).hexdigest(), Path(path).stat().st_size)):
+            package_ref = export_capture(self.bundle, self.destination,
+                source_manifest_bytes=origin_bytes,
+                validation_identity={"validation_sha256": "b" * 64, "source": "current UI fixture"},
+                _candidate_profile="xp2-lan")
+            manifest, _, _ = read_package(package_ref, _candidate_profile="xp2-lan",
+                                          execution_image=self.bundle.execution_image)
+        self.assertNotEqual(package_ref["path"], origin_path)
+        self.assertEqual(manifest["origin"], {"path": origin_path, "sha256": registered[1]})
+        self.assertEqual(manifest["content_profile"]["schema"], "civ6rl.official_content_profile.v2")
+        self.assertEqual(set(manifest["content_profile"]["resolved_content_vectors"]),
+                         {"active_mod_handles", "ordered_component_handles"})
+
+    def test_registered_current_bbg_v2_rejects_cross_origin_and_unselected_image(self):
+        from civ6_host.runtime import capture_candidates, xp2_bbg_inputs, execution_images, capture_package
+        _origin_path, origin_bytes, selected, candidate = self._current_bbg_v2_bundle()
+        registered = candidate.reference
+        with patch.object(capture_candidates, "select_private_candidate", return_value=candidate), \
+             patch.object(xp2_bbg_inputs, "registered_reference", return_value=registered), \
+             patch.object(execution_images, "identity", return_value=selected), \
+             patch.object(execution_images, "verify", return_value=None), \
+             patch.object(capture_package, "_hash_file", side_effect=lambda path:
+                 (selected["image_sha256"], Path(path).stat().st_size)
+                 if Path(path) == Path(selected["path"])
+                 else (hashlib.sha256(Path(path).read_bytes()).hexdigest(), Path(path).stat().st_size)):
+            package_ref = export_capture(self.bundle, self.destination,
+                source_manifest_bytes=origin_bytes, validation_identity={"source": "current"},
+                _candidate_profile="xp2-lan")
+            with self.assertRaisesRegex(CapturePackageError, "explicitly selected execution image"):
+                read_package(package_ref, _candidate_profile="xp2-lan")
+            wrong_image = dict(selected, profile_id="xp2-gamecore-reference")
+            with patch.object(execution_images, "identity", return_value=wrong_image):
+                with self.assertRaisesRegex(CapturePackageError, "differs from the selected image profile"):
+                    read_package(package_ref, _candidate_profile="xp2-lan",
+                                 execution_image=self.bundle.execution_image)
+            manifest_path = Path(package_ref["path"])
+            manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+            manifest["origin"]["path"] = "work/official-capture/other-world/manifest.json"
+            raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True, allow_nan=False).encode("ascii") + b"\n"
+            manifest_path.write_bytes(raw)
+            altered = {"path": str(manifest_path), "sha256": digest(raw)}
+            with self.assertRaisesRegex(CapturePackageError, "exact XP2 capture"):
+                read_package(altered, _candidate_profile="xp2-lan",
+                             execution_image=self.bundle.execution_image)
+
+    def test_current_content_v2_refuses_a_synthesized_configured_vector(self):
+        from civ6_host.runtime import capture_candidates, xp2_bbg_inputs, execution_images, capture_package
+        origin_path, origin_bytes, selected, candidate = self._current_bbg_v2_bundle()
+        candidate_ref = candidate.reference
+        self.bundle.content_profile["resolved_content_vectors"]["configured_mod_handles"] = []
+        with patch.object(capture_candidates, "select_private_candidate", return_value=candidate), \
+             patch.object(xp2_bbg_inputs, "registered_reference", return_value=candidate_ref), \
+             patch.object(execution_images, "identity", return_value=selected):
+            with self.assertRaisesRegex(CapturePackageError, "opaque/vector shape"):
+                export_capture(self.bundle, self.destination, source_manifest_bytes=origin_bytes,
+                               validation_identity={}, _candidate_profile="xp2-lan")
 
     def test_source_manifest_bytes_must_match_origin_reference(self):
         with self.assertRaisesRegex(CapturePackageError, "provided source manifest bytes"):

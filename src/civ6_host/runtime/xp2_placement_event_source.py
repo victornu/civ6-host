@@ -244,17 +244,19 @@ def verify_live(base, read):
                 verified_fragments=count, verified_switch_tables=1)
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     proof = source()
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]),
             *(dict(path=path, sha256=digest) for path, digest in PARENT_PINS.values())]
     refs.extend(dict(path=path, sha256=digest) for path, digest in COMMON_EVIDENCE.items())
     # The shared EXE codecs and XP2 facade sources are source-qualified by
     # their existing runtime selectors; include their complete chosen closure.
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     providers = (
-        lambda: __import__("civ6_host.runtime.foundation_facade_profiles", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
-        lambda: __import__("civ6_host.runtime.turn_unit_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
-        lambda: __import__("civ6_host.runtime.xp2_history_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
+        lambda: __import__("civ6_host.runtime.foundation_facade_profiles", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
+        lambda: __import__("civ6_host.runtime.turn_unit_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
+        lambda: __import__("civ6_host.runtime.xp2_history_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
         lambda: __import__("civ6_host.runtime.xp2_player_query_source", fromlist=["source_dependencies"]).source_dependencies(),
     )
     refs.extend(dict(path=str(path), sha256=digest, absolute=True)
@@ -307,11 +309,11 @@ def bind_owner(owner, core, read):
     return receipt
 
 
-def event_profile(*, core_sha256):
+def event_profile(*, core_sha256, execution_image=None):
     if core_sha256 != XP2_CORE_SHA256:
         raise ValueError("XP2 placement event profile requires the exact XP2 Core")
     proof = source()
-    source_dependencies()
+    source_dependencies(execution_image=execution_image)
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     from .a0_family_source import A0FamilyProfile
     mapping = {kind: frozenset(record_type for record_type, _ in rows)

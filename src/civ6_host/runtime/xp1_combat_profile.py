@@ -66,10 +66,11 @@ def source_sha(core_sha256,retained):
     return SOURCE[1]
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_combat_event_source import source_dependencies as xp2_dependencies
-        return xp2_dependencies()
+        return xp2_dependencies(execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 combat ABI')
     if core_sha256!=XP1_CORE_SHA256:
         raise ValueError('Combat source dependencies require exact XP1 or XP2')
     from .paths import resource_root
@@ -79,11 +80,14 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return {**map_sources(),**{str(resolve_path(resource_root()/r['path']).resolve()):r['sha256'] for r in refs}}
 
 
-def bind_owner(backend,core,read):
+def bind_owner(backend,core,read,*,execution_image=None):
     backend.check_thread()
     if backend.core is core and backend.load_abi.core_sha256==XP2_CORE_SHA256:
         from .xp2_combat_event_source import bind_owner as bind_xp2
-        return bind_xp2(backend,core,read)
+        if execution_image is None:
+            execution_image=getattr(core,'_civ6_host_execution_image',None)
+        return bind_xp2(backend,core,read,execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 combat ABI')
     if backend.core is not core or backend.load_abi.core_sha256!=XP1_CORE_SHA256:
         raise ValueError('Combat source requires its exact XP1 owner')
     p=verify_source();identity=(core,core._handle,SOURCE[1])

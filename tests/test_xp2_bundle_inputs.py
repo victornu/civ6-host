@@ -155,6 +155,37 @@ class XP2BundleInputsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 xp2.validate_scripts(self.scripts, copied, self.process, {})
 
+    def test_current_execution_image_is_an_explicit_xp2_abi_selection(self):
+        from civ6_host.runtime.execution_images import known_path, select
+
+        current_manifest = LAB / 'work/official-capture/bbg751-world-A-ui/manifest.json'
+        raw = current_manifest.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         '0438263e3e78b78233153afe0bc4e1ace6ac8e315aed21e4507f738bae8b285d')
+        current_process = json.loads(raw)['preflight']['process']
+        profile_id = xp2.CURRENT_EXECUTION_PROFILE_ID
+        image = select(profile_id, core_path=known_path(profile_id))
+        self.assertEqual(image.image_sha256, xp2.CURRENT_XP2_CORE_SHA256)
+        self.assertEqual(image.reference_core_sha256, XP2_CORE_SHA256)
+        self.assertEqual(xp2.validate_process(current_process, execution_image=image),
+                         xp2.CURRENT_XP2_CORE_SHA256)
+
+        with self.assertRaises(ValueError):
+            xp2.validate_process(current_process)
+        with self.assertRaises(ValueError):
+            xp2.validate_process({**current_process, 'exe_sha256': '0' * 64},
+                                 execution_image=image)
+        with self.assertRaises(ValueError):
+            xp2.validate_process({**current_process, 'gamecore_module': {
+                **current_process['gamecore_module'], 'sha256': XP2_CORE_SHA256}},
+                execution_image=image)
+        with self.assertRaises(ValueError):
+            xp2.validate_process(self.process, execution_image=image)
+        altered = dict(image.__dict__)
+        altered['reference_core_sha256'] = '0' * 64
+        with self.assertRaises(ValueError):
+            xp2.validate_process(current_process, execution_image=altered)
+
     def test_reader_source_pins_and_public_base_xp1_guards_remain_closed(self):
         digests = xp2.reader_validator_digests()
         self.assertTrue(digests)

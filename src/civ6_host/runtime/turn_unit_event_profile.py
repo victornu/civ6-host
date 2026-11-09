@@ -147,22 +147,43 @@ def read_application_mode(application, core_sha256, candidate_backend=None):
     return shared(application, candidate_backend=candidate_backend)
 
 
-def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256 == XP2_CORE_SHA256:
         from .xp2_turn_notification_source import source_dependencies as selected
         from .foundation_facade_profiles import source_dependencies as facade_dependencies
         from .application_mirror_profiles import civilization_source_dependencies
         from .xp1_load_capability import source_dependencies as capability_dependencies
         from .xp1_visibility_cache_gate import source_dependencies as cache_dependencies
+        from .xp2_turn_notification_source import source as turn_source
+        image=turn_source()['image']
+        if execution_image is not None:
+            from pathlib import Path
+            if (str(Path(image['path']).resolve())!=str(Path(execution_image.path).resolve())
+                    or image['sha256']!=execution_image.reference_core_sha256):
+                raise ValueError('XP2 turn-unit provenance differs from the selected execution/reference pair')
         pins=selected()
-        for extra in (facade_dependencies(core_sha256=core_sha256),
+        for extra in (facade_dependencies(core_sha256=core_sha256,
+                      execution_image=execution_image),
                       civilization_source_dependencies(core_sha256),
                       capability_dependencies(core_sha256),
-                      cache_dependencies(core_sha256=core_sha256)):
+                      cache_dependencies(core_sha256=core_sha256,
+                      **({'execution_image':execution_image} if execution_image is not None else {}))):
+            if execution_image is not None:
+                from .runtime_source_dependencies import materialize_runtime_source_pins
+                extra=materialize_runtime_source_pins(extra,execution_image=execution_image,
+                    provenance_images=(image,))
             for path,sha in extra.items():
                 if path in pins and pins[path]!=sha:raise ValueError('Conflicting turn notification dependency')
                 pins[path]=sha
+        if execution_image is not None:
+            from .runtime_source_dependencies import materialize_runtime_source_pins
+            pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                provenance_images=(image,))
+            from .a0_family_source import verify_pinned_files
+            verify_pinned_files(pins)
         return pins
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 turn-unit ABI')
     verify_source(core_sha256=core_sha256)
     from .a0_family_source import _path
     p = verify_source()
@@ -177,11 +198,12 @@ def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
     return pins
 
 
-def event_profile(*, core_sha256=XP1_CORE_SHA256):
+def event_profile(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     from .a0_family_source import A0FamilyProfile, verify_pinned_files, verify_extracted_sources
     from .native.native_deferred_empty_profile import _ROWS
     p = verify_source(core_sha256=core_sha256)
-    verify_pinned_files(source_dependencies(core_sha256=core_sha256))
+    verify_pinned_files(source_dependencies(core_sha256=core_sha256,
+        execution_image=execution_image))
     verify_extracted_sources(p['source_modules'])
     for kind,size in SIZES.items():
         actual = _ROWS[kind]; expected = p['receiver_rows'][str(kind)]

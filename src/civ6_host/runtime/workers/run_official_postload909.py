@@ -24,6 +24,12 @@ def sha(data):
 
 def open_official_backend(closure, emit, win):
     candidate = closure.get('input_profile') in ('xp1-lan', 'xp2-lan')
+    execution_image = None
+    if 'execution_image' in closure:
+        if closure.get('input_profile') != 'xp2-lan':
+            raise ValueError('Execution image compatibility requires the explicit XP2 owner')
+        from civ6_host.runtime.execution_images import from_identity
+        execution_image = from_identity(closure['execution_image'])
     if candidate:
         from civ6_host.runtime.captured_saved_load import select_load_closure
         candidate_contract = select_load_closure(closure)
@@ -77,7 +83,9 @@ def open_official_backend(closure, emit, win):
             validate_closure_profile(closure)
         if candidate:
             from civ6_host.runtime.capture_candidates import consume_input_handoff
-            captured = consume_input_handoff(candidate_contract.family, closure['prepared_capture'])
+            captured = consume_input_handoff(candidate_contract.family, closure['prepared_capture'],
+                official_bundle=candidate_contract.reference,
+                **({'execution_image': execution_image} if execution_image is not None else {}))
             if (closure['official_bundle']['path'], closure['official_bundle']['sha256']) != captured.reference:
                 raise ValueError('XP1 worker capture differs from its prepared handoff')
             if closure.get('resume_checkpoint') is not None:
@@ -109,11 +117,24 @@ def open_official_backend(closure, emit, win):
         raise ValueError('Every database must be private to the process')
     emit('native_reset_timing', phase='child_source_and_fixture_verification_seconds', elapsed_seconds=time.perf_counter() - phase_started, timing_scope='non-overlapping stage', strategic_training_ready=False)
     phase_started = time.perf_counter()
-    profile = profile_for_core(dll, mode='context' if candidate else 'init')
+    profile = profile_for_core(dll, mode='context' if candidate else 'init',
+        **({'execution_image': execution_image} if execution_image is not None else {}))
+    if execution_image is not None:
+        from civ6_host.runtime.native.native_core_context_profiles import require_executable_profile
+        from civ6_host.runtime.execution_images import identity
+        require_executable_profile(profile)
+        emit('native_execution_image_selected', execution_image=identity(execution_image),
+            capture_engine_sha256=captured.content_profile['engine']['gamecore_sha256'],
+            historical_capture_rewritten=False, native_library_loaded=False)
     handle = os.add_dll_directory(str(dll.parent))
     shared_handle = os.add_dll_directory(str(profile.shared_dependency_directory)) if candidate else None
     core = C.WinDLL(str(dll))
-    validate_loaded_modules(profile, win.modules())
+    if execution_image is not None:
+        core._civ6_host_execution_image = execution_image
+    loaded_modules = validate_loaded_modules(profile, win.modules())
+    if execution_image is not None:
+        emit('native_execution_modules_verified', execution_image=identity(execution_image),
+            modules=loaded_modules, native_library_loaded=True, context_created=False)
     create = core.DllCreateGameContext
     create.argtypes, create.restype = ([], C.c_void_p)
     if C.cast(create, C.c_void_p).value != core._handle + profile.create_context_rva:
@@ -122,6 +143,14 @@ def open_official_backend(closure, emit, win):
     if not context:
         raise RuntimeError('Factory returned null')
     backend = OfficialLoadBackend(core, context, fixture, profile.shared_dependency_directory, profile, proofs, emit, candidate_bundle=captured if candidate else None)
+    command_profile_diagnostic = closure.get('command_profile_diagnostic', False)
+    if (type(command_profile_diagnostic) is not bool
+            or command_profile_diagnostic and (
+                not candidate or candidate_contract.family != 'xp2-lan'
+                or execution_image is None
+                or profile.execution_image is not execution_image)):
+        raise ValueError('Native Load profiling requires the explicit XP2 execution image')
+    backend.command_profile_diagnostic = command_profile_diagnostic
     if captured is not None:
         backend.captured_bundle = captured
     backend.library_directory_handle = handle

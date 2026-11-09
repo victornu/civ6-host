@@ -181,11 +181,19 @@ class PrivateLogFiles:
         if entry['flags'] not in (0, 5) or not filename or _resolve_resource_path(Path(filename)).name != filename or any((ch in filename for ch in '/\\:')) or (filename in ('.', '..')):
             self.host._fatal('unverified active log channel options', channel=hex(channel), **entry)
         path = self.root / filename
-        if _resolve_resource_path(path).exists():
+        win32_path = str(path)
+        path_units = len(win32_path.encode('utf-16-le')) // 2
+        if path_units >= 260 and not win32_path.startswith('\\\\?\\'):
+            if win32_path.startswith('\\\\'):
+                win32_path = '\\\\?\\UNC\\' + win32_path[2:]
+            else:
+                win32_path = '\\\\?\\' + win32_path
+        if Path(win32_path).exists():
             self.host._fatal('native log path already exists', filename=filename)
-        handle = self.kernel.CreateFileW(str(path), 1073741824, 1, None, 2, 134217856, None)
+        handle = self.kernel.CreateFileW(win32_path, 1073741824, 1, None, 2, 134217856, None)
         if handle in (None, C.c_void_p(-1).value):
-            self.host._fatal('native log open failed', error=C.get_last_error())
+            self.host._fatal('native log open failed', error=C.get_last_error(),
+                             filename=filename, path_utf16_units=path_units)
         size = C.c_int64()
         if not self.kernel.GetFileSizeEx(handle, C.byref(size)) or size.value != 0:
             self.kernel.CloseHandle(handle)

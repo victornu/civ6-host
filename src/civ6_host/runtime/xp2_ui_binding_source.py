@@ -169,8 +169,11 @@ def bind_ui_api(runtime,game_child,ui_child,core_context,core):
             or not hasattr(runtime.host,'LAB_ProfileScriptCoreUIBindingsInstall')):
         raise ValueError('XP2 UI requires fresh distinct managed children and its native export')
     view,borrowed=_owner(runtime,game_child,ui_child,core_context,core)
-    selected=profile_for_core(core._name,mode='context')
-    if selected.ruleset!='xp2' or selected.core_sha256!=XP2_CORE_SHA256:
+    selected=profile_for_core(core._name,mode='context',
+        execution_image=getattr(core,'_civ6_host_execution_image',None))
+    from .native.native_core_context_profiles import require_executable_profile
+    require_executable_profile(selected)
+    if selected.ruleset!='xp2' or selected.source_core_sha256!=XP2_CORE_SHA256:
         raise ValueError('XP2 UI binder refuses another engine')
     validate_loaded_modules(selected,Windows().modules())
     build=verify_source_build(_current_executable(),required_components={

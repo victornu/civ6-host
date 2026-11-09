@@ -156,10 +156,18 @@ class PreparedReaderCandidateTests(unittest.TestCase):
         admission,producer,consumer,accepted,manifest,reference=self.fixture()
         transitions=admission._check_xp2_prepared_reader(producer,consumer,accepted,manifest,reference)
         joins = {join['module']: join for join in transitions[0]['reviewed_input_transitions']}
-        self.assertEqual(set(joins), {'runtime/xp2_bundle_inputs.py', 'runtime/capture_script_paths.py'})
+        bbg_transitions = {
+            'runtime/capture_candidates.py': 'exact_bbg751_recovered_handoff_selection',
+            'runtime/native/native_localization.py': 'exact_bbg751_private_localization_branch',
+        }
+        self.assertEqual(set(joins), {
+            'runtime/xp2_bundle_inputs.py', 'runtime/capture_script_paths.py', *bbg_transitions})
+        for module, transition in bbg_transitions.items():
+            self.assertEqual(joins[module]['transition'], transition)
+            self.assertFalse(joins[module]['producer_identity_substituted'])
         relocated = joins['runtime/capture_script_paths.py']
-        self.assertEqual(relocated['transition'], 'xp2_script_proof_physical_path_relocation_v1')
-        self.assertTrue(relocated['logical_reference_preserved'])
+        self.assertEqual(relocated['transition'], 'xp2_script_proof_pinned_workshop_path_support')
+        self.assertTrue(relocated['stock_relative_path_resolution_unchanged'])
         self.assertTrue(relocated['proof_bytes_rechecked'])
         self.assertFalse(relocated['producer_identity_substituted'])
         key = 'runtime/xp2_bundle_inputs.py'
@@ -171,9 +179,8 @@ class PreparedReaderCandidateTests(unittest.TestCase):
         self.assertTrue(pair['original_capture_branch_unchanged'])
         self.assertFalse(pair['producer_identity_substituted'])
         self.assertFalse(transitions[0]['native_session_admitted'])
-        # Raw bundle parsing remains byte-identical for XP1 and XP2.
-        key='runtime/native/native_official_bundle.py'
-        self.assertEqual(consumer['runtime_sources'][key],producer['runtime_sources'][key])
+        for key in ('runtime/native/official_save.py', 'runtime/native/official_configuration.py'):
+            self.assertEqual(consumer['runtime_sources'][key], producer['runtime_sources'][key])
 
     def test_unknown_validator_versions_and_wrong_package_do_not_inherit_transition(self):
         admission,producer,consumer,accepted,manifest,reference=self.fixture()
@@ -228,7 +235,9 @@ class LineageCandidateTests(unittest.TestCase):
                 selected_path_count=1,active_count=1,source_records=1,source_files=1)))
         official._remember_prepared_bundle(self.original,'xp2-lan',official._prepared_bundle_validator_digests(),
             _token=official._PARENT_ADMISSION_TOKEN,_input_only=True)
-        self.stack.enter_context(patch.object(inputs_profile,'consume_input_handoff',return_value=self.original))
+        from civ6_host.runtime import capture_candidates
+        self.consume = self.stack.enter_context(patch.object(
+            capture_candidates, 'consume_input_handoff', return_value=self.original))
         self.close=self.stack.enter_context(patch.object(network_session,'xp1_loaded_close_evidence',return_value={'fixture_only':True}))
         self.components={};self.virtual_components={}
         pair=self.producer/'checkpoint';pair.mkdir()
@@ -324,6 +333,9 @@ class LineageCandidateTests(unittest.TestCase):
         self.assertIsNone(self.original.inputs.checkpoint)
         self.assertTrue(self.close.called)
         self.assertEqual(self.close.call_args.kwargs['core_sha256'],CORE)
+        self.assertEqual(self.close.call_args.kwargs['official_bundle'], inputs_profile.REFERENCE)
+        self.consume.assert_called_with('xp2-lan', {'fixture_only': True},
+                                        official_bundle=inputs_profile.REFERENCE)
         with self.assertRaises(ValueError):inputs_profile.validate_candidate_inputs(replace(resumed.inputs,game=b'foreign'),resumed)
         with self.assertRaises(ValueError):inputs_profile.validate_candidate_inputs(resumed.inputs,replace(resumed))
 
@@ -337,6 +349,14 @@ class LineageCandidateTests(unittest.TestCase):
             original=self.m[key];self.m[key]=value
             with self.subTest(key=key),self.assertRaises(ValueError):cp.manifest(self.write_manifest())
             self.m[key]=original
+
+    def test_bbg_lineage_rejects_the_stock_official_save_digest(self):
+        from civ6_host.runtime import xp2_bbg_inputs as bbg
+        self.m['source_official_bundle'] = dict(zip(('path', 'sha256'), bbg.REFERENCE))
+        self.m['origin_official_save_sha256'] = inputs_profile.XP2_LAN_PROFILE.save_sha
+        with self.assertRaisesRegex(ValueError, 'BBG checkpoint differs from its original official save'):
+            cp.manifest(self.write_manifest(), official_bundle=bbg.REFERENCE)
+        self.consume.assert_not_called()
 
     def test_source_database_identity_and_distinct_private_copies_refuse(self):
         old=self.m['fixture'];value=json.loads(self.fixture.read_bytes())

@@ -85,6 +85,30 @@ class XP2OptionalAchievementServiceTests(unittest.TestCase):
         self.assertIs(event['platform_request_submitted'],False)
         self.assertIs(event['platform_success_reported'],False)
 
+    def test_native02_composed_callback_uses_source_proved_null_ignored_route(self):
+        backend = fixture(); host = backend.host
+        frames = [dict(module=source.CORE_MODULE, rva=rva)
+                  for rva in source.NATIVE02_OBSERVED_CHAIN]
+        with patch('civ6_host.runtime.native.native_absent_achievements.capture_stack',
+                   return_value=frames):
+            self.install(backend)
+            callback = backend._xp2_host20[1]
+            self.assertIsNone(callback(host.pointer))
+        event = backend.emit.call_args.kwargs
+        self.assertEqual(event['source_proof_sha256'], source.NATIVE02_SOURCE[1])
+        self.assertIs(event['native_null_branch_used'], True)
+        self.assertIs(event['platform_service_installed'], False)
+        self.assertIs(event['platform_request_submitted'], False)
+        self.assertIs(event['platform_success_reported'], False)
+        self.assertIs(event['source_qualified_unused_result_path'], True)
+        frames[1]['rva'] = '0x17b387'
+        backend.emit.reset_mock()
+        with patch('civ6_host.runtime.native.native_absent_achievements.capture_stack',
+                   return_value=frames):
+            with self.assertRaisesRegex(ValueError, 'Unproved XP2 optional achievement caller chain'):
+                callback(host.pointer)
+        backend.emit.assert_not_called()
+
     def test_foreign_engine_owner_binding_and_duplicate_install_refuse(self):
         for field, value in [('stage', 'loaded'), ('busy', False), ('poisoned', True),
                              ('destroyed', True), ('_xp1_commands_requested', False)]:

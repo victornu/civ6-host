@@ -31,15 +31,18 @@ def _current_executable():
 
 def bind_game_api(runtime, child, core_context, core, *, core_sha256):
     """Use the same managed root/child and protected Core registration path."""
-    from .native.native_core_context_profiles import profile_for_core, validate_loaded_modules
+    from .native.native_core_context_profiles import (profile_for_core,
+        require_executable_profile, validate_loaded_modules)
     from .native.native_probe import Windows
     from .native.native_setup import local_reader
 
     if os.name != 'nt' or C.sizeof(C.c_void_p) != 8:
         raise ValueError('Native script registration requires Windows x64')
     abi = profiles.profile_for_sha(core_sha256)
-    selected = profile_for_core(core._name, mode='context')
-    if selected.core_sha256 != abi.core_sha256 or selected.ruleset != abi.ruleset:
+    selected = profile_for_core(core._name, mode='context',
+        execution_image=getattr(core, '_civ6_host_execution_image', None))
+    require_executable_profile(selected)
+    if selected.source_core_sha256 != abi.core_sha256 or selected.ruleset != abi.ruleset:
         raise ValueError('Script binding profile differs from the actual Core')
     validate_loaded_modules(selected, Windows().modules())
     pointer = runtime.registry.validate(child)

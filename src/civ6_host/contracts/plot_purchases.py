@@ -9,6 +9,8 @@ GAPS = ('unit_purchase', 'building_purchase', 'district_purchase', 'faith_purcha
         'placement_filtered_plot_purchase')
 CITY_GAPS = ('district_purchase', 'faith_purchase', 'corps_purchase', 'army_purchase',
              'placement_filtered_plot_purchase')
+CITY_FAITH_GAPS = ('district_purchase', 'corps_purchase', 'army_purchase',
+                   'placement_filtered_plot_purchase', 'faith_purchase_native_effect')
 LIMIT = 4096
 
 
@@ -29,10 +31,13 @@ def validate_action(action):
     _validate_price(action['price_token'])
 
 
-def validate_city_action(action):
+def validate_city_action(action, *, allow_faith=False):
+    if type(allow_faith) is not bool:
+        raise ValueError('Faith purchase permission must be an exact boolean')
     if (type(action) is not dict or set(action) != CITY_FIELDS or action['kind'] != 'purchase'
-            or action['category'] not in ('unit', 'building') or action['currency'] != 'YIELD_GOLD'):
-        raise ValueError('Expected a standard gold unit or building purchase')
+            or action['category'] not in ('unit', 'building')
+            or action['currency'] not in (('YIELD_GOLD', 'YIELD_FAITH') if allow_faith else ('YIELD_GOLD',))):
+        raise ValueError('Expected an allowed unit or building purchase')
     for field in ('city_id', 'index', 'hash'):
         if type(action[field]) is not int or not 0 <= action[field] <= 0xffffffff:
             raise ValueError('Invalid city purchase ' + field)
@@ -42,15 +47,19 @@ def validate_city_action(action):
     _validate_price(action['price_token'])
 
 
-def validate_purchase_action(action):
+def validate_purchase_action(action, *, allow_faith=False):
+    if type(allow_faith) is not bool:
+        raise ValueError('Faith purchase permission must be an exact boolean')
     if 'plot_id' in action:
         validate_action(action)
     else:
-        validate_city_action(action)
+        validate_city_action(action, allow_faith=allow_faith)
 
 
 def validate_catalogue(value, player_id, turn, *, width=None, height=None, own_cities=None,
-                       city_items=False):
+                       city_items=False, allow_faith=False):
+    if type(allow_faith) is not bool:
+        raise ValueError('Faith purchase permission must be an exact boolean')
     if type(value) is not list or len(value) > LIMIT:
         raise ValueError('Malformed plot purchase catalogues')
     city_ids = []
@@ -74,8 +83,9 @@ def validate_catalogue(value, player_id, turn, *, width=None, height=None, own_c
                 raise ValueError('Malformed plot purchase offer')
             action = offer['action']
             if city_items:
-                validate_city_action(action)
-                key = (action['category'], action['index'])
+                validate_city_action(action, allow_faith=allow_faith)
+                key = ((action['category'], action['index'], action['currency'])
+                       if allow_faith else (action['category'], action['index']))
                 if action['city_id'] != city['city_id'] or key in seen:
                     raise ValueError('Foreign or duplicate city purchase offer')
                 seen.add(key)

@@ -1,5 +1,7 @@
 """Exact XP2 cache source selection; no public or native-run admission."""
 from __future__ import annotations
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import struct
 from .configuration_profiles import _source
@@ -7,7 +9,17 @@ from .saved_load_profiles import XP2_CORE_SHA256
 
 SOURCE=('work/host-extensions/xp2-cache-services/source-profile-v1.json','b8beb461d61621747584a93ea5cb118d31c3b049daf4d951c516d375b984f660')
 
+_UPDATE_SOURCE = ContextVar('xp2_cache_update_source', default=None)
+
+
 def source():
+    active = _UPDATE_SOURCE.get()
+    if active is not None:
+        return active
+    return _verified_source()
+
+
+def _verified_source():
     p=_source(SOURCE)
     if (p['schema']!='civ6_host.xp2_cache_services.static.v1'
             or p['image']['sha256']!=XP2_CORE_SHA256
@@ -24,6 +36,26 @@ def source():
         if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
             raise ValueError('XP2 cache source dependency differs: '+row['path'])
     return p
+
+@contextmanager
+def update_source_scope():
+    """Share immutable evidence through one update and its synchronous publication.
+
+    Only source proofs are reused. Callers still validate live native context,
+    owners, slots, locks and queued records; the complete source closure is
+    checked again before the update/publication interval can return.
+    """
+    if _UPDATE_SOURCE.get() is not None:
+        raise RuntimeError('Nested XP2 cache source scope')
+    proof = _verified_source()
+    token = _UPDATE_SOURCE.set(proof)
+    try:
+        yield
+    finally:
+        _UPDATE_SOURCE.reset(token)
+    if _verified_source() != proof:
+        raise ValueError('XP2 cache source changed during native update')
+
 
 def source_dependencies():
     from .paths import resource_root

@@ -166,30 +166,44 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP2_CORE_SHA256):
+def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
     p=verify_source(core_sha256);result={}
+    if execution_image is not None:
+        image_path=Path(resolve_path(Path(p['image']['path'])).resolve())
+        if (str(image_path)!=str(Path(execution_image.path).resolve())
+                or p['image']['sha256']!=execution_image.reference_core_sha256):
+            raise ValueError('XP2 attack provenance differs from the selected execution/reference pair')
     refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),p['image'],p['exe'],*p['references'],
           *p['extractors'],*p['official_ui'].values(),p['enum_selection']['body_reference']]
     for row in refs:
         path=resolve_path(resource_root()/row['path']).resolve()
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        if execution_image is None and hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
             raise ValueError('XP2 public attack dependency changed: '+str(path))
         if str(path) in result and result[str(path)]!=row['sha256']:
             raise ValueError('Conflicting XP2 public attack dependency')
         result[str(path)]=row['sha256']
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    result=materialize_runtime_source_pins(result, execution_image=execution_image,
+        provenance_images=(p['image'], p['exe']))
     from .xp2_world_input_source import source_dependencies as world
     from .combat_event_profile import source_dependencies as combat
     from .district_damage_profile import source_dependencies as district
     for provider in (world,combat,district):
-        for path,sha in provider(core_sha256=core_sha256).items():
+        for path,sha in provider(core_sha256=core_sha256, execution_image=execution_image).items():
             if path in result and result[path]!=sha:raise ValueError('Conflicting XP2 attack source')
             result[path]=sha
     from .xp2_foundation_query_source import source_dependencies as facades
     from .xp2_aux_map_profile import source_dependencies as maps
-    for provider in (facades,maps):
-        for path,sha in provider().items():
-            if path in result and result[path]!=sha:raise ValueError('Conflicting XP2 attack helper source')
-            result[path]=sha
+    for path,sha in facades(execution_image=execution_image).items():
+        if path in result and result[path]!=sha:raise ValueError('Conflicting XP2 attack helper source')
+        result[path]=sha
+    for path,sha in maps().items():
+        if path in result and result[path]!=sha:raise ValueError('Conflicting XP2 attack helper source')
+        result[path]=sha
+    result=materialize_runtime_source_pins(result, execution_image=execution_image,
+        provenance_images=(p['image'], p['exe']))
+    from .a0_family_source import verify_pinned_files
+    verify_pinned_files(result)
     return result
 
 
@@ -255,7 +269,7 @@ def bind_owner(owner,core,read):
     bind_world(owner,core,read)
     # Pin the source closure once on this actual owned lifetime. Every call keeps
     # thread/module/reader checks; native live data is never cached here.
-    source_dependencies()
+    source_dependencies(execution_image=getattr(core, '_civ6_host_execution_image', None))
     receipt=VerifiedAttackSource(owner,core,core._handle,XP2_CORE_SHA256,SOURCE[1],
                                 verify_live(core._handle,read),SOURCE[1],SOURCE[1])
     owner._xp2_unit_attack_source_receipt=receipt

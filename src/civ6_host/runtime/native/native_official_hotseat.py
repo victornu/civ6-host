@@ -147,7 +147,9 @@ def prepare_interactive(owner):
         if c.controller_initialized is not False or c.controller_byte_0d is not None or c.turn_values_by_thread or (c.service_flags != 0):
             raise RuntimeError('Interactive hotseat controller is not fresh')
         p.deferred_events.fresh_controller_projection_enabled = False
-        owner.native_controller_code = NativeControllerCode()
+        execution_image = getattr(getattr(owner, 'core', None), '_civ6_host_execution_image', None)
+        owner.native_controller_code = (NativeControllerCode() if execution_image is None else
+                                       NativeControllerCode(execution_image=execution_image))
         p.deferred_events.turn_begin_state = NativeControllerTurnState(owner.native_controller_code, owner.emit)
         turn = 3
         if inputs.official_bundle is not None:
@@ -352,7 +354,9 @@ def replay_official_round(owner):
         if c.controller_initialized is not False or c.controller_byte_0d is not None or c.turn_values_by_thread or (c.service_flags != 0):
             raise RuntimeError('Four-human replay requires a fresh native controller owner')
         p.deferred_events.fresh_controller_projection_enabled = False
-        owner.native_controller_code = NativeControllerCode()
+        execution_image = getattr(getattr(owner, 'core', None), '_civ6_host_execution_image', None)
+        owner.native_controller_code = (NativeControllerCode() if execution_image is None else
+                                       NativeControllerCode(execution_image=execution_image))
         p.deferred_events.turn_begin_state = NativeControllerTurnState(owner.native_controller_code, owner.emit)
         p.view_publisher.publish()
         before = owner.jobs_snapshot('before')

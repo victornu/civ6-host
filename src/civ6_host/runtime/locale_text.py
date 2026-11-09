@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 
 SOURCE=('work/host-simultaneous/city-management/locale-length-source-v2.json','25eb41e58ab92390e0a5cb7f92bdca79a72be594264f70c461197571d3c0cf4f')
+CURRENT_SOURCE=('work/actual-core-092-integration/locale-current/source-profile.json',
+                'cc6326899b99bfb54c92845ed368e51b88efbbce9bdf8cf4dab9a334f7a9645d')
 
 
-def source_files():
+def source_files(*, execution_image=None):
     from .provenance import resource_root
     from .resource_resolution import resolve_path
     path=resolve_path(resource_root()/SOURCE[0]);raw=path.read_bytes()
@@ -17,6 +19,26 @@ def source_files():
         p=resolve_path(resource_root()/row['path'])
         if hashlib.sha256(p.read_bytes()).hexdigest()!=row['sha256']:raise ValueError('Locale length dependency changed')
         pins[str(p)]=row['sha256']
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)  # Require the canonical registered selection.
+        path=resolve_path(resource_root()/CURRENT_SOURCE[0]);raw=path.read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=CURRENT_SOURCE[1]:
+            raise ValueError('Current Locale export proof changed')
+        current=json.loads(raw)
+        if (current['schema']!='civ6-host.locale-current-exports.v1'
+                or current['actual_core_sha256']!=execution_image.image_sha256
+                or current['reference_core_sha256']!=execution_image.reference_core_sha256
+                or current['reference_source']!={'path':SOURCE[0],'sha256':SOURCE[1]}
+                or current['algorithm_bytes_unchanged_after_guard_normalization'] is not True):
+            raise ValueError('Current Locale proof is for another runtime/source pair')
+        pins[str(path)]=CURRENT_SOURCE[1]
+        for row in current['files']:
+            p=resolve_path(resource_root()/row['path'])
+            if hashlib.sha256(p.read_bytes()).hexdigest()!=row['sha256']:
+                raise ValueError('Current Locale build/source changed')
+            pins[str(p)]=row['sha256']
+        proof=current
     return pins,proof
 
 
@@ -30,12 +52,10 @@ def attach(prefix):
     from .resource_resolution import resolve_path
     runtime.registry.validate(child)
     if not runtime.locale_bound:raise RuntimeError('Locale lifecycle is not initialized')
-    _,proof=source_files();_,original=legacy.verified_files()
+    _,original=legacy.verified_files()
     library=runtime.service_owner.localization_library
-    for loaded,identity in ((runtime.library,original['havok']),(library,original['images']['localization'])):
-        if (Path(loaded._name).resolve()!=resolve_path(Path(identity['path'])).resolve()
-                or hashlib.sha256(Path(loaded._name).read_bytes()).hexdigest()!=identity['sha256']):
-            raise RuntimeError('Length-aware Locale loaded image differs from its ABI proof')
+    image=legacy.verify_runtime_images(runtime,original)
+    _,proof=source_files(execution_image=image)
     if not hasattr(runtime,'locale_text_module'):
         module=C.WinDLL(str(resolve_path(resource_root()/proof['dll']['path'])))
         runtime.locale_text_module=module
@@ -51,5 +71,6 @@ def attach(prefix):
             cases.append(dict(key=key.decode(),bytes=len(expected),sha256=hashlib.sha256(expected).hexdigest(),embedded_nul=b'\0' in expected))
         legacy._diagnose(runtime,child,library)
         runtime.emit('native_locale_length_verified',source_sha256=SOURCE[1],dll_sha256=proof['dll']['sha256'],
+                     execution_source_sha256=CURRENT_SOURCE[1] if image is not None else SOURCE[1],
                      cases=cases,native_string_oracle=True,official_formatter_unchanged=True)
     prefix.length_locale_child=child

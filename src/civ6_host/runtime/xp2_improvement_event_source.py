@@ -141,18 +141,26 @@ def source():
 verify_source = source
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .a0_family_source import verify_pinned_files
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .turn_unit_event_profile import source_dependencies as query_dependencies
     p = source()
-    pins = query_dependencies(core_sha256=XP2_CORE_SHA256)
-    for ref in [dict(path=SOURCE[0],sha256=SOURCE[1]),p['generator'],*p['references'].values(),*p['images'].values()]:
+    pins = query_dependencies(core_sha256=XP2_CORE_SHA256, execution_image=execution_image)
+    image_refs = tuple(p['images'].values())
+    refs = [dict(path=SOURCE[0],sha256=SOURCE[1]),p['generator'],*p['references'].values()]
+    if execution_image is None:
+        refs.extend(image_refs)
+    for ref in refs:
         path = str(resolve_path(resource_root()/ref['path']).resolve())
         if path in pins and pins[path] != ref['sha256']:
             raise ValueError('XP2 improvement/route source dependency conflict')
         pins[path] = ref['sha256']
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins = materialize_runtime_source_pins(
+            pins, execution_image=execution_image, provenance_images=image_refs)
     verify_pinned_files(pins)
     return pins
 
@@ -186,7 +194,7 @@ class VerifiedSource:
     instructions: int
 
 
-def bind_owner(owner,core,read):
+def bind_owner(owner,core,read,*,execution_image=None):
     from .turn_unit_event_profile import bind_owner as bind_queries
     from .foundation_facade_profiles import verify_xp1_once
     from .paths import resource_root
@@ -198,7 +206,9 @@ def bind_owner(owner,core,read):
     if old is not None and (type(old) is not VerifiedSource or old.owner is not owner
             or old.core is not core or old.base != core._handle or old.proof_sha256 != SOURCE[1]):
         raise ValueError('XP2 improvement/route source lifetime changed')
-    source_dependencies()
+    if execution_image is None:
+        execution_image = getattr(core, '_civ6_host_execution_image', None)
+    source_dependencies(execution_image=execution_image)
     bind_queries(owner,core,read)
     verify_xp1_once(core,core._handle,read,resource_root(),core_sha256=XP2_CORE_SHA256)
     count = verify_live(core._handle,read)
@@ -209,7 +219,7 @@ def bind_owner(owner,core,read):
 
 
 @lru_cache(maxsize=1)
-def event_profile():
+def _event_profile():
     from .a0_family_source import A0FamilyProfile
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     source()
@@ -218,6 +228,13 @@ def event_profile():
         if row is None or set(row['record_sizes']) != {size}:
             raise ValueError('XP2 improvement/route receiver shape changed')
     return A0FamilyProfile(MappingProxyType({k:frozenset((r,)) for k,r in KINDS.items()}),SIZES,SOURCE[1])
+
+
+def event_profile(*, execution_image=None):
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+    return _event_profile()
 
 
 def decode_fields(kind,fields,read):

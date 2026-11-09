@@ -15,19 +15,28 @@ from civ6_host.contracts import unit_work_info, unit_work_state
 from . import network_turn
 
 
-PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources')
+PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources', 'diplomacy', 'trade', 'espionage', 'spy_completion', 'world_congress', 'world_congress_review', 'native_command_permissions', 'world_congress_active_effects')
 COMBAT_GROUP_SCHEMA='civ6-host.combat-inputs.v1'
 PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v1'
 CURRENT_PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v2'
 UNIT_WORK_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v1'
 UNIT_WORK_CATALOGUE_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v2'
 UNIT_WORK_DETAILED_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v3'
+TRADE_PERMISSION_GROUP_SCHEMA = 'civ6-host.trade-inputs.v2'
 _REQUIRED_FIELDS = {
     'display': (),
     'economy': ('treasury', 'yield_display', 'research_info', 'research', 'candidates'),
     'production': ('production', 'production_info', 'production_queues', 'candidates'),
     'growth': ('city_growth',),
     'strategic_resources': ('strategic_resources',),
+    'diplomacy': ('diplomacy_overview',),
+    'trade': ('trade_routes', 'trade_origins'),
+    'espionage': ('espionage',),
+    'spy_completion': ('spy_completion',),
+    'world_congress': ('world_congress',),
+    'world_congress_review': ('world_congress_review', 'world_congress_review_status'),
+    'native_command_permissions': ('native_command_permissions',),
+    'world_congress_active_effects': ('world_congress_active_effects','world_congress_active_effects_status'),
     'combat': ('unit_attacks','queued_orders'),
     'unit_work': ('unit_work_state', 'unit_work_info', 'unit_work'),
 }
@@ -47,7 +56,19 @@ def required_fields(group: str, decision_schema=None) -> tuple[str, ...]:
         return ('unit_work_state', 'unit_work')
     if group == 'production' and decision_schema in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS:
         return ('production_current', 'production_queues')
+    if group == 'trade' and decision_schema in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+        return ('trade_routes',)
     return _REQUIRED_FIELDS[group]
+
+
+def envelope(response, group, channel, data, source_contracts):
+    """Detach a typed result and retain the accepted player decision identity."""
+    observation, decisions = response['observation'], response['decisions']
+    return copy.deepcopy(dict(
+        schema='civ6-host.information.v1', group=group, channel=channel,
+        episode_id=response['episode_id'], game_generation=response['game_generation'],
+        player_id=observation['player_id'], sequence=response['sequence'], turn=observation['turn'],
+        native_decision_id=decisions['decision_id'], source_contracts=source_contracts, data=data))
 
 
 def project(group: str, observation, decisions) -> dict:
@@ -72,8 +93,101 @@ def project(group: str, observation, decisions) -> dict:
     if type(player_id) is not int or not 0 <= player_id <= 63 or type(turn) is not int or turn < 0:
         raise ValueError('information observation identity is malformed')
 
+    if group == 'native_command_permissions':
+        if decisions.get('schema') not in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+            raise ValueError('Native command permissions require their explicit capability revision')
+        return copy.deepcopy(network_turn.validate_native_command_permissions(
+            decisions['native_command_permissions'], player_id, turn, decisions['sequence']))
+
     if group == 'economy':
         return economy_inputs.project(observation, decisions)
+
+    if group == 'diplomacy':
+        from . import diplomacy_overview
+        return copy.deepcopy(diplomacy_overview.validate(decisions['diplomacy_overview'], player_id, turn))
+
+    if group == 'trade':
+        from . import trade
+        if any(decisions[field] is None for field in fields):
+            raise ValueError('Public trade information is unavailable')
+        if decisions.get('schema') in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+            unavailable = network_turn.family_query_unavailable(decisions, 'change_trade_origin')
+            if (decisions.get('trade_origins') is None) != unavailable:
+                raise ValueError('Trade origin information differs from native reader admission')
+            trade.validate_decisions(decisions, observation, actions_closed=False)
+            return {'schema': TRADE_PERMISSION_GROUP_SCHEMA, 'player_id': player_id, 'turn': turn,
+                    'routes': copy.deepcopy(decisions['trade_routes']),
+                    'origins': copy.deepcopy(decisions['trade_origins']),
+                    'origins_status': (network_turn.NATIVE_STRATEGIC_READER_UNAVAILABLE
+                                       if unavailable else 'available')}
+        trade.validate_decisions(decisions, observation, actions_closed=False)
+        return {'schema': trade.GROUP_SCHEMA, 'player_id': player_id, 'turn': turn,
+                'routes': copy.deepcopy(decisions['trade_routes']),
+                'origins': copy.deepcopy(decisions['trade_origins'])}
+
+    if group == 'espionage':
+        from . import espionage
+        if decisions.get('schema') not in network_turn.ESPIONAGE_CAPABILITY_SCHEMAS:
+            raise ValueError('Espionage requires its explicit capability revision')
+        catalogue = decisions['espionage']
+        if catalogue is None:
+            raise ValueError('Public espionage information is unavailable')
+        espionage.compare_own(catalogue, observation)
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in espionage.ACTION_FIELDS]
+        if offered != espionage.actions(catalogue):
+            raise ValueError('Espionage choices differ from the native catalogue')
+        return copy.deepcopy(catalogue)
+
+    if group == 'spy_completion':
+        from . import spy_completion
+        if decisions.get('schema') not in network_turn.SPY_COMPLETION_CAPABILITY_SCHEMAS:
+            raise ValueError('Spy completion requires its explicit capability revision')
+        catalogue = decisions['spy_completion']
+        if catalogue is None:
+            raise ValueError('Public spy completion information is unavailable')
+        spy_completion.compare_own(catalogue, observation)
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in spy_completion.ACTION_FIELDS]
+        if offered != spy_completion.actions(catalogue):
+            raise ValueError('Spy completion choices differ from the native catalogue')
+        return copy.deepcopy(catalogue)
+
+    if group == 'world_congress_active_effects':
+        from . import world_congress_active_effects
+        if decisions.get('schema') not in network_turn.CONGRESS_ACTIVE_EFFECTS_CAPABILITY_SCHEMAS:
+            raise ValueError('Congress active effects require their explicit capability revision')
+        value=decisions['world_congress_active_effects']
+        world_congress_active_effects.validate_group(value,decisions['world_congress_active_effects_status'],
+            decisions['world_congress'],player_id,turn,decisions['sequence'])
+        if value is None:
+            raise ValueError('Public Congress active effects are unavailable: '+decisions['world_congress_active_effects_status'])
+        return copy.deepcopy(value)
+
+    if group == 'world_congress_review':
+        from . import world_congress_review
+        if decisions.get('schema') not in network_turn.WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS:
+            raise ValueError('Congress review requires its explicit capability revision')
+        value = decisions['world_congress_review']
+        world_congress_review.validate_group(value, decisions['world_congress_review_status'],
+            decisions['world_congress'], player_id, turn, decisions['sequence'])
+        if value is None:
+            raise ValueError('Public Congress review is unavailable: ' + decisions['world_congress_review_status'])
+        return copy.deepcopy(value)
+
+    if group == 'world_congress':
+        from . import world_congress
+        if decisions.get('schema') not in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS:
+            raise ValueError('Congress requires its explicit capability revision')
+        catalogue = decisions['world_congress']
+        if catalogue is None:
+            raise ValueError('Public Congress information is unavailable')
+        world_congress.compare_own(catalogue, observation, decisions['sequence'])
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in world_congress.CANDIDATE_FIELDS]
+        if offered != world_congress.actions(catalogue):
+            raise ValueError('Congress candidates differ from their exact parameter domains')
+        return copy.deepcopy(catalogue)
 
     if group == 'strategic_resources':
         from . import strategic_resources

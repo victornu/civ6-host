@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -32,10 +33,31 @@ CITY_LISTENER_SOURCE = (
     "work/host-extensions/xp2-host-slot20-static/source-profile-city-listener-v1.json",
     "470ef25a36de360294366c9ec3622141cf219ba501a6c56a3e9f2c4cc30c4216",
 )
+NATIVE02_SOURCE = (
+    "work/host-extensions/xp2-host-slot20-static/source-profile-native02-v1.json",
+    "eeeccad843287fccfd356155369fc3aa5e9250bb2816321e795c39e27f032d71",
+)
 CITY_LISTENER_PREFIX = ("0x17f098", "0x178ed0", "0x25c54c", "0x25d3f1", "0x25d459")
+NATIVE02_PREFIX = ("0x17f098", "0x17feda", "0x2e9e8c")
+NATIVE02_OBSERVED_CHAIN = ("0x17f098", "0x17feda", "0x2e9e8c", "0x2eda33", "0x2ead5b",
+    "0x2eadb4", "0x447ffe", "0x447dc8", "0x447e33", "0x42e2c6", "0x401537",
+    "0x5cacd", "0x5e343", "0x4b172", "0x63e2e9")
+NATIVE02_OBSERVED_CHAIN_BODY_STARTS = ("0x17f060", "0x17fe80", "0x2e9de0", "0x2ed850",
+    "0x2eaaa0", "0x2ead90", "0x447fb0", "0x447d70", "0x447df0", "0x42dc40",
+    "0x4012f0", "0x5ca80", "0x5e2d0", "0x4afc0", "0x63e2e0")
 _CITY_LISTENER_LITERAL = b"NEW_ACHIEVEMENT_4_14\0"
 FORMATION_CORE_RETURN_PREFIX = ("0x17f098", "0x17fa97", "0x226ed4", "0x1a33a5", "0x65a217")
 _FORMATION_LITERAL = b"NEW_ACHIEVEMENT_4_13\0"
+CONGRESS_SOURCE = (
+    "work/trade-common-client/congress-achievement-staging/source.json",
+    "1d3df505be559ae348892048c8985586845f55ea13867a526d4cfe730fb16906",
+)
+CONGRESS_PREFIX = ("0x17f098", "0x17cdc6", "0x3bc6b9", "0x3bf934")
+_CONGRESS_DATA = (
+    (0x9d0678, b"VSV_ACHIEVEMENT_21\0"),
+    (0x9c46f8, b"PlayerType\0"),
+    (0x9d0650, b"APPLY_DECREASED_DIPLO_VP_TO_PLAYER\0"),
+)
 CORE_MODULE = "GameCore_XP2_FinalRelease.dll"
 EXE_SHA256 = "e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63"
 HOST_GLOBAL_RVA = 0xB8AA80
@@ -251,18 +273,147 @@ def city_listener_source() -> dict:
     return proof
 
 
-def source_dependencies() -> dict[str, str]:
+def native02_source() -> dict:
+    """Verify the exact XP2 callback and receiver that safely ignore null."""
+    proof = _source(NATIVE02_SOURCE)
+    contract = proof.get("contract", {})
+    if (proof.get("schema") != "civ6-host.xp2-host-slot20-native02.static.v1"
+            or proof.get("images", {}).get("xp2", {}).get("sha256") != XP2_CORE_SHA256
+            or proof.get("parent_profile", {}).get("sha256") != SOURCE[1]
+            or tuple(contract.get("accepted_core_return_prefix", ())) != NATIVE02_PREFIX
+            or tuple(contract.get("observed_core_return_chain", ())) != NATIVE02_OBSERVED_CHAIN
+            or contract.get("shared_parent_sha256") != SOURCE[1]
+            or contract.get("host_slot") != "0x20"
+            or contract.get("host_global_rva") != "0xb8aa80"
+            or contract.get("platform_service_installed") is not False
+            or contract.get("platform_request_submitted") is not False
+            or contract.get("platform_success_reported") is not False
+            or proof.get("validation", {}).get("native_execution") is not False
+            or proof.get("validation", {}).get("process_memory_read") is not False
+            or proof.get("validation", {}).get("runtime_modified") is not False
+            or set(proof.get("bodies", {})) != set(NATIVE02_OBSERVED_CHAIN_BODY_STARTS)):
+        raise ValueError("XP2 native02 host+20 source identity changed")
+    for ref in proof.get("references", ()):
+        path = _path(ref["path"])
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != ref["sha256"]:
+            raise ValueError("XP2 native02 source reference changed: " + ref["path"])
+    trace = proof.get("trace", {})
+    trace_path = _path(trace.get("path", ""))
+    matches = []
+    for line in trace_path.read_bytes().splitlines(keepends=True):
+        try:
+            row = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if (row.get("stage") == "unsupported_host_contract" and row.get("slot") == "0x20"
+                and "Unproved XP2 optional achievement caller chain" in row.get("error", "")):
+            matches.append((line, row))
+    if (len(matches) != 1 or hashlib.sha256(matches[0][0]).hexdigest() != trace.get("line_sha256")
+            or tuple(row["rva"] for row in matches[0][1].get("native_stack", ())
+                     if row.get("module") == CORE_MODULE) != NATIVE02_OBSERVED_CHAIN):
+        raise ValueError("XP2 native02 trace evidence changed")
+    for name, body in proof["bodies"].items():
+        _verify_body(body, name)
+    joins = {
+        "0x17fe80": {("0x17fed5", "call 0x18017f060"),
+                     ("0x17feda", "mov rbp, qword ptr [rsp + 0x38]"),
+                     ("0x17fee9", "ret")},
+        "0x2e9de0": {("0x2e9e89", "call qword ptr [rax + 0x10]"),
+                     ("0x2e9e8c", "mov rdi, rbx")},
+    }
+    for start, required in joins.items():
+        rows = [row for fragment in proof["bodies"][start].get("fragments", ())
+                for row in fragment.get("instructions", ())]
+        if not required <= {(row["rva"], row["text"]) for row in rows}:
+            raise ValueError("XP2 native02 helper/callback/receiver join changed: " + start)
+    receiver_rows = [row for fragment in proof["bodies"]["0x2e9de0"].get("fragments", ())
+                     for row in fragment.get("instructions", ())]
+    receiver_rows.sort(key=lambda row: int(row["rva"], 16))
+    call_index = next(i for i, row in enumerate(receiver_rows) if row["rva"] == "0x2e9e89")
+    first_rax = next(row for row in receiver_rows[call_index + 1:]
+                     if re.search(r"\b(?:rax|eax|ax|al|ah)\b", row["text"]))
+    if first_rax["text"] != "mov rax, qword ptr [rcx]":
+        raise ValueError("XP2 native02 receiver reads callback result before overwrite")
+    return proof
+
+
+def congress_source(execution_image):
+    """Current-image resolution finalization; historical source stays separate."""
+    from .a0_policy_unlock_current import (
+        _require_image, CURRENT_PROFILE_ID, CURRENT_CORE_SHA256, CURRENT_EXE_SHA256)
+    _require_image(execution_image)
+    proof = _source(CONGRESS_SOURCE)
+    contract = proof.get('contract', {})
+    if (proof.get('schema') != 'civ6-host.xp2-congress-achievement-absence.static.v1'
+            or proof.get('execution_profile') != dict(id=CURRENT_PROFILE_ID,
+                core_sha256=CURRENT_CORE_SHA256, executable_sha256=CURRENT_EXE_SHA256,
+                reference_core_sha256=XP2_CORE_SHA256)
+            or proof.get('static_only') is not True
+            or any(proof.get(k) is not False for k in
+                   ('native_execution', 'process_memory_read', 'runtime_modified'))
+            or tuple(contract.get('accepted_core_return_prefix', ())) != CONGRESS_PREFIX
+            or contract.get('host_slot') != '0x20'
+            or contract.get('host_global_rva') != '0xb8aa80'
+            or contract.get('absent_service_result') != 'null'
+            or any(contract.get(k) is not False for k in ('service_installed',
+                'platform_request_submitted', 'platform_success_reported',
+                'caller_result_consumed', 'historical_image_new_route_admitted'))):
+        raise ValueError('XP2 Congress achievement source identity changed')
+    expected = {
+        '0x17f060': (('0x17f095', 'call qword ptr [rax + 0x20]'),
+                    ('0x17f09b', 'test rax, rax'), ('0x17f09e', 'je 0x18017f0f1')),
+        '0x17cd00': (('0x17cdc1', 'call 0x18017f060'),
+                    ('0x17cdc6', 'add rbx, 8')),
+        '0x3bc650': (('0x3bc6b6', 'call qword ptr [rax + 0x10]'),
+                    ('0x3bc6b9', 'mov rdi, rbx')),
+        '0x3bf880': (('0x3bf928', 'add rcx, 0xbb8'),
+                    ('0x3bf92f', 'call 0x1803bc650'),
+                    ('0x3bf934', 'mov rdx, rbx'), ('0x3bf937', 'mov rcx, r14'),
+                    ('0x3bf93a', 'call 0x1803bbac0')),
+        'thunk_17fac0': (('0x17fac7', 'jmp 0x18017cd00'),),
+        'delegate_ctor_16bd00': (('0x16bd00', 'lea rax, [rip + 0x8655d9]'),),
+        'registration_17ec64': (('0x17ec6b', 'call 0x18016bd00'),
+                               ('0x17ec73', 'lea rcx, [rsi + 0xbb8]')),
+    }
+    if set(proof.get('bodies', {})) != set(expected):
+        raise ValueError('XP2 Congress achievement body set changed')
+    for name, joins in expected.items():
+        body = proof['bodies'][name]
+        _verify_body(body, name)
+        rows = [r for f in body.get('fragments', ()) for r in f['instructions']]
+        rows = rows or body['instructions']
+        if not set(joins) <= {(r['rva'], r['text']) for r in rows}:
+            raise ValueError('XP2 Congress achievement call join changed')
+    if proof['bodies']['0x17f060']['sha256'] != source()['bodies']['helper_17f060']['sha256']:
+        raise ValueError('XP2 Congress no longer uses the shared null-service helper')
+    data = proof.get('data', ())
+    if ([(int(r['rva'],16),bytes.fromhex(r['raw_hex'])) for r in data[:3]] != list(_CONGRESS_DATA)
+            or len(data) != 4 or data[3] != dict(name='callback_vtable_slot',
+                rva='0x9d12f0',target_rva='0x17fac0',raw_hex=(0x18017fac0).to_bytes(8,'little').hex())):
+        raise ValueError('XP2 Congress achievement literal or delegate changed')
+    return proof
+
+
+def source_dependencies(*, execution_image=None) -> dict[str, str]:
     """Return immutable proof and source references required by the adapter."""
     proof = source()
+    native02 = native02_source()
     formation = formation_source()
     refs = [{"path": SOURCE[0], "sha256": SOURCE[1]}, *proof["references"],
             {"path": FORMATION_SOURCE[0], "sha256": FORMATION_SOURCE[1]}, *formation["references"],
             {"path": ERA_TRANSITION_SOURCE[0], "sha256": ERA_TRANSITION_SOURCE[1]},
             {"path": RAF30_SOURCE[0], "sha256": RAF30_SOURCE[1]},
-            {"path": CITY_LISTENER_SOURCE[0], "sha256": CITY_LISTENER_SOURCE[1]}]
+            {"path": CITY_LISTENER_SOURCE[0], "sha256": CITY_LISTENER_SOURCE[1]},
+            {"path": NATIVE02_SOURCE[0], "sha256": NATIVE02_SOURCE[1]}, *native02["references"]]
     city_listener_source()
+    native02_source()
     raf30_source()
     era_transition_source()
+    current_refs = []
+    if execution_image is not None:
+        congress = congress_source(execution_image)
+        refs.append(dict(path=CONGRESS_SOURCE[0], sha256=CONGRESS_SOURCE[1]))
+        current_refs = [*congress['references'], *congress['images'].values()]
     pins: dict[str, str] = {}
     for ref in refs:
         path = str(_path(ref["path"]))
@@ -270,6 +421,14 @@ def source_dependencies() -> dict[str, str]:
         if path in pins and pins[path] != digest:
             raise ValueError("Conflicting XP2 host+20 source dependency")
         pins[path] = digest
+    # New current-image records pin explicit file paths; the historical A0
+    # resource-only resolver retains its original strict relative-path rule.
+    from .resource_resolution import resolve_path
+    for ref in current_refs:
+        path = str(resolve_path(Path(ref['path'])).resolve())
+        if path in pins and pins[path] != ref['sha256']:
+            raise ValueError('Conflicting current XP2 host+20 source dependency')
+        pins[path] = ref['sha256']
     module_path = str(Path(__file__).resolve())
     module_digest = hashlib.sha256(Path(module_path).read_bytes()).hexdigest()
     if module_path in pins and pins[module_path] != module_digest:
@@ -286,19 +445,24 @@ def _read_exact(read, address: int, length: int) -> bytes:
     return value
 
 
-def verify_live(base: int, read, *, host_pointer: int) -> dict:
+def verify_live(base: int, read, *, host_pointer: int, execution_image=None) -> dict:
     """Match the pinned Core call chain and host-global owner to live memory."""
     if (type(base) is not int or base <= 0 or not callable(read)
             or type(host_pointer) is not int or host_pointer <= 0):
         raise ValueError("XP2 host+20 verification requires an exact Core and host")
     proof = source()
+    native02 = native02_source()
     count = spans = 0
     formation = formation_source()
     era = era_transition_source()
     raf30 = raf30_source()
     city_listener = city_listener_source()
+    congress = congress_source(execution_image) if execution_image is not None else None
+    congress_bodies = congress['bodies'] if congress is not None else {}
+    live_native02 = {name: native02["bodies"][name] for name in ("0x17fe80", "0x2e9de0")}
     for name, body in {**proof["bodies"], **formation["bodies"], **era["bodies"],
-                       **raf30["bodies"], **city_listener["bodies"]}.items():
+                       **live_native02,
+                       **raf30["bodies"], **city_listener["bodies"], **congress_bodies}.items():
         fragments = body.get("fragments") or [body]
         for fragment in fragments:
             raw = bytes.fromhex(fragment.get("raw_hex", ""))
@@ -323,9 +487,19 @@ def verify_live(base: int, read, *, host_pointer: int) -> dict:
         raise ValueError("XP2 RAF30 achievement literal changed")
     if _read_exact(read, base + 0x9cee08, len(_CITY_LISTENER_LITERAL)) != _CITY_LISTENER_LITERAL:
         raise ValueError("XP2 city listener achievement literal changed")
+    current_receipt = {}
+    if congress is not None:
+        for rva, expected in (*_CONGRESS_DATA,
+                (0x9d12f0, (base + 0x17fac0).to_bytes(8, 'little'))):
+            if _read_exact(read, base + rva, len(expected)) != expected:
+                raise ValueError('XP2 Congress achievement live data changed')
+            count += len(expected); spans += 1
+        current_receipt = dict(congress_source_sha256=CONGRESS_SOURCE[1],
+            execution_image_sha256=execution_image.image_sha256)
     count += len(_ERA_TRANSITION_LITERAL) + len(_RAF30_LITERAL) + len(_CITY_LISTENER_LITERAL)
     spans += 3
-    return {"source_sha256": SOURCE[1], "formation_source_sha256": FORMATION_SOURCE[1],
+    return {**current_receipt, "source_sha256": SOURCE[1], "native02_source_sha256": NATIVE02_SOURCE[1],
+            "formation_source_sha256": FORMATION_SOURCE[1],
             "era_transition_source_sha256": ERA_TRANSITION_SOURCE[1], "raf30_source_sha256": RAF30_SOURCE[1],
             "core_sha256": XP2_CORE_SHA256,
             "city_listener_source_sha256": CITY_LISTENER_SOURCE[1],
@@ -333,7 +507,7 @@ def verify_live(base: int, read, *, host_pointer: int) -> dict:
             "host_global_rva": hex(HOST_GLOBAL_RVA), "native_execution": False}
 
 
-def select_contract(frames, *, service_installed: bool = False) -> str:
+def select_contract(frames, *, service_installed: bool = False, execution_image=None) -> str:
     """Admit only complete, source-proved Core return prefix."""
     source()
     if service_installed is not False:
@@ -349,8 +523,15 @@ def select_contract(frames, *, service_installed: bool = False) -> str:
     if any(frame["module"] != CORE_MODULE for frame in core_frames):
         raise ValueError("Unproved XP2 optional achievement caller chain")
     returns = tuple(frame["rva"] for frame in core_frames)
+    if execution_image is not None:
+        congress_source(execution_image)
+        if returns[:len(CONGRESS_PREFIX)] == CONGRESS_PREFIX:
+            return CONGRESS_SOURCE[1]
     if returns[:len(ACCEPTED_CORE_RETURN_PREFIX)] == ACCEPTED_CORE_RETURN_PREFIX:
         return SOURCE[1]
+    if returns[:len(NATIVE02_PREFIX)] == NATIVE02_PREFIX:
+        native02_source()
+        return NATIVE02_SOURCE[1]
     if returns[:len(FORMATION_CORE_RETURN_PREFIX)] == FORMATION_CORE_RETURN_PREFIX:
         formation_source()
         return FORMATION_SOURCE[1]

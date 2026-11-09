@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import struct
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from civ6_host.runtime.native import native_gameplay_empty as empty
@@ -17,6 +18,8 @@ from civ6_host.runtime import gameplay_active_profiles as active_profiles
 
 BASE = empty.BASE_CORE_SHA256
 EXPANSION_CORES = tuple(sorted(active_profiles.SUPPORTED_CORES - {BASE}))
+HISTORICAL_EXPANSION_CORES = tuple(core for core in EXPANSION_CORES
+    if core != active_profiles.CURRENT_XP2_CORE_SHA256)
 
 
 class Memory:
@@ -71,6 +74,9 @@ class Memory:
         return result
 
     def capture(self, **options):
+        if self.core_sha256 == active_profiles.CURRENT_XP2_CORE_SHA256:
+            return empty.read_gameplay_state(self.read, self.base,
+                core_sha256=self.core_sha256, **options)
         return empty.read_gameplay_state(self.read, self.base,
             expected_auxiliary_vtable=self.auxiliary_vtable,
             core_sha256=self.core_sha256, **options)
@@ -101,26 +107,43 @@ class ProcessFixture:
     def read(self, address, size):
         return self.memory.read(address, size)
 
-    def selection(self):
-        return {'schema': 'civ6rl.official_gameplay_selection994.capture.v1',
+    def selection(self, current=False):
+        snapshot = {'schema': 'civ6rl.gameplay_selection994.memory_snapshot.v2'
+                if current else 'civ6rl.gameplay_selection994.memory_snapshot.v1',
+            'record_count': 0, 'records': [], 'selected_paths': [], 'bounds': {}}
+        if current:
+            snapshot.update(executable_sha256=empty.CURRENT_EXE_SHA256,
+                current_correspondence_sha256='b7a84db116b87f28890f89622553768c8024c2def153cf935df155ea09b7e0ca',
+                resolved_content_captured=True)
+        return {'schema': 'civ6rl.official_gameplay_selection994.capture.v2'
+                if current else 'civ6rl.official_gameplay_selection994.capture.v1',
             'process': self.identity(), 'exe_module': copy.deepcopy(self.exe),
             'gamecore_module': {**self.core, 'sha256': self.core_sha256},
             'execution_proven': False,
-            'snapshot': {'schema': 'civ6rl.gameplay_selection994.memory_snapshot.v1',
-                'record_count': 0, 'records': [], 'selected_paths': [], 'bounds': {}}}
+            'snapshot': snapshot}
 
 
 class ExpansionActiveListTests(unittest.TestCase):
-    def test_supported_profiles_are_base_plus_two_expansions(self):
-        self.assertEqual(len(active_profiles.SUPPORTED_CORES), 3)
+    def test_supported_profiles_include_current_xp2_with_separate_evidence(self):
+        self.assertEqual(len(active_profiles.SUPPORTED_CORES), 4)
         self.assertIn(BASE, active_profiles.SUPPORTED_CORES)
-        self.assertEqual(len(EXPANSION_CORES), 2)
+        self.assertEqual(len(EXPANSION_CORES), 3)
         for core_sha256 in active_profiles.SUPPORTED_CORES:
             self.assertEqual(len(active_profiles.source_digest(core_sha256)), 64)
             profile = empty.source_profile(core_sha256=core_sha256)
             self.assertTrue({'status', 'image', 'layout', 'functions',
                              'load_vtable_slots', 'checks'}.issubset(profile))
-            self.assertEqual(profile['image']['sha256'], core_sha256)
+            if core_sha256 == active_profiles.CURRENT_XP2_CORE_SHA256:
+                self.assertEqual(profile['image']['sha256'], active_profiles.XP2_CORE_SHA256)
+                evidence = profile['runtime_execution_image']
+                self.assertEqual(evidence['image_sha256'], core_sha256)
+                self.assertEqual(evidence['reference_core_sha256'], active_profiles.XP2_CORE_SHA256)
+                self.assertEqual(evidence['active_list_group'], active_profiles.CURRENT_XP2_ACTIVE_GROUP)
+                self.assertEqual(evidence['active_list_captured_spans'], 589)
+                self.assertEqual(evidence['active_list_matching_spans'], 589)
+                self.assertFalse(evidence['native_execution_performed'])
+            else:
+                self.assertEqual(profile['image']['sha256'], core_sha256)
             self.assertEqual(profile['status'],
                 'base_empty_active_list_and_load_consumption_source_verified'
                 if core_sha256 == BASE else 'static_layout_verified_no_execution')
@@ -158,6 +181,48 @@ class ExpansionActiveListTests(unittest.TestCase):
                 self.assertFalse(any(address >= Memory.storage for address, _ in memory.calls))
                 self.assertFalse(nonempty['execution_proven'])
 
+    def test_current_xp2_uses_active_chain_without_claiming_auxiliary_identity(self):
+        core = active_profiles.CURRENT_XP2_CORE_SHA256
+        memory = Memory(core)
+        state = memory.capture()
+        self.assertEqual(state['schema'], active_profiles.CURRENT_EXPANSION_STATE_SCHEMA)
+        self.assertEqual(state['core_sha256'], core)
+        self.assertEqual(state['active_count'], 0)
+        self.assertIsNone(state['auxiliary_address'])
+        self.assertIsNone(state['auxiliary_vtable'])
+        self.assertFalse(state['auxiliary_identity_checked'])
+        self.assertFalse(any(address in (Memory.base + memory.layout['auxiliary_global_rva'],)
+                             for address, _ in memory.calls))
+        with self.assertRaisesRegex(empty.ContentSnapshotError, 'no qualified auxiliary'):
+            empty.read_gameplay_state(memory.read, memory.base, core_sha256=core,
+                expected_auxiliary_vtable=memory.auxiliary_vtable)
+
+    def test_current_capture_joins_current_exe_and_current_selection_profile(self):
+        core = active_profiles.CURRENT_XP2_CORE_SHA256
+        process = ProcessFixture(core)
+        selected = process.selection(current=True)
+        profile = __import__('civ6_host.runtime.execution_images', fromlist=['select'])
+        image = profile.select(profile._PROFILE.id, core_path=profile.known_path(profile._PROFILE.id))
+        verification = SimpleNamespace(profile_id=image.id, image_sha256=core,
+            manifest_sha256=image.correspondence_manifest_sha256, executable=True,
+            game_qualified=False, admission_scope='bounded_native_trial',
+            verified_groups=(active_profiles.CURRENT_XP2_ACTIVE_GROUP,),
+            native_execution_performed=False)
+        with patch.object(empty, 'capture_selection_process',
+                side_effect=[selected, copy.deepcopy(selected)]) as capture_selection, \
+             patch.object(empty, '_file_digest',
+                side_effect=[empty.CURRENT_EXE_SHA256, core]), \
+             patch.object(active_profiles.execution_images, 'verify', return_value=verification):
+            report = empty.capture_process(process, executable_sha256=empty.CURRENT_EXE_SHA256)
+            stable = empty.stable_capture_identity(report)
+        self.assertEqual(capture_selection.call_args.kwargs['executable_sha256'],
+                         empty.CURRENT_EXE_SHA256)
+        self.assertTrue(capture_selection.call_args.kwargs['include_resolved_content'])
+        self.assertEqual(report['status'], 'selected_and_active_empty_observed')
+        self.assertEqual(report['state']['schema'], active_profiles.CURRENT_EXPANSION_STATE_SCHEMA)
+        self.assertIsNone(report['state']['auxiliary_vtable'])
+        self.assertEqual(stable['selection']['schema'], 'civ6rl.gameplay_selection994.memory_snapshot.v2')
+
     def test_expansion_loading_and_uninitialized_state_are_refused(self):
         for core_sha256 in EXPANSION_CORES:
             for key, owner, value in (
@@ -191,7 +256,7 @@ class ExpansionActiveListTests(unittest.TestCase):
                 memory.capture()
 
     def test_source_identity_must_match_the_selected_engine(self):
-        for core_sha256 in EXPANSION_CORES:
+        for core_sha256 in HISTORICAL_EXPANSION_CORES:
             with self.subTest(core=core_sha256):
                 original_source = active_profiles.SOURCE
                 with patch.object(active_profiles, 'SOURCE',
@@ -221,7 +286,7 @@ class ExpansionActiveListTests(unittest.TestCase):
                     empty.stable_capture_identity(report)
 
     def test_capture_process_selects_only_the_matching_known_engine_reader(self):
-        for core_sha256 in EXPANSION_CORES:
+        for core_sha256 in HISTORICAL_EXPANSION_CORES:
             process = ProcessFixture(core_sha256)
             selected = process.selection()
             state = process.memory.capture()

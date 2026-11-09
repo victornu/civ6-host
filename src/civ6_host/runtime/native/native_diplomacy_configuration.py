@@ -50,7 +50,50 @@ def leader(raw, read):
         data.extend(value)
     raise RuntimeError('Native leader identifier exceeds read bound')
 
-def read(owner, statement):
+def read(owner, statement, *, core_sha256=None):
+    if core_sha256 is not None:
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        if (core_sha256 != XP2_CORE_SHA256
+                or getattr(getattr(owner, 'load_abi', None), 'core_sha256', None) != XP2_CORE_SHA256):
+            raise ValueError('XP2 diplomacy configuration requires its exact saved owner profile')
+        from civ6_host.runtime import xp2_world_configuration as xp2
+        from civ6_host.runtime.native import native_world_configuration as shared
+        from civ6_host.runtime.configuration_profiles import configuration_abi
+        source = xp2.verify_source()
+        app, base = owner.owner, owner.core._handle
+        reader = owner.runtime.read
+        call = getattr(owner.runtime, 'call', None)
+        if getattr(app, '_configuration_abi', None) != configuration_abi(XP2_CORE_SHA256):
+            raise ValueError('XP2 diplomacy requires its restored application configuration provider')
+        app.require_context(base, owner.context)
+        before = app.snapshot()
+        f = statement['fields']
+        from_id, initiator = f['FromPlayer'], f['Initiator']
+        if type(from_id) is not int or not 0 <= from_id < 64:
+            raise ValueError('Invalid XP2 diplomacy configuration participant')
+        ids = {from_id}
+        if type(initiator) is int and 0 <= initiator < 64:
+            ids.add(initiator)
+        xp2._live_getter(base, reader, source)
+        result = {}
+        for pid in sorted(ids):
+            pointer = before['players'][pid]
+            slot = shared.human(xp2._value(base, pointer, 'SLOT_STATUS', reader, call, source))
+            row = {}
+            if pid == from_id:
+                row['leader'] = leader(xp2._value(base, pointer, 'LEADER_TYPE_NAME', reader, call, source), reader)
+            if pid == initiator:
+                row['human'] = slot
+            result[pid] = row
+        if app.snapshot() != before:
+            raise RuntimeError('XP2 application provider changed during diplomacy read')
+        app.require_context(base, owner.context)
+        owner.emit('native_diplomacy_application_configuration_read', players=result,
+            provider='restored_application_B', source_sha256=source['provider_source_sha256'],
+            shared_exe_source_sha256=source['shared_exe_source_sha256'],
+            gameplay_player_human_substituted=False, native_configuration_written=False,
+            eligible_for_training=False)
+        return result
     verify_source()
     app = owner.owner
     base = owner.core._handle

@@ -105,7 +105,8 @@ def work_decisions():
 
 class InformationGroupsTests(unittest.TestCase):
     def test_public_group_names_and_required_fields(self):
-        self.assertEqual(information.PUBLIC_GROUPS, ('economy', 'production', 'growth', 'unit_work', 'combat', 'display'))
+        self.assertEqual(information.PUBLIC_GROUPS, ('economy', 'production', 'growth', 'unit_work',
+            'combat', 'display', 'strategic_resources', 'diplomacy', 'trade'))
         from civ6_host.contracts.network_turn import CAPABILITY_UNIT_WORK_STATE_SCHEMA
         self.assertEqual(information.required_fields('unit_work'),
                          ('unit_work_state', 'unit_work_info', 'unit_work'))
@@ -114,6 +115,7 @@ class InformationGroupsTests(unittest.TestCase):
         self.assertEqual(information.required_fields('combat'), ('unit_attacks','queued_orders'))
         self.assertEqual(information.required_fields('production'),
                          ('production', 'production_info', 'production_queues', 'candidates'))
+        self.assertEqual(information.required_fields('trade'), ('trade_routes', 'trade_origins'))
         with self.assertRaisesRegex(ValueError, 'Unknown public information group'):
             information.required_fields('critic')
         with self.assertRaisesRegex(ValueError, 'Unknown public information group'):

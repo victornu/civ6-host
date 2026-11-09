@@ -187,6 +187,30 @@ class SavedLoadOwnerTests(unittest.TestCase):
             self.assertEqual(o.phase,'closed')
             self.assertEqual([row[-1] for row in f.calls if row[0]=='postload'],[(0,1)])
 
+    def test_bbg_view_listener_runs_after_publication_before_observation(self):
+        from civ6_host.runtime import xp2_bbg_inputs, xp2_bbg_view_ready
+
+        with Fixture(flags=dict(unit_commands_candidate=False)) as f:
+            backend = f.backend
+            backend.load_abi = NS(core_sha256=XP2_CORE_SHA256)
+            backend._xp2_postload_requested = True
+            backend.loaded_roster = b'1|44|26|0|1'
+            backend.inputs.official_bundle = xp2_bbg_inputs.REFERENCE
+            backend.captured_bundle = NS(reference=xp2_bbg_inputs.REFERENCE)
+            closure = dict(f.closure, input_profile='xp2-lan')
+            with patch('civ6_host.runtime.captured_saved_load.validate_candidate_inputs'):
+                owner = SavedLoadOwner.from_loaded(backend, closure, f.emit)
+            with patch.object(xp2_bbg_view_ready, 'deliver', side_effect=lambda pub: f.mark('view_ready', pub)):
+                owner.populate_caches()
+                owner.postload()
+                self.assertNotIn('view_ready', [row[0] for row in f.calls])
+                owner.publish()
+                owner.observe_initial()
+            stages = [row[0] for row in f.calls]
+            self.assertEqual(stages.count('view_ready'), 1)
+            self.assertEqual(stages[stages.index('view_ready')-1:stages.index('view_ready')+2],
+                             ['publish', 'view_ready', 'view_create'])
+
     def test_xp2_attachment_refuses_incomplete_command_lifecycle_before_work(self):
         with Fixture() as f:
             closure=dict(f.closure,input_profile='xp2-lan',observe_player_candidate=False)

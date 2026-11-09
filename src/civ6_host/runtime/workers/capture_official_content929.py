@@ -13,6 +13,7 @@ import json
 import os
 import sys
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('tools/capture_official_content929.py')))).resolve().parents[1]
+from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
 from civ6_host.runtime.native.native_resolved_content import EXE_SHA
 from civ6_host.runtime.native.native_resolved_content import read_resolved_content
 from civ6_host.runtime.native.native_resolved_content import source_profile
@@ -102,9 +103,9 @@ class ReadOnlyProcess:
             raise RuntimeError('Partial ReadProcessMemory result')
         return buffer.raw
 
-def capture(pid):
-    expected = _resolve_resource_path(_resolve_resource_path(Path(source_profile()['image']['path']))).resolve(strict=True)
-    if hashlib.sha256(_resolve_resource_path(expected).read_bytes()).hexdigest() != EXE_SHA:
+def capture(pid, *, executable_sha256=EXE_SHA):
+    expected = _resolve_resource_path(_resolve_resource_path(Path(source_profile(executable_sha256)['image']['path']))).resolve(strict=True)
+    if hashlib.sha256(_resolve_resource_path(expected).read_bytes()).hexdigest() != executable_sha256:
         raise ValueError('Installed Civ6 image differs from pinned source')
     with ReadOnlyProcess(pid) as process:
         identity = process.identity()
@@ -119,28 +120,29 @@ def capture(pid):
             raise ValueError('Capture requires exactly one loaded GameCore image')
         core = gamecores[0]
         core_sha = hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(core['path']))).read_bytes()).hexdigest()
-        state = read_resolved_content(process.read, main[0]['base'])
+        state = read_resolved_content(process.read, main[0]['base'], executable_sha256=executable_sha256)
         if process.identity() != identity:
             raise RuntimeError('Process identity changed during capture')
         after = process.modules()
         for module in [*main, *gamecores]:
             if module not in after:
                 raise RuntimeError('A relevant module changed during capture')
-        if hashlib.sha256(_resolve_resource_path(expected).read_bytes()).hexdigest() != EXE_SHA:
+        if hashlib.sha256(_resolve_resource_path(expected).read_bytes()).hexdigest() != executable_sha256:
             raise RuntimeError('EXE file changed during capture')
         if hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(core['path']))).read_bytes()).hexdigest() != core_sha:
             raise RuntimeError('GameCore file changed during capture')
-    return {'schema': 'civ6rl.official_resolved_content929.capture.v1', 'process': identity, 'exe_module': main[0], 'gamecore_module': {**core, 'sha256': core_sha}, 'snapshot': state, 'read_only_process_rights': PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 'game_executable_launched': False, 'remote_code_executed': False, 'process_suspended': False, 'memory_written': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False}
+    return {'schema': 'civ6rl.official_resolved_content929.capture.v2' if executable_sha256 == CURRENT_EXE_SHA else 'civ6rl.official_resolved_content929.capture.v1', 'process': identity, 'exe_module': main[0], 'gamecore_module': {**core, 'sha256': core_sha}, 'snapshot': state, 'read_only_process_rights': PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 'game_executable_launched': False, 'remote_code_executed': False, 'process_suspended': False, 'memory_written': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pid', required=True, type=int)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--executable-sha256', choices=(EXE_SHA, CURRENT_EXE_SHA), default=EXE_SHA)
     args = parser.parse_args()
     out = _resolve_resource_path(args.output).resolve()
     if not out.is_relative_to(ROOT / 'work') or _resolve_resource_path(out).exists():
         raise ValueError('Use a fresh output path beneath project work/')
-    result = capture(args.pid)
+    result = capture(args.pid, executable_sha256=args.executable_sha256)
     out.parent.mkdir(parents=True, exist_ok=True)
     with _resolve_resource_path(out).open('x', encoding='utf-8') as stream:
         json.dump(result, stream, indent=2)

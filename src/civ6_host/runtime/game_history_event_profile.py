@@ -83,13 +83,21 @@ def verify_source():
     return p,era
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     p,era=verify_source()
     refs=[dict(path=path,sha256=sha) for path,sha in (SOURCE,ERA_SOURCE)]
-    refs.extend((*p['images'].values(),*p['references']))
-    return {str(resolve_path(resource_root()/r['path']).resolve()):r['sha256'] for r in refs}
+    refs.extend((*p['references'],))
+    pins={str(resolve_path(resource_root()/r['path']).resolve()):r['sha256'] for r in refs}
+    if execution_image is None:
+        pins.update({str(resolve_path(resource_root()/r['path']).resolve()):r['sha256']
+                     for r in p['images'].values()})
+    else:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                                             provenance_images=p['images'].values())
+    return pins
 
 
 def receiver_rows():

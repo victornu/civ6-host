@@ -40,7 +40,9 @@ class ControlInputService(HostControllerQuery):
         self.addresses={}
         host._control_input_owner=self
         try:
-            self.code=NativeControllerCode()
+            execution_image=getattr(core,'_civ6_host_execution_image',None)
+            self.code=(NativeControllerCode() if execution_image is None else
+                       NativeControllerCode(execution_image=execution_image))
             self.turn_begin_state=NativeControllerTurnState(self.code,emit)
             deferred.turn_begin_state=self.turn_begin_state
             # The existing callback's source contract reads the supplied session

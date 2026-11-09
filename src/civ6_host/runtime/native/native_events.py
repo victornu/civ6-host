@@ -92,11 +92,19 @@ class NativeEventRecorder:
         if not name or _resolve_resource_path(Path(name)).name != name or any((c in name for c in '/\\:')) or (name in ('.', '..')):
             self.host._fatal('unverified native event filename', name=name)
         path = self.root / name
-        if _resolve_resource_path(path).exists():
+        win32_path = str(path)
+        path_units = len(win32_path.encode('utf-16-le', errors='surrogatepass')) // 2
+        if path_units >= 260 and not win32_path.startswith('\\\\?\\'):
+            if win32_path.startswith('\\\\'):
+                win32_path = '\\\\?\\UNC\\' + win32_path[2:]
+            else:
+                win32_path = '\\\\?\\' + win32_path
+        if Path(win32_path).exists():
             self.host._fatal('native event file already exists', name=name)
-        handle = self.kernel.CreateFileW(str(path), 1073741824, 1, None, 2, 134217856, None)
+        handle = self.kernel.CreateFileW(win32_path, 1073741824, 1, None, 2, 134217856, None)
         if handle in (None, C.c_void_p(-1).value):
-            self.host._fatal('native event open failed', name=name, error=C.get_last_error())
+            self.host._fatal('native event open failed', name=name, error=C.get_last_error(),
+                             path_utf16_units=path_units)
         size = C.c_int64()
         if not self.kernel.GetFileSizeEx(handle, C.byref(size)) or size.value:
             self.kernel.CloseHandle(handle)

@@ -20,7 +20,8 @@ def enable(owner,backend):
         raise ValueError('District producer state already exists')
     from .district_damage_profile import bind_owner
     from .native.native_deferred_empty_profile import validate_empty_profile_record
-    profile=bind_owner(backend,backend.core,owner.read)
+    execution_image=getattr(backend.core,'_civ6_host_execution_image',None)
+    profile=bind_owner(backend,backend.core,owner.read,execution_image=execution_image)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('District callbacks overlap an existing producer')
     for kind,size in profile.record_sizes.items():

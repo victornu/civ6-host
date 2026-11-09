@@ -16,6 +16,8 @@ from .resource_resolution import resolve_path
 
 SOURCE = ('work/host-extensions/xp2-world-input-static/source-profile-v1.json',
           '4f52cd6551bcb61b7af2d4e23571eb300c7c8b55ad34b6b94e0387c94a9e72f3')
+SWAP_SOURCE = ('work/host-extensions/xp2-world-input-static/swap-units-v1.json',
+               '442fb48d1ec084bc8f36b4da810598027abd5d61463d86ea62372f727262e798')
 CALLBACKS = {'Unit.GetComponentID': 0x6BCB00, 'Unit.GetPlotId': 0x6BD340,
     'Unit.GetCombat': 0x6BCAB0, 'Unit.GetRangedCombat': 0x6BD4F0,
     'Unit.GetBombardCombat': 0x6BCA10, 'Map.GetGridSize': 0x6A2430,
@@ -177,23 +179,91 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return proof
 
 
-def source_dependencies(core_sha256=XP2_CORE_SHA256):
+def verify_swap_source():
+    """Join the existing exact XP2 route to its inherited SWAP_UNITS branch."""
+    proof = verify_source(XP2_CORE_SHA256)
+    swap = _source(SWAP_SOURCE)
+    route = proof['ui_route']['shared_functions']
+    expected = {
+        'schema': 'civ6_host.xp2_world_input_swap.static.v1',
+        'base_profile': {'path': SOURCE[0], 'sha256': SOURCE[1]},
+        'official_functions': {
+            name: {'file': route[name]['file'],
+                   'extracted_sha256': route[name]['extracted_sha256']}
+            for name in ('MoveUnitToPlot', 'RequestMoveOperation')},
+        'route': {
+            'operation_symbol': 'UnitOperationTypes.SWAP_UNITS',
+            'legality_call': 'UnitManager.CanStartOperation(kUnit, UnitOperationTypes.SWAP_UNITS, nil, tParameters)',
+            'request_call': 'UnitManager.RequestOperation(kUnit, UnitOperationTypes.SWAP_UNITS, tParameters)',
+            'parameters': {
+                'x': 'UnitOperationTypes.PARAM_X = plotX',
+                'y': 'UnitOperationTypes.PARAM_Y = plotY',
+                'modifiers': 'UnitOperationTypes.PARAM_MODIFIERS = UnitOperationMoveModifiers.ATTACK + UnitOperationMoveModifiers.MOVE_IGNORE_UNEXPLORED_DESTINATION'},
+            'request_abi': 'UnitManager.RequestOperation(unit, operation, parameters)',
+            'legality_owner': 'Official GameCore CanStartOperation decides eligibility; host does not recreate legality.',
+            'effect_boundary': 'The host reports the native request and archive receipt only; swap effect requires a native witness.'},
+        'scope': {
+            'engine_sha256': XP2_CORE_SHA256,
+            'candidate_operations_added': ('SWAP_UNITS',),
+            'war_confirmation_admitted': False,
+            'other_request_operations_admitted': False,
+            'full_movement_or_combat_qualified': False}}
+    if swap != expected:
+        raise ValueError('XP2 swap source supplement differs from its exact inherited UI route')
+    return swap
+
+
+def adapt_request_source(raw):
+    """Admit only official MOVE_TO and CanStart-gated SWAP_UNITS requests."""
+    verify_swap_source()
+    changes = (
+        (b'local nativeUnitManager=UnitManager',
+         b'local unqualified=false\nlocal nativeUnitManager=UnitManager'),
+        (b' return nativeRequest(requestUnit,operation,parameters)',
+         b" if operationName~='MOVE_TO' and operationName~='SWAP_UNITS' then unqualified=true;return end\n return nativeRequest(requestUnit,operation,parameters)"),
+        (b"if warPrompt~=nil then\n assert(requestCount==0,'war prompt also issued a native request')",
+         b"if unqualified or warPrompt~=nil then\n assert(requestCount==(unqualified and 1 or 0),'ambiguous unqualified click')\n return outcome('unsupported',nil,nil,nil,nil)\nend\nif warPrompt~=nil then\n assert(requestCount==0,'war prompt also issued a native request')"))
+    for before, after in changes:
+        if raw.count(before) != 1:
+            raise ValueError('XP2 official click seam changed before swap guard')
+        raw = raw.replace(before, after)
+    return raw
+
+
+def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
     proof = verify_source(core_sha256)
-    refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), proof['extractor'], proof['image'],
+    if execution_image is not None and core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 world-input ABI')
+    if execution_image is not None:
+        image_path = Path(proof['image']['path']).resolve()
+        if (str(image_path) != str(Path(execution_image.path).resolve())
+                or proof['image']['sha256'] != execution_image.reference_core_sha256):
+            raise ValueError('XP2 world-input provenance differs from the selected execution/reference pair')
+    refs = [dict(path=SOURCE[0], sha256=SOURCE[1]),
+            dict(path=SWAP_SOURCE[0], sha256=SWAP_SOURCE[1]), proof['extractor'], proof['image'],
             *proof['references'], *proof['official_ui']]
     result = {}
     for row in refs:
         path = resolve_path(resource_root() / row['path']).resolve()
-        if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+        if execution_image is None and hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
             raise ValueError('XP2 world-input dependency changed: ' + str(path))
         result[str(path)] = row['sha256']
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    result = materialize_runtime_source_pins(result, execution_image=execution_image,
+        provenance_images=(proof['image'],))
     from .xp1_status_profiles import source_dependencies as status
     from .unit_operation_ui_profile import source_dependencies as operation
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     for provider in (status, operation):
-        for path, digest in provider(core_sha256=XP2_CORE_SHA256).items():
+        for path, digest in provider(core_sha256=XP2_CORE_SHA256, **execution_options).items():
             if path in result and result[path] != digest:
                 raise ValueError('Conflicting XP2 world-input source pins')
             result[path] = digest
+    result = materialize_runtime_source_pins(result, execution_image=execution_image,
+        provenance_images=(proof['image'],))
+    from .a0_family_source import verify_pinned_files
+    verify_pinned_files(result)
     return result
 
 

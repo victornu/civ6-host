@@ -7,6 +7,7 @@ from civ6_host.runtime import a0_foundation_events as foundation
 from civ6_host.runtime import a0_game_history_events as events
 from civ6_host.runtime import foundation_event_profile as project
 from civ6_host.runtime import xp2_history_event_profile as source
+from civ6_host.runtime import xp2_wonder_completion
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 from test_xp1_turn_a0 import scalar
 from test_xp2_turn_notifications import XP2ComposedNotifications
@@ -28,6 +29,12 @@ def _install_history_with_turn_units(owner, backend, original):
         memory.put(memory.core_base + rva, raw)
     for rva, raw in source.age_core_fragments():
         memory.put(memory.core_base + rva, raw)
+    for rva, raw in source.property_core_fragments():
+        memory.put(memory.core_base + rva, raw)
+    for body in xp2_wonder_completion.source()[1]['functions'].values():
+        for fragment in body['fragments']:
+            memory.put(memory.core_base + int(fragment['start_rva'], 16),
+                       bytes.fromhex(fragment['raw_hex']))
     # This saved-owner fixture predates the XP2 reader identity field; bind it
     # to the exact ABI already carried by the real backend.
     owner.arguments.reader.core_sha256 = backend.load_abi.core_sha256
@@ -87,12 +94,11 @@ class XP2GameHistoryTests(unittest.TestCase):
         self.assertIs(owner.history_event_profile, owner._history_event_profile)
         self.assertEqual(set(owner.history_event_profile.record_types_by_kind),
                          {source.HISTORY_KIND, source.ERA_KIND, source.ERA_SCORE_KIND,
-                          source.TURN21_KIND, 0x8C6B2399, *source.DESCRIPTOR_EVENTS, *source.AGE_EVENTS})
+                          source.TURN21_KIND, source.PROPERTY_KIND, 0x8C6B2399,
+                          *source.DESCRIPTOR_EVENTS, *source.AGE_EVENTS})
         self.assertEqual(owner.foundation_event_profile.record_types_by_kind[project.PROJECT_KIND],
                          frozenset((96, 99, 100)))
         self.assertIsNone(owner.placement_event_profile)
-        self.assertFalse(owner.handles_kind(0x4082A91E))
-
         emissions = (
             (source.HISTORY_KIND, self.fields(3, 4), 0x105, 0),
             (source.ERA_KIND, self.fields(5, 6), 0x104, 6),
@@ -107,6 +113,8 @@ class XP2GameHistoryTests(unittest.TestCase):
                           0xD6FCF3E4: scalar(2, 0)}, 0x108, 6),
             (0x2C333AC8, {0xA1E5A149: scalar(3, 0),
                           0xD6FCF3E4: scalar(2, 1)}, 0x107, 4),
+            (source.PROPERTY_KIND, {0xA1E5A149: scalar(3, 0),
+                                    0xD6FCF3E4: scalar(2, 0xBBAABBCC)}, 0x106, 0),
         )
         for sequence, (kind, fields, record_type, flag) in enumerate(emissions, 1):
             with self.subTest(kind=hex(kind), sequence=sequence):
@@ -118,8 +126,8 @@ class XP2GameHistoryTests(unittest.TestCase):
                 self.assertEqual(struct.unpack_from('<I', record, 72)[0], flag)
                 expected_b = fields.get(0xA1FBC372, bytes(24))[8:12]
                 expected_b = int.from_bytes(expected_b, 'little') if isinstance(expected_b, bytes) else expected_b
-                self.assertEqual(struct.unpack_from('<3I', record, 80),
-                                 (sequence, int.from_bytes(fields[0xD6FCF3E4][8:12], 'little'), expected_b))
+                expected_a = 0 if record_type == 0x106 else int.from_bytes(fields[0xD6FCF3E4][8:12], 'little')
+                self.assertEqual(struct.unpack_from('<3I', record, 80), (sequence, expected_a, expected_b))
                 self.assertEqual(struct.unpack_from('<I', record, 92)[0],
                                  30 if record_type == 0xE2 else 0)
                 self.assertEqual(graph.event.deferred.drain(), 1)
@@ -145,6 +153,7 @@ class XP2GameHistoryTests(unittest.TestCase):
     def test_source_pins_include_exact_missing_second_proof_but_not_xp1_admission(self):
         pins = source.source_dependencies(core_sha256=XP2_CORE_SHA256)
         self.assertIn(source.SOURCE[1], pins.values())
+        self.assertIn(source.PROPERTY_SOURCE[1], pins.values())
         self.assertIn('82542c6f053560b0dbd0b9a8ad522d45d65cb88aa5abf7d410d2cb73651cda72',
                       pins.values())
         self.assertEqual(source.source_dependencies(core_sha256=XP1_CORE_SHA256), {})

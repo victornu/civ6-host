@@ -6,7 +6,9 @@ admits the source-checked interface, not saved Load or gameplay.
 from __future__ import annotations
 
 import ctypes as C
+import ast
 import hashlib
+import json
 from pathlib import Path
 
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256, _source, _body
@@ -25,6 +27,9 @@ HOST_LIFETIME_COMPATIBILITY = (
 HOST_INIT_COMPATIBILITY = (
     'work/host-extensions/xp2-load-logger-static/host-compatibility-v1.json',
     '61ec408a7953499c7095c9682c01e0beb67e348705294e2cc45b424962dd5f95')
+HOST_SDK_COMPATIBILITY = (
+    'work/host-extensions/xp1-load-logger-static/host-sdk-compatibility-v1.json',
+    'f42f2bf4822a7ee37070604ab3955153ccc479a0492d464cd06205507b3d07eb')
 
 
 def source_dependencies(core_sha256=XP1_CORE_SHA256):
@@ -35,6 +40,9 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
             dict(path=HOST_LIFETIME_COMPATIBILITY[0], sha256=HOST_LIFETIME_COMPATIBILITY[1]),
             dict(path=HOST_INIT_COMPATIBILITY[0], sha256=HOST_INIT_COMPATIBILITY[1]),
             *proof['references'].values()]
+    sdk = _checked_host_sdk_compatibility()
+    rows.extend([dict(path=HOST_SDK_COMPATIBILITY[0], sha256=HOST_SDK_COMPATIBILITY[1]),
+                 sdk['archive_native_host'], sdk['archive_manifest']])
     if core_sha256 == XP2_CORE_SHA256:
         selected = _checked_source(core_sha256)
         rows.extend([dict(path=XP2_SOURCE[0], sha256=XP2_SOURCE[1]),
@@ -46,6 +54,117 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     elif core_sha256 != XP1_CORE_SHA256:
         raise ValueError('Unknown saved-Load logger engine')
     return {str(resolve_path(resource_root()/r['path']).resolve()): r['sha256'] for r in rows}
+
+
+def _source_span(source: bytes, name: str, node_type):
+    tree = ast.parse(source)
+    matches = [node for node in tree.body if isinstance(node, node_type) and node.name == name]
+    if len(matches) != 1:
+        raise ValueError('Expected one top-level native_host definition: ' + name)
+    node = matches[0]
+    lines = source.splitlines(keepends=True)
+    raw = b''.join(lines[node.lineno - 1:node.end_lineno])
+    ast_sha256 = hashlib.sha256(ast.dump(node, include_attributes=False).encode('utf-8')).hexdigest()
+    return raw, ast_sha256
+
+
+def _checked_host_sdk_compatibility():
+    """Verify the exact SDK host transition while byte-pinning DiagnosticHost."""
+    from .native import native_host
+    from .paths import resource_root
+    from .resource_resolution import resolve_path
+
+    proof = _source(HOST_SDK_COMPATIBILITY)
+    migration = _source(HOST_LIFETIME_COMPATIBILITY)
+    init = _source(HOST_INIT_COMPATIBILITY)
+    current_path = Path(native_host.__file__).resolve(strict=True)
+    current_bytes = current_path.read_bytes()
+    current_sha256 = hashlib.sha256(current_bytes).hexdigest()
+    expected_original = _source(SOURCE)['host_callback_sources'].get(current_path.name)
+    if (proof.get('schema') != 'civ6-host.logger-sdk-host-compatibility.v1'
+            or proof.get('lifetime_compatibility') != dict(path=HOST_LIFETIME_COMPATIBILITY[0],
+                                                            sha256=HOST_LIFETIME_COMPATIBILITY[1])
+            or proof.get('prior_compatibility') != dict(path=HOST_INIT_COMPATIBILITY[0],
+                                                        sha256=HOST_INIT_COMPATIBILITY[1])
+            or proof.get('original_logger_host_sha256') != expected_original
+            or proof.get('prior_host_sha256') != init.get('current_host_sha256')
+            or proof.get('current_host_sha256') != current_sha256
+            or migration.get('schema') != 'civ6_host.logger_lifetime_compatibility.v1'
+            or migration.get('original_host_sha256') != expected_original
+            or migration.get('exact_original_reconstructed') is not True
+            or init.get('schema') != 'civ6-host.logger-expansion-init-compatibility.v1'
+            or init.get('prior_compatibility') != dict(path=HOST_LIFETIME_COMPATIBILITY[0],
+                                                        sha256=HOST_LIFETIME_COMPATIBILITY[1])
+            or init.get('original_logger_host_sha256') != expected_original
+            or init.get('prior_host_sha256') != migration.get('current_host_sha256')
+            or init.get('current_host_sha256') != proof.get('prior_host_sha256')
+            or init.get('exact_prior_reconstructed') is not True
+            or init.get('replacement_function') != 'initialize_context'
+            or init.get('diagnostic_host_class_byte_identical') is not True):
+        raise ValueError('Shared logger SDK host compatibility chain changed')
+
+    root = resource_root()
+    archive = proof.get('archive_native_host', {})
+    archive_manifest = proof.get('archive_manifest', {})
+    for row in (archive, archive_manifest):
+        relative = Path(row.get('path', ''))
+        if relative.is_absolute() or '..' in relative.parts:
+            raise ValueError('SDK compatibility archive reference escaped the resource root')
+        target = resolve_path(root / relative).resolve(strict=True)
+        if not target.is_relative_to(root):
+            raise ValueError('SDK compatibility archive reference is not private to the resource root')
+        if hashlib.sha256(target.read_bytes()).hexdigest() != row.get('sha256'):
+            raise ValueError('SDK compatibility archive bytes changed')
+    manifest = json.loads((root / archive_manifest['path']).read_bytes())
+    native_host_rows = [row for row in manifest.get('files', ())
+                        if row.get('path') == 'src/civ6_host/runtime/native/native_host.py']
+    if (len(native_host_rows) != 1
+            or native_host_rows[0].get('sha256') != proof.get('prior_host_sha256')
+            or archive.get('sha256') != proof.get('prior_host_sha256')):
+        raise ValueError('SDK compatibility archive manifest does not pin the exact prior host')
+
+    prior_host = (root / archive['path']).read_bytes()
+    old_class, old_class_ast = _source_span(prior_host, 'DiagnosticHost', ast.ClassDef)
+    new_class, new_class_ast = _source_span(current_bytes, 'DiagnosticHost', ast.ClassDef)
+    class_record = proof.get('diagnostic_host', {})
+    class_sha = hashlib.sha256(old_class).hexdigest()
+    if (old_class != new_class or class_record.get('name') != 'DiagnosticHost'
+            or class_record.get('byte_identical') is not True
+            or class_record.get('source_bytes') != len(old_class)
+            or class_record.get('source_bytes_sha256') != class_sha
+            or class_sha != hashlib.sha256(new_class).hexdigest()
+            or class_record.get('ast_sha256') != old_class_ast
+            or old_class_ast != new_class_ast):
+        raise ValueError('DiagnosticHost class differs from the exact pre-SDK archive')
+
+    old_tree, new_tree = ast.parse(prior_host), ast.parse(current_bytes)
+    old_functions = {node.name: node for node in old_tree.body if isinstance(node, ast.FunctionDef)}
+    new_functions = {node.name: node for node in new_tree.body if isinstance(node, ast.FunctionDef)}
+    changed = sorted(name for name in set(old_functions) | set(new_functions)
+                     if name not in old_functions or name not in new_functions
+                     or ast.dump(old_functions[name], include_attributes=False)
+                     != ast.dump(new_functions[name], include_attributes=False))
+    old_other = [ast.dump(node, include_attributes=False) for node in old_tree.body
+                 if not isinstance(node, ast.FunctionDef)]
+    new_other = [ast.dump(node, include_attributes=False) for node in new_tree.body
+                 if not isinstance(node, ast.FunctionDef)]
+    expected_changed = ['finish_database', 'initialize_context']
+    if changed != expected_changed or old_other != new_other:
+        raise ValueError('NativeHost SDK transition changed definitions outside the two selected functions')
+    if tuple(proof.get('changed_top_level_exact', ())) != tuple(expected_changed):
+        raise ValueError('SDK compatibility proof changed its exact top-level function scope')
+    function_records = proof.get('changed_top_level_functions', {})
+    for name in expected_changed:
+        old_raw, old_ast_sha = _source_span(prior_host, name, ast.FunctionDef)
+        new_raw, new_ast_sha = _source_span(current_bytes, name, ast.FunctionDef)
+        row = function_records.get(name, {})
+        if (old_raw == new_raw
+                or hashlib.sha256(old_raw).hexdigest() != row.get('prior_source_sha256')
+                or hashlib.sha256(new_raw).hexdigest() != row.get('current_source_sha256')
+                or old_ast_sha != row.get('prior_ast_sha256')
+                or new_ast_sha != row.get('current_ast_sha256')):
+            raise ValueError('SDK compatibility function evidence changed: ' + name)
+    return proof
 
 
 def _checked_xp1_source():
@@ -64,6 +183,11 @@ def _checked_xp1_source():
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         expected = proof['host_callback_sources'][path.name]
         if actual == expected:
+            continue
+        if (module is native_logging and expected == '2219a4ccb34ca1a4734c17017853bec56f487e011656ee3d6ac8b06175a7b87e'
+                and actual == 'e97c903b42c68d7f5f7dde2432a313377cb1ed41c81a9b095570b3d4685e2147'):
+            # The file sink uses extended Win32 names for long private paths.
+            # Channel state, callback ABI and the retained source proof stay unchanged.
             continue
         if module is native_host:
             migration = _source(HOST_LIFETIME_COMPATIBILITY)
@@ -84,6 +208,10 @@ def _checked_xp1_source():
                     and init['exact_prior_reconstructed'] is True
                     and init['replacement_function'] == 'initialize_context'
                     and init['diagnostic_host_class_byte_identical'] is True):
+                continue
+            sdk = _checked_host_sdk_compatibility()
+            if (sdk['prior_host_sha256'] == init.get('current_host_sha256')
+                    and sdk['current_host_sha256'] == actual):
                 continue
         if actual != expected:
             raise ValueError('Shared logger implementation changed: ' + path.name)
@@ -201,7 +329,8 @@ def install_saved_load_logger(backend):
     from .native.native_host import DiagnosticHost
     from .native.native_logging import DisabledLogWriters
     backend.check_thread()
-    core_sha256 = backend.profile.core_sha256
+    core_sha256 = getattr(backend.profile, 'source_core_sha256',
+                          backend.profile.core_sha256)
     if core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
         raise ValueError('Unknown saved-Load logger engine')
     engine = 'xp1' if core_sha256 == XP1_CORE_SHA256 else 'xp2'
@@ -262,6 +391,7 @@ def install_saved_load_logger(backend):
                'supplement_source_sha256': XP2_SUPPLEMENT[1] if supplement is not None else None,
                'core_sha256': core_sha256,
                'host_lifetime_compatibility_sha256': HOST_LIFETIME_COMPATIBILITY[1],
+               'host_sdk_compatibility_sha256': HOST_SDK_COMPATIBILITY[1],
                'executed_shared_host_sha256': hashlib.sha256(Path(native_host.__file__).read_bytes()).hexdigest(),
                'slots': [hex(x) for x in (SLOTS + (XP2_EXTRA_SLOTS if supplement is not None else ()))],
                'reused_shared_registry': True,

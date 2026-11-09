@@ -61,7 +61,7 @@ def _read_profile(root,item,label):
     return json.loads(raw),path
 
 
-def _xp2_source(root=None):
+def _xp2_source(root=None, execution_image=None):
     """Resolve the exact XP2 Unit facade, query-map, and shared callback join."""
     if root is None:
         from civ6_host.runtime.provenance import resource_root
@@ -119,7 +119,7 @@ def _xp2_source(root=None):
     proof=dict(root=root,unit=unit,query_map=query_map,application=application,
                player=player,context=context,exe=exe,
                paths=(unit_path,map_path,application_path,player_path,context_path,exe_path))
-    _xp2_dependencies(proof)
+    _xp2_dependencies(proof, execution_image=execution_image)
     return proof
 
 
@@ -145,11 +145,12 @@ def _xp2_instruction_spans(bodies):
     return tuple(spans)
 
 
-def _xp2_dependencies(proof):
+def _xp2_dependencies(proof, execution_image=None):
     from .native.native_found_city_event import SELECTOR_PROOF_SHA256
     from .resource_resolution import resolve_path
     selector=proof['root']/'evidence/native-e23b-selectors'/f'{SELECTOR_PROOF_SHA256}.json'
     pins={str(resolve_path(selector)):SELECTOR_PROOF_SHA256}
+    provenance_images=[]
     docs=(proof['unit'],proof['query_map'],proof['application'],proof['player'],proof['context'])
     for doc in docs:
         refs=[]
@@ -164,20 +165,36 @@ def _xp2_dependencies(proof):
             elif isinstance(value,(list,tuple)):
                 refs.extend(item for item in value if isinstance(item,dict) and 'path' in item and 'sha256' in item)
         refs.extend(item for item in (doc.get('generator'),doc.get('boundary_helper'),doc.get('extractor'),
-                                       doc.get('capture_script'),doc.get('image'))
+                                       doc.get('capture_script'))
                     if isinstance(item,dict) and 'path' in item and 'sha256' in item)
+        image=doc.get('image')
+        if isinstance(image,dict) and 'path' in image and 'sha256' in image:
+            provenance_images.append(image)
+            if execution_image is None:
+                refs.append(image)
         images=doc.get('images',{})
         if isinstance(images,dict):
-            refs.extend(item for item in images.values()
-                        if isinstance(item,dict) and 'path' in item and 'sha256' in item)
+            rows=[item for item in images.values()
+                  if isinstance(item,dict) and 'path' in item and 'sha256' in item]
+            provenance_images.extend(rows)
+            if execution_image is None:
+                refs.extend(rows)
         for item in refs:
             rel=str(item['path']);digest=item['sha256']
             path=resolve_path(proof['root']/rel)
             key=str(path)
             if key in pins and pins[key]!=digest:raise ValueError('Conflicting XP2 FoundUnit dependency identity')
             pins[key]=digest
+    image_paths={str(Path(resolve_path(row['path'])).resolve()) for row in provenance_images}
     for path in proof['paths']:
-        pins[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+        key=str(path.resolve())
+        if execution_image is not None and key in image_paths:
+            continue
+        pins[key]=hashlib.sha256(path.read_bytes()).hexdigest()
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                                             provenance_images=provenance_images)
     for path,digest in pins.items():
         p=Path(path)
         if not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest()!=digest:
@@ -185,10 +202,12 @@ def _xp2_dependencies(proof):
     return pins
 
 
-def source_dependencies(root=None,*,core_sha256=XP1_SHA256):
+def source_dependencies(root=None,*,core_sha256=XP1_SHA256,execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
-        proof=_xp2_source(root)
-        return _xp2_dependencies(proof)
+        proof=_xp2_source(root,execution_image=execution_image)
+        return _xp2_dependencies(proof,execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 found-unit source')
     if core_sha256!=XP1_SHA256:
         raise ValueError('Unknown found-unit query engine')
     if root is None:
@@ -204,14 +223,16 @@ def _tables(raw):
                              for name,(vt,slots) in raw.items()})
 
 
-def query_abi(core_sha256,root=None):
+def query_abi(core_sha256,root=None,*,execution_image=None):
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 FoundUnit source ABI')
     if core_sha256==BASE_SHA256:
         from civ6_host.runtime.native import native_found_city_event as m
         from civ6_host.runtime.native.native_unit_created_event import TABLES
         return FoundUnitQueryABI(core_sha256,_tables(TABLES),0x7c7078,
             MappingProxyType({name:getattr(m,name) for name in CONSTANTS}),MappingProxyType(dict(m.CORE_CODE_PINS)))
     if core_sha256==XP2_CORE_SHA256:
-        proof=_xp2_source(root)
+        proof=_xp2_source(root,execution_image=execution_image)
         unit=proof['unit']['player_units'];mp=proof['query_map']['profile']
         tables={
             'outer':(0xA101E8,{0xB8:0x590360}),
@@ -237,10 +258,10 @@ def query_abi(core_sha256,root=None):
             for rva,raw in instruction_spans(proof)}))
 
 
-def verify_live(base,read,*,core_sha256=XP1_SHA256,root=None):
+def verify_live(base,read,*,core_sha256=XP1_SHA256,root=None,execution_image=None):
     if core_sha256 not in (XP1_SHA256,XP2_CORE_SHA256) or type(base) is not int or base<=0:
         raise ValueError('Expected an exact supported query module')
-    abi=query_abi(core_sha256,root)
+    abi=query_abi(core_sha256,root,execution_image=execution_image)
     for (rva,size),digest in abi.code_pins.items():
         if hashlib.sha256(read(base+rva,size)).hexdigest()!=digest:
             raise ValueError('Found-unit instructions changed at '+hex(rva))

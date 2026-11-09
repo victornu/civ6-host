@@ -38,6 +38,9 @@ MATERIALIZED = 'verified_native_rows_into_private_template_v1'
 BUILD_PATH = ROOT / 'work/official-capture/localization-query/build03/build.json'
 BUILD_SHA = '6b5cacf3a4714bca8637bc092faa37ce00244a678da119830804b59fc45f21bd'
 PROVIDER_SHA = '857c6c1ed49cfbad6a70e487e181280fdb98bbc32e7e59f4c2edd7f323477134'
+CURRENT_PROVIDER_SHA = '580da00f3bbf5dc5688ef615fee39c35b9b6198d92ccc09d3e9863cd4ed1c5ca'
+CURRENT_BUILD_PATH = ROOT / 'work/official-capture/current-image-adapter/query-build/build.json'
+CURRENT_BUILD_SHA = '40fbfcbb181b97886336cf6bca5d340672d0c84e5b3209328e93dc0fe9bd4bf3'
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_SECONDS = 3600
 SOURCE_PATHS = ('civ6rl/native_localization_logical_export.py', 'civ6rl/native_localization_query.py', 'civ6rl/native_localization_export.py', 'civ6rl/native_localization_capture.py', 'civ6rl/database_capture992.py', 'civ6rl/database_capture_bundle993.py', 'civ6rl/file_client.py', 'mod/UI/Civ6RLDatabaseCapture992.lua')
@@ -54,9 +57,18 @@ def _nonce(value):
 def _boundary(player, turn):
     _require(type(player) is int and 0 <= player < 64 and (type(turn) is int) and (0 <= turn <= 1000000), 'Invalid logical export player/turn')
 
-def _build():
-    _require(_sha(BUILD_PATH) == BUILD_SHA and _sha(_resolve_resource_path(Path(_historical_module_file(provider)))) == PROVIDER_SHA, 'Unknown Localization query build or provider')
-    return provider.verify_build(BUILD_PATH)
+def _build(ref=None):
+    path, digest = (BUILD_PATH, BUILD_SHA)
+    if ref is not None:
+        if _resolve_resource_path(_resolve_resource_path(Path(ref['path']))).resolve() == _resolve_resource_path(CURRENT_BUILD_PATH).resolve() and ref['sha256'] == CURRENT_BUILD_SHA:
+            path, digest = (CURRENT_BUILD_PATH, CURRENT_BUILD_SHA)
+        else:
+            _require(ref == reference(BUILD_PATH), 'Unknown Localization query build reference')
+    _require(_sha(path) == digest and _sha(_resolve_resource_path(Path(_historical_module_file(provider)))) in {PROVIDER_SHA, CURRENT_PROVIDER_SHA}, 'Unknown Localization query build or provider')
+    build = provider.verify_build(path)
+    if path == CURRENT_BUILD_PATH:
+        _require(build.get('execution_profile') == provider.current_image_profile(), 'Current Localization query build profile differs')
+    return build
 
 def _module(record, build):
     _require(type(record) is dict and type(record.get('base')) is int and (65536 <= record['base'] < 2 ** 47) and (type(record.get('bytes')) is int) and (record['bytes'] > 0) and (record.get('sha256') == build['dll']['sha256']) and (record.get('path') == build['dll']['path']) and (record.get('name') == _resolve_resource_path(Path(build['dll']['path'])).name), 'Helper module identity differs')
@@ -79,12 +91,11 @@ def _installation(ref):
     _require(installed.get('inbox_restored') is True and installed.get('game_actions_issued') == 0 and (type(installed.get('game_actions_issued')) is int) and (installed.get('atomic_snapshot_proven') is False) and (installed.get('training_eligible') is False), 'Installation claims or inbox receipt differ')
     registered = _json(installed.get('registration'))
     build = bulk_export.selected_build(registered.get('build'))
-    build_reference = registered['build'] if build is not None else reference(BUILD_PATH)
     if build is None:
-        build = _build()
+        build = _build(registered.get('build'))
     _process(registered.get('process'))
     reg_nonce = _nonce(registered.get('nonce'))
-    _require(registered.get('schema') == 'civ6rl.localization_query_registration.v1' and registered.get('status') == 'registered_at_menu' and (registered.get('training_eligible') is False) and (registered['process'] == process) and (registered.get('build') == build_reference), 'Registration process/build differs')
+    _require(registered.get('schema') == 'civ6rl.localization_query_registration.v1' and registered.get('status') == 'registered_at_menu' and (registered.get('training_eligible') is False) and (registered['process'] == process), 'Registration process/build differs')
     _file(registered['build'])
     event, command = provider.registration_command(build, process, reg_nonce)
     _require(registered.get('event') == event and registered.get('command') == command, 'Registration command differs')
@@ -278,7 +289,7 @@ def export_localization(client, process, folder, *, installation_ref, cache_path
     target = folder / 'localization-export.json'
     bulk_export.declare_sources(client, build, report)
     try:
-        before = runtime.capture_process(process, folder / 'runtime-before', nonce=nonce, timeout_seconds=remaining(30))
+        before = runtime.capture_process(process, folder / 'runtime-before', nonce=nonce, timeout_seconds=remaining(30), executable_sha256=expected_localization['modules']['exe']['sha256'])
         report['runtime_before'] = reference(folder / 'runtime-before/localization-manifest.json')
         _require(runtime_identity(before) == expected and before['modules'] == expected_localization['modules'], 'Runtime changed before logical capture')
         candidate = reference(cache_path)
@@ -299,7 +310,7 @@ def export_localization(client, process, folder, *, installation_ref, cache_path
                 return client.read_active_database(request, timeout=min(timeout, remaining(15)))
             bulk_export.capture_tables(read, folder / 'tables', expected_player_id=expected_player_id, expected_turn=expected_turn, connections=('localization',), limits=tables.Limits(page_size=64, localization_row_pagination='rowid_seek_v1', timeout_seconds=remaining()), client=client, process=process, build=build, registered=registered, identity=expected, remaining=remaining)
         report['tables_bundle'] = reference(folder / 'tables/manifest.json')
-        after = runtime.capture_process(process, folder / 'runtime-after', nonce=nonce, timeout_seconds=remaining(30))
+        after = runtime.capture_process(process, folder / 'runtime-after', nonce=nonce, timeout_seconds=remaining(30), executable_sha256=expected_localization['modules']['exe']['sha256'])
         report['runtime_after'] = reference(folder / 'runtime-after/localization-manifest.json')
         _require(runtime_identity(after) == expected and before['modules'] == after['modules'] and (before['process'] == after['process'] == process_identity) and (process.identity() == process_identity), 'Runtime changed across logical capture')
         _require(_helper_module(process, build) == installed['helper_module'] and sources == _sources() and (reference(collector) == report['installed_collector']), 'Provider/collector changed across logical capture')

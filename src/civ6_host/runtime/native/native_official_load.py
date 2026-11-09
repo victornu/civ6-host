@@ -292,8 +292,12 @@ def run_experiment(backend, inputs, *, prepare_services=None):
     emit = backend.emit
     save_sha = profile.save_sha
     if inputs.official_bundle is not None:
+        from civ6_host.runtime import xp2_bbg_inputs
         from civ6_host.runtime.native.native_official_bundle import _manifest
-        save_sha = _manifest(inputs.official_bundle)[1]['save']['source']['sha256']
+        if candidate and inputs.official_bundle == xp2_bbg_inputs.REFERENCE:
+            save_sha = xp2_bbg_inputs.SAVE_SHA256
+        else:
+            save_sha = _manifest(inputs.official_bundle)[1]['save']['source']['sha256']
     emit('official_load_scope', save_sha256=save_sha if inputs.checkpoint is None else None, origin_official_save_sha256=save_sha, checkpoint_reference=inputs.checkpoint, official_bundle_reference=inputs.official_bundle, configuration_sha256=sha(inputs.configuration), game_sha256=sha(inputs.game), profile=profile.name, saved_mode=profile.mode_name, same_save_database_proven=False, gameplay_script_selection_proven=False, eligible_for_training=False)
     phase_started = time.perf_counter()
     backend.initialize_fresh()
@@ -313,7 +317,7 @@ def run_experiment(backend, inputs, *, prepare_services=None):
     emit('before_official_gamecore_load', topology=topology, game_bytes=len(inputs.game))
     phase_started = time.perf_counter()
     before = backend.jobs_snapshot('before')
-    status = backend.load_raw()
+    status = _load_raw_with_optional_profile(backend)
     after = backend.jobs_snapshot('after')
     emit('native_reset_timing', phase='raw_gamecore_load_and_job_snapshots_seconds', elapsed_seconds=time.perf_counter() - phase_started, timing_scope='non-overlapping stage', strategic_training_ready=False)
     emit('official_gamecore_load_returned', status=status, jobs_before=before, jobs_after=after, bytes_consumed=backend.reader.transport.cursor, validation_completed=False, eligible_for_training=False)
@@ -325,4 +329,55 @@ def run_experiment(backend, inputs, *, prepare_services=None):
     backend.busy = False
     emit('official_gamecore_load_observed', result=result, readback=readback, postload_completed=False, normal_destroy_validated=False, same_save_database_proven=False, full_restore_proven=False, controlled_process_stop_required=True, strategic_training_ready=False)
     return result
+
+
+def _load_raw_with_optional_profile(backend):
+    """Profile only the explicit current-XP2 Load call, on its calling thread."""
+    if getattr(backend, 'command_profile_diagnostic', False) is not True:
+        return backend.load_raw()
+
+    import sys
+    if sys.getprofile() is not None:
+        raise RuntimeError('Cannot profile native Load while another profiler is active')
+    import cProfile
+    from civ6_host.runtime.execution_images import identity
+
+    profile = backend.profile
+    image = getattr(profile, 'execution_image', None)
+    if image is None:
+        raise RuntimeError('Native Load profiling requires its explicit execution image')
+    selected = identity(image)
+    core_identity = dict(actual_core_sha256=profile.core_sha256,
+        reference_core_sha256=backend.load_abi.core_sha256,
+        execution_profile_id=selected['profile_id'],
+        execution_image_sha256=selected['image_sha256'])
+    if (selected['image_sha256'] != profile.core_sha256
+            or selected['reference_core_sha256'] != profile.source_core_sha256
+            or backend.load_abi.core_sha256 != profile.source_core_sha256):
+        raise RuntimeError('Native Load profiler current/reference image identities differ')
+
+    profiler = cProfile.Profile()
+    started = time.perf_counter()
+    callback_failed = False
+    profiler.enable()
+    try:
+        return backend.load_raw()
+    except BaseException:
+        callback_failed = True
+        raise
+    finally:
+        elapsed = time.perf_counter() - started
+        try:
+            try:
+                profiler.disable()
+            except BaseException:
+                if not callback_failed:
+                    raise
+            backend._command_load_profile = dict(profiler=profiler,
+                wall_seconds=elapsed, callback_failed=callback_failed,
+                core_identity=core_identity)
+        except BaseException:
+            # Diagnostic bookkeeping must never replace a native Load error.
+            if not callback_failed:
+                raise
 from civ6_host.runtime.capture_profiles import LAN_PROFILE

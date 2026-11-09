@@ -27,6 +27,35 @@ execution still require separate checks. The retained XP2
 LAN capture verifies all three databases and has no BBG selection. Its exit
 code of 1 indicates that no BBG candidate was found after successful screening.
 
+For an evaluation world, compare the new official LAN save with the pinned
+training world before collecting its databases. Pass the candidate save and
+its `--sha256`, followed by `--save-only --different-map-from` with the reference
+save and `--different-map-from-sha256` with its digest. This reads the native
+saved Map `RANDOM_SEED` and the GameCore stream digest. Exit 2 means one of them
+matches. The same reference options can gate the full manifest inspection
+without `--save-only`. Distinct values are a prerequisite for this evaluation
+split. Record official new-world generation and validate the exact captured
+content and native session separately.
+
+For a completed BBG 7.5.1 capture, `python -m civ6_host.runtime.xp2_capture_selection`
+accepts `--bbg751` with the pinned capture and Localization producer manifest.
+It validates the saved Gathering Storm content, the two ordered gameplay sources
+from the known profile, their before/after witnesses and the three final
+databases. `--prepare-private` stages private copies of those inputs, the ICU
+data and both saved streams for the candidate world. This stage reports
+`native_session_admitted: false`. Native Load admission and validation of a
+new world are separate steps.
+
+To use a completed capture with `NetworkBackend`, set
+`CIV6_HOST_BBG751_OFFICIAL_CAPTURE` to a JSON object with its `path` under
+`work/official-capture` and its `sha256`. Use the same registered origin for
+`--bbg751 --prepare-package` and for `NetworkBackend(official_bundle=...)`.
+Pass the emitted package pin as `prepared_capture`, with `input_profile='xp2-lan'`.
+Use separate Python processes for distinct prepared worlds. The current native
+adapter is bounded to the known 44 × 26 LAN profile with one human and one AI.
+The recovered BBG reference keeps its existing handoff. A new registered world
+still needs an observed native reset and official-client comparison.
+
 `tools/capture_script_path_witness.py` builds the existing capture994 path
 witness from a pinned `runtime-selections` report and the current read-only
 XP2 process observer. Pass `--script-root` for each exact approved game or
@@ -42,10 +71,116 @@ by the drive-qualified Workshop path for `scripts/bbg_script.lua`. The
 headless Gameplay database owner restored the official debug export to
 memory and read a base Knight cost of 200. The original save contains the
 `P_CAPITALS` property initialized by BBG Lua. The active Localization
-database for this capture still needs an export, and the current XP2
-admission accepts the retained stock capture and its single WorldCongress
-script. The BBG game has not entered headless Load. See the
-[local PoC evidence](../../civ6-rl-lab/evidence/host-bbg751-local-poc.json).
+database was missing from that first capture. The interrupted correlated
+capture was subsequently recovered from its retained files. Two complete
+before-save reads and the first complete after-save read match across 509
+gameplay and configuration tables (56,227 rows per pass). The final main
+schema and typed rows also match archived official exports exactly. Both
+active Localization exports were independently revalidated and agree across
+8 tables and 295,014 rows. The official save, its application configuration
+and GameCore streams, the database copies and the two ordered scripts are
+hash-pinned. The interrupted second after-save pass and final observation
+remain absent. This recovered evidence is distinct from a completed capture994
+manifest.
+
+The active BBG Gameplay journal shows Knight Cost 200. The retained native
+headless Database DLL query returned 200 using the same Gameplay bytes now
+matched to the correlated capture. The private BBG PoC now completes the exact
+saved GameCore Load with its three private databases and two ordered scripts.
+The loaded GameInfo Knight cost is also 200, and the same-save turn, map
+dimensions, gold, city count and own-unit snapshot match the official capture.
+
+The native auxiliary table writer reuses the existing XP2 recursive
+converter. During the pinned BBG initializer it committed eight native entries
+to the Variant destination for P_CAPITALS. The original script returned from
+the setter and completed initialization. This records a new write during
+script execution. The PoC did not independently read the property after Load.
+
+The process closed the loaded game and its services normally in 73.86 seconds,
+with a 270 MiB peak commit under a 768 MiB cap. Its LoadGameViewStateDone
+listener was registered and retained in the BBG context. A subsequent bounded
+run on the same capture completed Post160 and cache publication, invoked the
+actual BBG listener once, and shut down cleanly. The listener returned before
+any game update. The official frontend uses the event as its ready-to-start
+boundary. The exact EXE emission callsite and a Macedon trait-state change
+remain unverified. See the
+[PoC delivery](../../civ6-rl-lab/evidence/host-bbg751-local-poc-delivery.json),
+[view-ready run](../../civ6-rl-lab/evidence/host-bbg751-native-view-ready.json)
+and [correlated recovery](../../civ6-rl-lab/evidence/host-bbg751-correlated-input-recovery.json).
+
+The common `NetworkBackend` and `SessionClient` now accept the exact local
+BBG capture via `xp2-lan`, its recovered handoff and its separate verified
+XP2 UI executable. Stock XP2 retains its existing package and executable.
+The client read the player's turn-1 observation and 14 native choices. The
+map dimensions, two own units, gold, city count, ten sampled visible plots,
+five research options and one civic match the official capture.
+
+In that same lifetime the client founded a city and changed the active
+research through the native command queue. It also submitted the sole civic
+option and confirmed the already selected civic. The native owner closed
+and the supervisor reaped it. The instrumented group took 190.71 seconds
+and peaked at 400 MiB of commit with a 512 MiB child cap. The earlier attempt
+stopped after receiving the initial observation because the probe looked
+for nested map dimensions. See the
+[common-client evidence](../../civ6-rl-lab/evidence/host-bbg751-common-client-initial.json).
+
+The next grouped run selected a Builder and observed it at the head of the
+native production queue with a cost of 25. The forced end-turn order changed
+player 0 from active to inactive. Both effects were returned by the common
+client. The first update then encountered a 263-character private log path.
+The Windows file sink now supports that path, and the retry wrote the journal.
+
+The retry advanced into GameCore's turn-2 processing and located a synchronous
+AUX60 reentry during BBG's `OnGameTurnStarted` listener. The official executable
+uses its owned Lua state and a protected call under the script lock. The host
+now uses this path while retaining the parent stack. An isolated HavokScript
+fixture checks execution order, typed arguments, nil result behavior, protected
+errors and refusal outside a live event frame.
+
+The next native run returned six nested calls across `UnitCreated`,
+`OnUnitMoved` and `UnitInitialized`. It also committed an integer property
+Variant from the active BBG listener. The subsequent registered A0
+notification `0x4082a91e` was refused in that run. Its XP2 producer, EXE callback
+and 96-byte record writer are pinned. See the
+[first-turn evidence](../../civ6-rl-lab/evidence/host-bbg751-first-turn-native-prefix.json),
+[nested Lua evidence](../../civ6-rl-lab/evidence/host-bbg751-native-nested-events.json)
+and [property write evidence](../../civ6-rl-lab/evidence/host-bbg751-native-turn-property-prefix.json).
+
+The shared FIFO now queues and consumes both `GameCoreEvent::GamePropertyChanged`
+records after the two native BBG integer property writes. The common client
+applied the five choices, returned the player's turn-2 observation, and closed
+the native session. A fresh reset restored the exact initial public observation
+and candidate list in a distinct process and closed cleanly. This qualifies the
+initial action, turn and reset group on this capture. See the
+[native turn and reset evidence](../../civ6-rl-lab/evidence/host-bbg751-native-turn-reset.json).
+
+A separate checkpoint group waited for player 0 to become active and fully
+ready at turn 2. The turn number was already visible five updates earlier.
+The native Save produced a GameCore/configuration pair tied to the BBG capture.
+A new process with distinct, hash-identical databases restored the same public
+observation and choice menu. After another forced end turn, the client received
+an active turn-3 menu. Both workers returned from native Unload and Destroy.
+The instrumented consumer peaked at 492 MiB of commit against a 512 MiB cap.
+This is a checkpoint measurement on one world. See the
+[native checkpoint and resume evidence](../../civ6-rl-lab/evidence/host-bbg751-native-checkpoint-resume.json).
+
+The scripted development control used that turn-2 checkpoint and left the
+existing Builder order in production. Six forced end turns and 36 native
+updates led to an active turn 8 with a new Builder and 56 gold against an
+11-gold reserve. The separate learner-side task evaluator scored the public
+result, and the worker closed normally. The median instrumented time from
+an order to the next active turn was 27.47 seconds. Commit peaked at 499 MiB
+under the 512 MiB job cap. The result covers one world, with an official
+comparison at the initial capture and a public replay of the headless control.
+See the [development control evidence](../../civ6-rl-lab/evidence/host-bbg751-native-development-control.json).
+
+| BBG 7.5.1 family | Native proof on this capture | Remaining common-client work |
+| --- | --- | --- |
+| Exact content and game state | Exact captured Load through the common client, private final databases and two ordered Lua sources | Qualify additional saved scenarios with exact input sets |
+| Saved-load services | Configuration restore, Lua table-to-Variant, Post160, view publication, one view-ready listener, clean close, nested Lua dispatch, scoped integer property conversion and the associated deferred notifications | Verify the view-ready listener with a relevant trait and qualify other BBG gameplay and UI-to-gameplay scripts when exercised |
+| Player observations | Client observation at turn 1 and the sampled differential comparison above | Extend the comparison after interactions and across turns |
+| Actions, turns and results | Foundation and research state changes, civic command confirmation, Builder production, forced end turn, exact fresh reset, checkpoint resume and a scripted development result at active turn 8 | Compare the control to the official client, qualify other reachable choices and outcomes, and evaluate independent BBG worlds |
+| Multiplayer | The source capture has one human and one AI | Qualify two controlled seats and simultaneous action ordering, readiness and conflicts |
 
 The later source-runtime witnesses now qualify loading this exact bundle,
 limited observations and input families, initial turn progression, one district

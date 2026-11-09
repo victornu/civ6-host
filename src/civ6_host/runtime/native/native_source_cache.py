@@ -15,6 +15,7 @@ import re
 import threading
 from types import MappingProxyType
 from typing import Any
+from civ6_host.runtime.source_verification import pinned_json
 _MAX_ENTRIES = 64
 _SHA256_RE = re.compile('[0-9a-fA-F]{64}\\Z')
 _LOCK = threading.RLock()
@@ -42,6 +43,10 @@ def load_pinned_json(path: str | Path, expected_sha256: str) -> Any:
         raise ValueError('expected_sha256 must be 64 hexadecimal characters')
     expected = expected_sha256.lower()
     resolved = _resolve_resource_path(Path(os.path.abspath(os.fspath(path))))
+    return pinned_json(resolved, expected, _load_pinned_json)
+
+
+def _load_pinned_json(resolved: Path, expected: str) -> Any:
     identity_before = _stat_identity(resolved)
     cache_key = (str(resolved), expected, identity_before)
     with _LOCK:

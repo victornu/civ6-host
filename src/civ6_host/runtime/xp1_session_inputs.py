@@ -10,6 +10,7 @@ from pathlib import Path
 from .paths import resource_root
 from .provenance import installed_source_pins
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+from .source_verification import file_sha256, verification_scope
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -48,8 +49,7 @@ SAVED_UI_MANIFEST = (REPO/'native/profiles/xp1-ui/source-manifest.json',
 def saved_load_pin(pins, path, expected=None):
     from civ6_host.runtime.resource_resolution import resolve_path
     path = resolve_path(Path(path)).resolve()
-    with path.open('rb') as stream:
-        actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+    actual = file_sha256(path)
     if expected is not None and actual != expected:
         raise ValueError('Saved Load source/build/input changed: '+str(path))
     if str(path) in pins and pins[str(path)] != actual:
@@ -58,17 +58,27 @@ def saved_load_pin(pins, path, expected=None):
     return path
 
 
-def saved_load_build_pins(pins, *, ui=False, core_sha256=XP1_CORE_SHA256):
+def saved_load_build_pins(pins, *, ui=False, core_sha256=XP1_CORE_SHA256, official_bundle=None, execution_image=None):
     if type(ui) is not bool:raise ValueError('Native build selection must be explicit')
+    if execution_image is not None and core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Selected execution-image host requires the XP2 source ABI')
     if core_sha256 == XP2_CORE_SHA256:
         if not ui:raise ValueError('Shared XP2 sessions require the qualified UI host build')
         from .xp2_session_inputs import XP2_UI_HOST
-        from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA
+        from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA, xp2_component_requirements
         from .xp2_ui_binding_source import UI_COMPONENT_SHA
-        executable=saved_load_pin(pins,resource_root()/XP2_UI_HOST[0],XP2_UI_HOST[1])
-        build=verify_source_build(executable,required_components={
+        from . import xp2_bbg_inputs as bbg
+        bbg_capture=bbg.is_reference(official_bundle)
+        stock_current=False
+        if execution_image is not None and not bbg_capture:
+            from .capture_admission import _stock_xp2_execution
+            stock_current=_stock_xp2_execution(execution_image,origin=official_bundle)
+        host = (bbg.selected_ui_host(execution_image)
+                if bbg_capture or stock_current else XP2_UI_HOST)
+        executable=saved_load_pin(pins,resource_root()/host[0],host[1])
+        build=verify_source_build(executable,required_components=xp2_component_requirements(executable, {
             'gamecore_python_host.c':XP2_HOST_COMPONENT_SHA,
-            'script_core_ui_binding_profiles.inc':UI_COMPONENT_SHA})
+            'script_core_ui_binding_profiles.inc':UI_COMPONENT_SHA}))
         for name, expected in build['build_dependencies'].items():
             saved_load_pin(pins,resource_root()/name,expected)
         return executable
@@ -119,6 +129,56 @@ def saved_load_private_icu(fixture, pins, private):
     private['icu_copy'] = dict(source_path=str(source), copy_path=str(target), sha256=icu['sha256'])
 
 
+def _prepare_xp2_sources(captured, package, unit_commands):
+    from .xp2_session_inputs import xp2_saved_load_source_dependencies
+    from .captured_saved_load import validate_candidate_inputs
+    validate_candidate_inputs(captured.inputs, captured)
+    pins = {}
+    execution = getattr(captured, 'execution_image', None)
+    for group in (installed_source_pins(), captured.dependencies,
+                  xp2_saved_load_source_dependencies(postload160=True, observe_player=True,
+                    official_bundle=captured.reference, execution_image=execution)):
+        for name, expected in group.items():
+            saved_load_pin(pins, resource_root()/name, expected)
+    from . import xp2_bbg_inputs as bbg
+    if bbg.is_reference(captured.reference):
+        from .xp2_bbg_property_table import SOURCES as property_sources
+        from .xp2_bbg_view_ready import _SOURCE as view_ready_source
+        from .xp2_bbg_nested_events import SOURCE as nested_events_source
+        for name, expected in (*property_sources, view_ready_source, nested_events_source):
+            saved_load_pin(pins, resource_root()/name, expected)
+        from .native.native_core_context_profiles import profile_for_core
+        profile = profile_for_core(captured.engine_path, mode='context',
+            **({'execution_image': execution} if execution is not None else {}))
+        saved_load_pin(pins, profile.shared_dependency_directory.parents[2]/bbg.SUPPORT_PATH,
+                       bbg.SUPPORT_SHA256)
+    from .stdout_transport_profiles import source_dependencies as stdout_dependencies
+    for name, expected in stdout_dependencies(core_sha256=XP2_CORE_SHA256).items():
+        saved_load_pin(pins, name, expected)
+    if unit_commands:
+        execution_options = ({'execution_image': execution}
+                             if execution is not None else {})
+        from .xp2_government_source import source_dependencies as policy_dependencies
+        for name, expected in policy_dependencies(**execution_options).items():
+            saved_load_pin(pins, name, expected)
+        from .xp2_policy_relocation import source_dependencies as relocation_dependencies
+        for name, expected in relocation_dependencies(**execution_options).items():
+            saved_load_pin(pins, name, expected)
+        for name, expected in command_source_dependencies(XP2_CORE_SHA256, **execution_options).items():
+            saved_load_pin(pins, name, expected)
+        from .xp1_loaded_lifetime import source_dependencies as lifetime_dependencies
+        for name, expected in lifetime_dependencies(XP2_CORE_SHA256, postload=True,
+                continuation=True, **execution_options).items():
+            saved_load_pin(pins, name, expected)
+    saved_load_pin(pins, package['path'], package['sha256'])
+    if execution is not None:
+        from .execution_images import source_dependencies as execution_dependencies
+        for path, expected in execution_dependencies(execution).items():
+            saved_load_pin(pins, path, expected)
+    return pins, saved_load_build_pins(pins, ui=True, core_sha256=XP2_CORE_SHA256,
+        official_bundle=captured.reference, execution_image=execution)
+
+
 def prepare_sources(captured, package, *, postload160, publish_cache,
                     close_loaded, observe_player, unit_commands, core_sha256=XP1_CORE_SHA256):
     """Pin actual source dependencies for the requested retained owner phases."""
@@ -132,25 +192,10 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown captured session source engine')
     if core_sha256 == XP2_CORE_SHA256:
-        from .xp2_session_inputs import xp2_saved_load_source_dependencies
-        from .xp2_bundle_inputs import validate_candidate_inputs
         if not (postload160 and publish_cache and close_loaded and observe_player):
             raise ValueError('Shared XP2 preparation requires the full observed loaded lifecycle')
-        validate_candidate_inputs(captured.inputs,captured)
-        pins={}
-        for group in (installed_source_pins(),captured.dependencies,
-                xp2_saved_load_source_dependencies(postload160=True,observe_player=True)):
-            for name,expected in group.items():saved_load_pin(pins,resource_root()/name,expected)
-        from .stdout_transport_profiles import source_dependencies as stdout_dependencies
-        for name,expected in stdout_dependencies(core_sha256=core_sha256).items():saved_load_pin(pins,name,expected)
-        if unit_commands:
-            for name,expected in command_source_dependencies(core_sha256).items():
-                saved_load_pin(pins,name,expected)
-            from .xp1_loaded_lifetime import source_dependencies as lifetime_dependencies
-            for name,expected in lifetime_dependencies(core_sha256,postload=True,continuation=True).items():
-                saved_load_pin(pins,name,expected)
-        saved_load_pin(pins,package['path'],package['sha256'])
-        return pins,saved_load_build_pins(pins,ui=True,core_sha256=core_sha256)
+        with verification_scope():
+            return _prepare_xp2_sources(captured, package, unit_commands)
     pins = {}
     for name, expected in installed_source_pins().items():
         saved_load_pin(pins, name, expected)
@@ -237,10 +282,14 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
     return pins, executable
 
 
-def command_source_dependencies(core_sha256):
+def command_source_dependencies(core_sha256, *, execution_image=None):
     """Initial saved action graph only; later XP1 families retain their own joins."""
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown saved command source engine')
+    if execution_image is not None and core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 command source ABI')
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     from importlib import import_module
     references = {}
 
@@ -255,28 +304,43 @@ def command_source_dependencies(core_sha256):
             'turn_unit_event_profile','xp1_turn_profile','xp1_host_thread_gate','xp1_host_slot78',
             'xp1_absent_event_families','xp2_history_event_profile','xp2_turn_event_profile'):
         module=import_module('civ6_host.runtime.'+name)
-        collect(module.source_dependencies(core_sha256=core_sha256))
+        options = ({'execution_image': execution_image}
+                   if execution_image is not None and name in
+                   ('action_transport_profiles', 'unit_operation_ui_profile',
+                    'xp1_log_event_profile', 'found_unit_event_profiles',
+                    'foundation_event_profile', 'xp1_absent_event_families',
+                    'xp2_history_event_profile', 'xp2_turn_event_profile',
+                    'turn_unit_event_profile', 'xp1_turn_profile',
+                    'xp1_host_thread_gate', 'xp1_host_slot78') else {})
+        collect(module.source_dependencies(core_sha256=core_sha256, **options))
     if core_sha256==XP2_CORE_SHA256:
         from .xp1_unit_attack_profile import source_dependencies as attack_dependencies
-        collect(attack_dependencies(core_sha256=core_sha256))
+        collect(attack_dependencies(core_sha256=core_sha256, **execution_options))
         from .xp2_natural_wonder_source import source_dependencies as wonder_dependencies
         collect(wonder_dependencies())
         from .xp2_world_unit_event_source import source_dependencies as input_event_dependencies
-        collect(input_event_dependencies())
+        collect(input_event_dependencies(**execution_options))
         from .xp2_production_queue_event_source import source_dependencies as queue_event_dependencies
-        collect(queue_event_dependencies())
+        collect(queue_event_dependencies(**execution_options))
         from .xp2_placement_event_source import source_dependencies as placement_event_dependencies
-        collect(placement_event_dependencies())
+        collect(placement_event_dependencies(**execution_options))
         from .xp2_host_slot20_source import source_dependencies as achievement_dependencies
-        collect(achievement_dependencies())
+        collect(achievement_dependencies(**execution_options))
         from .improvement_change_profile import source_dependencies as improvement_dependencies
-        collect(improvement_dependencies(core_sha256=core_sha256))
+        collect(improvement_dependencies(core_sha256=core_sha256, **execution_options))
         from .xp2_feature_reveal_source import source_dependencies as feature_dependencies
         collect(feature_dependencies())
+        if execution_image is not None:
+            from .xp2_congress_presentation import source_dependencies as congress_dependencies
+            collect(congress_dependencies())
+            from .xp2_wmd_fallout_source import source_dependencies as fallout_dependencies
+            collect(fallout_dependencies())
+            from .xp2_congress_notice_source import source_dependencies as congress_notice_dependencies
+            collect(congress_notice_dependencies())
         from .district_damage_profile import source_dependencies as district_dependencies
-        collect(district_dependencies(core_sha256=core_sha256))
+        collect(district_dependencies(core_sha256=core_sha256, **execution_options))
         from .combat_event_profile import source_dependencies as combat_dependencies
-        collect(combat_dependencies(core_sha256=core_sha256))
+        collect(combat_dependencies(core_sha256=core_sha256, **execution_options))
     pins = {}
     for path, expected in references.items():
         saved_load_pin(pins, path, expected)

@@ -163,25 +163,37 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP2_CORE_SHA256):
+def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
     from .xp2_production_queue_source import source_dependencies as queue
     from .xp2_world_input_source import source_dependencies as world
     from .xp2_aux_map_profile import source_dependencies as maps
     p=verify_source(core_sha256);result={}
     for provider in (queue,world,maps):
-        for path,digest in provider().items():
+        if provider is queue:
+            rows = provider(execution_image=execution_image)
+        elif provider is world:
+            rows = provider(core_sha256=core_sha256, execution_image=execution_image)
+        else:
+            rows = provider()
+        for path,digest in rows.items():
             if path in result and result[path]!=digest:raise ValueError('Conflicting XP2 placement pin')
             result[path]=digest
     enum=enum_source()
     for ref in (dict(path=SOURCE[0],sha256=SOURCE[1]),p['image'],p['extractor'],*p['references'],
                 *p['official_ui_sources'].values(),dict(path=ENUM_SOURCE[0],sha256=ENUM_SOURCE[1]),
                 enum['extractor'],enum['body_reference']):
+        if ref is p['image'] and execution_image is not None:
+            continue
         path=str(resolve_path(resource_root()/ref['path']).resolve())
         if (hashlib.sha256(Path(path).read_bytes()).hexdigest()!=ref['sha256']
                 or path in result and result[path]!=ref['sha256']):
             raise ValueError('XP2 placement dependency changed: '+path)
         result[path]=ref['sha256']
-    return result
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(
+        result, execution_image=execution_image,
+        provenance_images=(p['image'],),
+    )
 
 
 def verify_live(base,read,core_sha256=XP2_CORE_SHA256):
@@ -228,7 +240,8 @@ def bind_owner(owner,core,read):
                 or old.queue_receipt is not q or old.world_receipt is not w):
             raise ValueError('XP2 placement receipt belongs to another lifetime')
         return old
-    source_dependencies()
+    execution_image = getattr(core, '_civ6_host_execution_image', None)
+    source_dependencies(XP2_CORE_SHA256, execution_image=execution_image)
     result=VerifiedPlacementSource(owner,core,core._handle,SOURCE[1],XP2_CORE_SHA256,q,w,verify_live(core._handle,read))
     owner._xp2_production_placement_source_receipt=result
     return result

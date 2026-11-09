@@ -2,6 +2,129 @@
 
 Model-independent Python API and headless host for the official Civilization VI GameCore.
 
+Contributors: see [the setup and contribution guide](docs/contributing.md) for
+the source/runtime boundary and private-resource requirements.
+
+The current GS + BBG 7.5.1 client now completes a recorded Congress ballot cycle:
+three explicit B/1 resolution votes, native result readback, exact own-vote
+matching, Save, and reload with identical public observations and catalogues.
+Both processes save and destroy their native context normally under 512 MiB.
+This qualifies that ballot on one retained world, not every Congress outcome,
+emergency, content profile or the complete API. Private lab evidence:
+`evidence/host-xp2-congress-ballot-cycle-native.json`.
+
+The current registered GS + BBG 7.5.1 world now also completes a Builder at T6,
+keeps an explicitly appended Slinger in its queue, moves the Builder to a visible
+owned tile, and builds the offered Farm. Native readback confirms the improvement
+and the change from three to two charges. The native checkpoint is saved and
+Unload/Destroy verified (492.8 MiB private peak under 512 MiB). The unchanged V16
+actor and frozen vocabulary score all seven recorded commands with recurrent
+memory, preserving every candidate in their input states (up to 1,200 choices).
+This is scripted native execution plus teacher-forced actor input/scoring
+validation; no autonomous model choice or optimizer update is claimed. Private
+lab receipts: `evidence/host-current-bbg751-world-a-builder.json` and
+`work/official-capture/bbg751-world-A-development/actor-coverage.json`.
+
+The common Python client now completes a scoped opening on a newly captured
+Gathering Storm + BBG 7.5.1 world with the installed current GameCore: found a
+city, choose research and a civic, start a Builder, change the production focus,
+lock a citizen, and advance from T1 to T3. These are eight native commands of
+seven kinds, selected from the exposed choices. The current player-display
+formatter is exercised on the public replies. A second process resumes the
+native checkpoint with identical public observations and decision catalogues;
+only episode, generation, sequence and decision identity differ. Both processes
+save, execute verified native Unload/Destroy, and are reaped below the 512 MiB
+limit (488.7 MiB maximum private peak).
+
+The exact official save/configuration/final databases/content/scripts remain
+associated, and actual Core 092 identity stays separate from source ABI 324.
+The prior initial official readback and reset qualification is retained. This
+is one-world scripted native qualification, not a training campaign, complete
+action-space qualification or whole-game equivalence claim. No model decision
+or PPO update was performed. Local private lab evidence:
+`evidence/host-current-bbg751-world-a-opening.json` and
+`evidence/host-current-bbg751-world-a-headless.json`.
+
+Profiling the current-image BBG macro path identified repeated static-proof
+validation. The host now reuses complete-body checks for the identical frozen
+proof object, while retaining per-call headers/dependencies and live native
+memory checks. One unprofiled, same-prefix production command plus response
+took 5.71 s versus 7.15 s before (20% less); its public states, choices and actor
+scores match. This is one instrumented admission interval, not sustained game
+throughput. Private peak increased from 407.5 to 431.0 MiB, below the 512 MiB cap.
+No rule, legality, observation or model-state cache was introduced. Private lab
+receipt: `evidence/host-current-xp2-static-validation-performance.json`.
+
+The current-image GS + BBG 7.5.1 API now exposes an opt-in v33 initial-diplomacy
+catalogue through `SessionClient.information('diplomacy')`. The native T25 witness
+reads the living, already-met major-player choices, saves and closes normally
+(415 MiB private peak). Its catalogue is empty: no initial request or major
+dialogue was exercised. Twenty direct-request mappings, explicit responses and
+factory guards are source/software prepared; that count is not native action
+coverage. Deal/alliance screens remain explicitly unsupported. See
+[the client contract](docs/client.md#xp2-initial-diplomacy) and private lab evidence
+`evidence/host-xp2-initial-diplomacy-native.json`.
+
+The local XP2 DLL was replaced during a Steam update/repair after the retained
+native witnesses. Its new SHA-256 is `092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f`;
+those witnesses target `324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c`.
+A distinct `xp2-gamecore-current-092abfbb` profile now completes a scoped native
+continuation through the common Python client: resume the retained GS + BBG 7.5.1
+T24 checkpoint, buy the offered Warrior for 80 gold, advance to T25, select a unit,
+exchange two owned units, save a v2 checkpoint and close. A second process resumes
+that new checkpoint and preserves its public observation exactly before saving
+and closing again. The 12 public replies match the retained old-runtime witness,
+apart from session/decision identity. This is a comparison of that same scripted
+host interval, not whole-game equivalence or a new official-client differential.
+
+The profile keeps runtime and captured ABI identities separate, selects rebuilt
+Havok export guards and a length-preserving Locale bridge, and preserves the old
+source proofs. The repaired XML inventory is explicitly pinned without broadening
+ownership responses. Both workers stayed below 512 MiB (412 and 407 MiB peaks),
+completed explicit native Unload/Destroy, and left all monitored files unchanged.
+Their deeply instrumented durations are not production throughput benchmarks.
+No CivilizationVI.exe or learner was launched. Broader actions, remaining formatter
+paths and simultaneous multiplayer remain unqualified on this runtime. Existing
+evidence retains its original identity; the historical host remains the default.
+Private evidence: `evidence/host-current-xp2-playable-cycle.json` in the local lab.
+
+The current-image common Python API now also completes an XP2 city-state war
+confirmation at T25. It opens the native prompt on a visible Hattusa unit,
+exposes the official popup text and both explicit choices, cancels without
+changing the observation/scheduler, reopens and accepts. Fresh native
+`IsAtWarWith` reads change from false to true after the official operation archive
+is delivered. Five client decisions, Save v2 and native Unload/Destroy complete
+normally, with a 414 MiB private-memory peak and 1,977 monitored files unchanged.
+This qualifies that city-state path, not general war/diplomacy gameplay.
+
+The current-image major-player RequestSession/type-132 receiver and retained
+explicit dialogue route are integrated with pinned source and composed software
+checks. This native interval emits no major statement, so it does not qualify
+that route. The new XP2 dialogue envelope omits raw AI/opaque payloads. Its separately
+pinned official-text renderer and explicit response route have source/software
+checks; native major dialogue display remains unqualified. Missing receiver profiles
+still refuse before RequestSession; the legacy runtime remains unchanged.
+No learner or full game was launched. Private evidence:
+`evidence/host-xp2-war-confirmation-native.json` in the local lab.
+
+The public modal uses `civ6-host.network-diplomacy-decisions.v1`; the remote
+client validates it without importing the native runtime. A separate current-image
+stock-GS T44 cycle completed war against Buenos Aires, Save v2 and clean native
+close (408 MiB private peak). Buenos Aires is a city-state, not the major-player
+witness originally sought. Its parent checkpoint retrieval failed after close;
+the explicit-image forwarding fix validates the already-produced artifact without
+replaying the game. No major statement was emitted. Private evidence:
+`evidence/host-xp2-public-dialogue-preparation.json` in the local lab.
+
+The selected Gathering Storm + BBG 7.5.1 session now also executes the official
+`SWAP_UNITS` branch through the existing `world_plot_click` API. A native witness
+buys an offered Warrior, advances one turn and exchanges two owned Warriors'
+positions at turn 25. The request delivers exactly one native archive and the
+session saves and closes normally, with a 411 MiB private-memory peak under a
+512 MiB limit. This is a scoped action witness, not full WorldInput coverage or
+a throughput benchmark; it does not qualify major-player war confirmations. Private
+evidence: `evidence/host-bbg751-unit-swap-native.json` in the local lab.
+
 **Development status.** Local qualification covers scoped Base, Rise and Fall
 and Gathering Storm sessions. The installed Windows client and runtime have
 resumed a Gathering Storm v21 checkpoint, played a native turn and saved again.

@@ -2,14 +2,16 @@
 from civ6_host.runtime.provenance import historical_source_file as _historical_source_file, historical_module_file as _historical_module_file, worker_path as _worker_path, pin_key as _pin_key, installed_source_pins as _installed_source_pins
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
 from pathlib import Path
-import hashlib, json, math
+import hashlib, json
 from civ6_host.runtime.native.native_source_cache import load_pinned_json
 from civ6_host.runtime.native.native_player_observation import observe_player
 from civ6_host.runtime.native.native_saved_unit_orders import uint
+from civ6_host.contracts.trade import (ROUTE_FIELDS as FIELDS, _number,
+    compare_routes as compare_own, route_actions as actions,
+    validate_route_action as validate_action, validate_routes as validate_catalog)
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_saved_trade.py')))).resolve().parents[1]
 PROOF = ROOT / 'work/trade-route967/source.json'
 PROOF_SHA = '0b7a086925f2a18ee3f9c98c443ea55617c59ca85a1271b98dcbc2fbba67869f'
-FIELDS = {'kind', 'unit_id', 'origin_owner', 'origin_city', 'destination_owner', 'destination_city', 'x0', 'y0', 'x1', 'y1'}
 LIMIT = 1048576
 
 def verify_source():
@@ -34,102 +36,6 @@ def source(pid, turn):
     uint(turn, 'turn', 2147483647)
     return f'local pid,turn={pid},{turn}\n'.encode() + helper() + LUA.encode()
 
-def _shape(v, fields):
-    if type(v) is not dict or set(v) != set(fields.split()):
-        raise ValueError('Invalid trade fields')
-
-def _list(v, maximum=4096):
-    if type(v) is not list or len(v) > maximum:
-        raise ValueError('Unbounded trade list')
-    return v
-
-def _number(v):
-    if type(v) not in (int, float) or not math.isfinite(v) or abs(v) >= 1000000000000.0:
-        raise ValueError('Invalid trade number')
-
-def _yields(v):
-    _shape(v, 'values majority_religion religion_pressure path_bonus tooltip')
-    for n in _list(v['values'], 64):
-        _number(n)
-    if type(v['majority_religion']) is not int or not -1 <= v['majority_religion'] <= 2147483647:
-        raise ValueError('Invalid trade religion')
-    _number(v['religion_pressure'])
-    if type(v['path_bonus']) is not bool or type(v['tooltip']) is not str or len(v['tooltip'].encode()) > 32768:
-        raise ValueError('Invalid yield tooltip')
-
-def validate_action(a, width=16384, height=16384):
-    if type(a) is not dict or set(a) != FIELDS or a['kind'] != 'make_trade_route':
-        raise ValueError('Invalid trade action')
-    for k in FIELDS - {'kind'}:
-        uint(a[k], k, 63 if k.endswith('_owner') else width - 1 if k.startswith('x') else height - 1 if k.startswith('y') else 4294967295)
-    return a
-
-def validate_catalog(v, pid, turn):
-    _shape(v, 'player_id turn width height traders active_routes')
-    uint(pid, 'player', 63)
-    uint(turn, 'turn', 2147483647)
-    if type(v['player_id']) is not int or type(v['turn']) is not int or v['player_id'] != pid or (v['turn'] != turn):
-        raise ValueError('Foreign trade catalogue')
-    w = uint(v['width'], 'width', 16384)
-    h = uint(v['height'], 'height', 16384)
-    if not 0 < w * h <= 16384:
-        raise ValueError('Invalid trade map')
-    active = []
-    for r in _list(v['active_routes']):
-        _shape(r, 'unit_id origin_owner origin_city destination_owner destination_city')
-        for k, n in r.items():
-            uint(n, k, 63 if k.endswith('_owner') else 4294967295)
-        if r['origin_owner'] != pid:
-            raise ValueError('Foreign outgoing trade route')
-        active.append(r['unit_id'])
-    if active != sorted(set(active)):
-        raise ValueError('Duplicate active traders')
-    ids = []
-    total = 0
-    for t in _list(v['traders']):
-        _shape(t, 'unit_id x y origin_owner origin_city destinations')
-        for k in ('unit_id', 'origin_city'):
-            uint(t[k], k)
-        uint(t['origin_owner'], 'origin owner', 63)
-        uint(t['x'], 'x', w - 1)
-        uint(t['y'], 'y', h - 1)
-        ids.append(t['unit_id'])
-        destinations = []
-        for d in _list(t['destinations']):
-            _shape(d, 'owner city_id x y name path portal_entrances portal_exits repeat_route can_confirm has_post origin_yields destination_yields')
-            uint(d['owner'], 'destination owner', 63)
-            uint(d['city_id'], 'destination city')
-            uint(d['x'], 'destination x', w - 1)
-            uint(d['y'], 'destination y', h - 1)
-            if type(d['name']) is not str or len(d['name'].encode()) > 32768:
-                raise ValueError('Invalid trade city name')
-            if any((type(d[k]) is not bool for k in ('repeat_route', 'can_confirm', 'has_post'))):
-                raise ValueError('Invalid trade flags')
-            if not d['repeat_route'] and (not d['can_confirm']):
-                raise ValueError('Nonrepeat destination blocked')
-            path = _list(d['path'], 16384)
-            if not path or any((type(n) is not int or not 0 <= n < w * h for n in path)):
-                raise ValueError('Invalid native trade path')
-            for k in ('portal_entrances', 'portal_exits'):
-                steps = []
-                for portal in _list(d[k], len(path)):
-                    _shape(portal, 'step plot')
-                    uint(portal['step'], 'portal step', len(path))
-                    if portal['step'] == 0 or type(portal['plot']) is not int or (not -1 <= portal['plot'] < w * h):
-                        raise ValueError('Invalid portal')
-                    steps.append(portal['step'])
-                if steps != sorted(set(steps)):
-                    raise ValueError('Duplicate portal step')
-            _yields(d['origin_yields'])
-            _yields(d['destination_yields'])
-            destinations.append((d['owner'], d['city_id']))
-            total += 1
-        if destinations != sorted(set(destinations)):
-            raise ValueError('Duplicate trade destination')
-    if ids != sorted(set(ids)) or total > 4096:
-        raise ValueError('Duplicate/unbounded trade roster')
-    return v
-
 def parse(raw, pid, turn):
     if type(raw) is not bytes or len(raw) > LIMIT:
         raise ValueError('Unbounded trade wire')
@@ -148,19 +54,6 @@ def catalog(prefix, turn, *, player_id=0):
     attach(prefix)
     raw = prefix.runtime.evaluate_text(prefix.ui_child, source(player_id, turn) + b'local result=snapshot();return encode(result)', b'@explicit_trade_catalog', capacity=LIMIT + 1)
     return parse(raw, player_id, turn)
-
-def actions(v):
-    validate_catalog(v, v['player_id'], v['turn'])
-    return [dict(kind='make_trade_route', unit_id=t['unit_id'], origin_owner=t['origin_owner'], origin_city=t['origin_city'], destination_owner=d['owner'], destination_city=d['city_id'], x0=d['x'], y0=d['y'], x1=t['x'], y1=t['y']) for t in v['traders'] for d in t['destinations'] if d['can_confirm']]
-
-def compare_own(v, obs):
-    validate_catalog(v, obs['player_id'], obs['turn'])
-    units = {u['id']: (u['x'], u['y']) for u in obs['units']}
-    cities = {c['id'] for c in obs['cities']}
-    if (v['width'], v['height']) != (obs['width'], obs['height']) or any((units.get(t['unit_id']) != (t['x'], t['y']) for t in v['traders'])):
-        raise ValueError('Trade roster differs from own observation')
-    if any((r['origin_city'] not in cities for r in v['active_routes'])):
-        raise ValueError('Outgoing route from absent own city')
 
 def literal(v):
     if type(v) is dict:

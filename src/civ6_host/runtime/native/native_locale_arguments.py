@@ -17,6 +17,38 @@ DLL_SHA = '356941013c3303136a221fbf54773963362f109a93badeef425f6350f134d8b2'
 def digest(p):
     return hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(p))).read_bytes()).hexdigest()
 
+def verify_runtime_images(runtime, proof):
+    """Match loaded files to their explicit runtime or historical ABI identity."""
+    library = runtime.service_owner.localization_library
+    pairs = ((runtime.library, proof['havok'], 'HavokScript_FinalRelease.dll'),
+             (library, proof['images']['localization'], 'Localization_FinalRelease.dll'))
+    shared = getattr(runtime, 'shared_dependency_profile', None)
+    if shared is not None:
+        from .native_shared_dependency_profiles import NativeSharedDependencyProfile
+        from civ6_host.runtime.execution_images import known_path, select
+        if type(shared) is not NativeSharedDependencyProfile:
+            raise ValueError('Locale requires the explicit shared dependency profile')
+        image = select('xp2-gamecore-current-092abfbb',
+                       core_path=known_path('xp2-gamecore-current-092abfbb'))
+        if (shared.actual_image_sha256, shared.interface_reference_sha256) != (
+                image.image_sha256, image.reference_core_sha256):
+            raise ValueError('Locale shared dependency image/reference pair differs')
+        identities = {row.name: row for row in image.shared_dependencies}
+        for loaded, reference, name in pairs:
+            row = identities[name]
+            if (reference['sha256'] != row.reference_sha256
+                    or _resolve_resource_path(Path(reference['path'])).resolve()
+                    != _resolve_resource_path(Path(row.path)).resolve()):
+                raise ValueError('Locale source ABI reference differs from runtime profile')
+            shared.verify_library_path(name, loaded._name)
+        return image
+    for loaded, identity, _ in pairs:
+        if (_resolve_resource_path(Path(loaded._name)).resolve()
+                != _resolve_resource_path(Path(identity['path'])).resolve()
+                or digest(loaded._name) != identity['sha256']):
+            raise RuntimeError('Locale/HKS loaded image differs')
+    return None
+
 def verified_files():
     p = load_pinned_json(PROOF, PROOF_SHA)
     b = load_pinned_json(BUILD, BUILD_SHA)
@@ -102,6 +134,13 @@ def _diagnose(runtime, child, library):
 
 def attach(prefix):
     runtime = prefix.runtime
+    if getattr(runtime, 'shared_dependency_profile', None) is not None:
+        # The current profile uses the length-preserving revision of this same
+        # native bridge; never reinstall the older C module over it.
+        from civ6_host.runtime.locale_text import attach as attach_length_locale
+        attach_length_locale(prefix)
+        prefix.numeric_locale_child = prefix.ui_child
+        return
     child = prefix.ui_child
     pointer = runtime.registry.validate(child)
     if not runtime.locale_bound:
@@ -110,9 +149,7 @@ def attach(prefix):
         return
     rows, p = verified_files()
     library = runtime.service_owner.localization_library
-    for loaded, identity in ((runtime.library, p['havok']), (library, p['images']['localization'])):
-        if _resolve_resource_path(_resolve_resource_path(Path(loaded._name))).resolve() != _resolve_resource_path(_resolve_resource_path(Path(identity['path']))).resolve() or digest(loaded._name) != identity['sha256']:
-            raise RuntimeError('Locale/HKS loaded image differs')
+    verify_runtime_images(runtime, p)
     runtime.namespaces.register(child, 'Locale')
     if not hasattr(runtime, 'locale_arguments_module'):
         module = C.WinDLL(str(DLL))

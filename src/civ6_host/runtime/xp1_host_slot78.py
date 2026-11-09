@@ -57,11 +57,12 @@ def verify_source(*, core_sha256=XP1_CORE_SHA256):
     return proof
 
 
-def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_turn_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown HOST78 source engine')
+    if execution_image is not None:raise ValueError('XP1 HOST78 does not accept an XP2 execution image')
     from .paths import resource_root
     from .resource_resolution import resolve_path
     proof = verify_source()
@@ -123,7 +124,9 @@ def install(backend):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_turn_source import SOURCE as reference,require_prepared_owner
         require_prepared_owner(backend)
-    source_dependencies(core_sha256=core_sha256)
+    execution_image = getattr(backend.core, '_civ6_host_execution_image', None)
+    source_dependencies(core_sha256=core_sha256,
+                        **({'execution_image': execution_image} if core_sha256 == XP2_CORE_SHA256 else {}))
     spans=verify_live(backend.core._handle,backend.runtime.read,host.pointer,core_sha256=core_sha256)
     previous=host._slot_bindings.get((C.addressof(host.vtable),0x78))
     callback=host._constant_zero_slot78

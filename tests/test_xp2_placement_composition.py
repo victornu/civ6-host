@@ -8,6 +8,7 @@ from civ6_host.runtime import (a0_foundation_events, foundation_facade_profiles,
     xp2_placement_event_source, placement_event_profile, faith_event_profile)
 from civ6_host.runtime.saved_load_profiles import XP2_CORE_SHA256
 from civ6_host.runtime import xp2_turn_notification_source as turn_source
+from civ6_host.runtime import xp2_wmd_fallout_visibility, xp2_wonder_completion
 from civ6_host.runtime.native import (native_event_6d7163b0 as district,
     native_event_6d7163b0_selector as district_selector,
     native_event_f391d7b3 as visibility, native_event_b3495127 as faith,
@@ -56,6 +57,14 @@ class XP2PlacementCompositionTests(unittest.TestCase):
                     graph.memory.put(base + int(part["start_rva"], 16),
                                      bytes.fromhex(part["raw_hex"]))
         for body in query_proof["functions"].values():
+            for part in body["fragments"]:
+                graph.memory.put(base + int(part["start_rva"], 16),
+                                 bytes.fromhex(part["raw_hex"]))
+        for body in xp2_wmd_fallout_visibility.source()["bodies"]["core"].values():
+            for part in body.get("fragments") or (body,):
+                graph.memory.put(base + int(part["start_rva"], 16),
+                                 bytes.fromhex(part["raw_hex"]))
+        for body in xp2_wonder_completion.source()[1]["functions"].values():
             for part in body["fragments"]:
                 graph.memory.put(base + int(part["start_rva"], 16),
                                  bytes.fromhex(part["raw_hex"]))

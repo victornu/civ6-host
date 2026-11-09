@@ -22,12 +22,13 @@ def admitted_frames():
 
 def proof_memory():
     proof = source.source()
+    native02 = source.native02_source()
     memory = {}
     formation = source.formation_source()
     era = source.era_transition_source()
     raf30 = source.raf30_source()
     city_listener = source.city_listener_source()
-    for body in (*proof["bodies"].values(), *formation["bodies"].values(),
+    for body in (*proof["bodies"].values(), *native02["bodies"].values(), *formation["bodies"].values(),
                  *era["bodies"].values(), *raf30["bodies"].values(), *city_listener["bodies"].values()):
         for fragment in body.get("fragments", ()) or (body,):
             raw = bytes.fromhex(fragment["raw_hex"])
@@ -74,6 +75,8 @@ class XP2HostSlot20SourceTests(unittest.TestCase):
         supplement = source._path(source.FORMATION_SOURCE[0]).resolve()
         self.assertEqual(pins[str(supplement)], source.FORMATION_SOURCE[1])
         self.assertIn(str(Path(source.__file__).resolve()), pins)
+        native02_profile = source._path(source.NATIVE02_SOURCE[0]).resolve()
+        self.assertEqual(pins[str(native02_profile)], source.NATIVE02_SOURCE[1])
         for path, digest in pins.items():
             self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(), digest)
 
@@ -81,6 +84,7 @@ class XP2HostSlot20SourceTests(unittest.TestCase):
         memory = proof_memory()
         receipt = source.verify_live(BASE, reader_for(memory), host_pointer=HOST)
         self.assertEqual(receipt["source_sha256"], source.SOURCE[1])
+        self.assertEqual(receipt["native02_source_sha256"], source.NATIVE02_SOURCE[1])
         self.assertEqual(receipt["core_sha256"], XP2_CORE_SHA256)
         self.assertEqual(receipt["formation_source_sha256"], source.FORMATION_SOURCE[1])
         for rva in (0x17fa92, 0x226ed1, 0x1a33a0, 0x65a217, 0x408fc, 0x9ceee0, 0x9d1020, 0x177732, 0xda760, 0x284c48, 0x9ceb28, 0x17ad17, 0x285ab9, 0x9d0288, 0x178ecb, 0x9cee08):
@@ -123,6 +127,25 @@ class XP2HostSlot20SourceTests(unittest.TestCase):
         self.assertEqual(source.select_contract(frames), source.CITY_LISTENER_SOURCE[1])
         with self.assertRaises(ValueError):
             source.select_contract(frames[:-1])
+
+    def test_native02_admits_only_the_source_proved_null_ignored_callback_prefix(self):
+        proof = source.native02_source()
+        frames = [dict(module=MODULE, rva=rva)
+                  for rva in proof["contract"]["observed_core_return_chain"]]
+        self.assertEqual(source.select_contract(frames), source.NATIVE02_SOURCE[1])
+        # Outer producer frames vary; the exact callback and its result-ignoring receiver do not.
+        frames[3]["rva"] = "0x2eabdf"
+        self.assertEqual(source.select_contract(frames), source.NATIVE02_SOURCE[1])
+        for changed in (frames[:2], [dict(module=MODULE, rva="0x17f098"),
+                                     dict(module=MODULE, rva="0x17feda"),
+                                     dict(module=MODULE, rva="0x2e9e8d")],
+                        [dict(module=MODULE, rva="0x17f098"),
+                         dict(module=MODULE, rva="0x17b387"),
+                         dict(module=MODULE, rva="0x2e9e8c")]):
+            with self.subTest(frames=changed), self.assertRaises(ValueError):
+                source.select_contract(changed)
+        with self.assertRaisesRegex(ValueError, "uninstalled"):
+            source.select_contract(frames, service_installed=True)
 
     def test_only_exact_four_frame_return_chain_is_selected(self):
         self.assertEqual(source.select_contract(admitted_frames(), service_installed=False),

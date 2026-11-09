@@ -73,15 +73,21 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP2_CORE_SHA256):
-    result=dict(placement.source_dependencies(core_sha256));p=verify_source(core_sha256)
+def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
+    result=dict(placement.source_dependencies(core_sha256, execution_image=execution_image));p=verify_source(core_sha256)
     for ref in (dict(path=SOURCE[0],sha256=SOURCE[1]),p['image'],p['extractor'],*p['references']):
+        if ref is p['image'] and execution_image is not None:
+            continue
         path=str(resolve_path(resource_root()/ref['path']).resolve())
         if (hashlib.sha256(Path(path).read_bytes()).hexdigest()!=ref['sha256']
                 or path in result and result[path]!=ref['sha256']):
             raise ValueError('XP2 placement inventory dependency changed: '+path)
         result[path]=ref['sha256']
-    return result
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(
+        result, execution_image=execution_image,
+        provenance_images=(p['image'],),
+    )
 
 
 def verify_live(base,read,core_sha256=XP2_CORE_SHA256):
@@ -119,7 +125,8 @@ def bind_owner(owner,core,read):
                 or old.placement_receipt is not original):
             raise ValueError('XP2 placement inventory belongs to another native lifetime')
         return old
-    source_dependencies()
+    execution_image = getattr(core, '_civ6_host_execution_image', None)
+    source_dependencies(XP2_CORE_SHA256, execution_image=execution_image)
     result=VerifiedInventorySource(owner,core,core._handle,SOURCE[1],XP2_CORE_SHA256,original,verify_live(core._handle,read))
     owner._xp2_placement_inventory_source_receipt=result
     return result

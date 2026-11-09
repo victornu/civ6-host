@@ -10,9 +10,67 @@ from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 READY='xp1-continuation-ready'
 ACTIVE='xp1-continuation-active'
 
-def validate_command(action):
+GOVERNOR_KINDS = ('appoint_governor', 'promote_governor', 'assign_governor', 'consider_governor_titles')
+TRADE_KINDS = ('make_trade_route', 'change_trade_origin')
+ESPIONAGE_KINDS = ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')
+SPY_COMPLETION_KINDS = ('spy_renew', 'spy_completion_dismiss')
+CONGRESS_KINDS = ('congress_open', 'congress_confirm_ballot', 'congress_confirm_proposals', 'congress_close')
+
+def validate_command(action, *, observation=None):
     if type(action) is not dict:
         raise ValueError('Explicit command dictionary required')
+    if action.get('kind') in CONGRESS_KINDS:
+        from civ6_host.contracts.world_congress import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') in SPY_COMPLETION_KINDS:
+        from civ6_host.contracts.spy_completion import validate_action
+        if observation is None:
+            raise ValueError('Spy completion command requires its exact player map dimensions')
+        validate_action(action, observation['width'], observation['height'])
+        return
+    if action.get('kind') in ESPIONAGE_KINDS:
+        from civ6_host.contracts.espionage import validate_action
+        if observation is None:
+            raise ValueError('Espionage command requires its exact player map dimensions')
+        validate_action(action, observation['width'], observation['height'])
+        return
+    if action.get('kind') in TRADE_KINDS:
+        from civ6_host.contracts import trade
+        if observation is None:
+            raise ValueError('Trade command requires its exact player map dimensions')
+        validate = (trade.validate_route_action if action['kind'] == 'make_trade_route'
+                    else trade.validate_origin_action)
+        validate(action, observation['width'], observation['height'])
+        return
+    if action.get('kind') == 'diplomacy_initiate':
+        from civ6_host.contracts.diplomacy_overview import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') == 'world_war_response':
+        from civ6_host.contracts.xp2_war_confirmation import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') in GOVERNOR_KINDS:
+        from civ6_host.contracts.governors import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') in ('send_envoy', 'retain_envoys'):
+        from civ6_host.contracts.envoys import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') in ('government','retain_government'):
+        from civ6_host.contracts.government import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') == 'policy_unlock':
+        from civ6_host.contracts.policy_unlock import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') == 'policies':
+        from civ6_host.contracts.capability_policies import validate_explicit_action
+        validate_explicit_action(action)
+        return
     if action.get('kind') == 'purchase':
         from civ6_host.contracts.plot_purchases import validate_purchase_action
         validate_purchase_action(action)
@@ -113,6 +171,7 @@ class SavedContinuation:
         self.explicit_world_input=None
         self.explicit_unit_orders=None
         self.explicit_production_queues=None
+        self.trade_feedback=None
         self._xp1_production_queue_catalogue=None
         self.explicit_placements={}
         self.explicit_combat_units=None
@@ -168,18 +227,55 @@ class SavedContinuation:
         self.publishing=False;self.publication_count+=1
 
     def execute(self,action,*,session=None):
-        validate_command(action)
+        validate_command(action,observation=getattr(self,'observation',None))
         xp2 = self.owner.load_abi.core_sha256 == XP2_CORE_SHA256
+        if (self.world_input_prompts.get(self.observation['player_id']) is not None
+                and action['kind'] != 'world_war_response'):
+            raise ValueError('The retained war modal requires an explicit response first')
+        if action['kind'] == 'world_war_response':
+            from .xp2_world_war import source_pin
+            pin = getattr(session, 'war_source_sha256', None)
+            if not xp2 or pin is None:
+                raise ValueError('War responses require the explicitly selected XP2 session profile')
+            source_pin(pin, 'xp2-lan')
+        if action['kind'] in GOVERNOR_KINDS and (not xp2
+                or not getattr(session, 'governors_diagnostic', False)):
+            raise ValueError('Governors require the explicit source-qualified XP2 session option')
+        if action['kind'] == 'diplomacy_initiate' and (not xp2
+                or getattr(session, 'diplomacy_overview_diagnostic', False) is not True):
+            raise ValueError('Initial diplomacy requires the selected XP2 initial-choice group')
+        if action['kind'] in TRADE_KINDS and (not xp2 or self.trade_feedback is None
+                or getattr(session, 'trade_diagnostic', False) is not True):
+            raise ValueError('Trade requires the selected XP2 BBG trade query group')
+        if action['kind'] in ESPIONAGE_KINDS + SPY_COMPLETION_KINDS and (not xp2 or self.trade_feedback is None
+                or getattr(session, 'espionage_diagnostic', False) is not True):
+            raise ValueError('Espionage requires the selected XP2 BBG espionage query group')
+        if getattr(session, 'world_congress_diagnostic', False):
+            from .xp2_world_congress import guard_other_action
+            guard_other_action(session, action)
+        if action['kind'] in CONGRESS_KINDS and (not xp2 or self.trade_feedback is None
+                or getattr(session, 'world_congress_diagnostic', False) is not True):
+            raise ValueError('Congress requires its exact XP2 option and feedback owner')
         if not xp2 and action['kind'] in UNIT_WORK_FIELDS:
             raise ValueError('Expansion unit work requires the verified XP2 route')
-        if not xp2 and action['kind'] in ('purchase', 'promote_unit', 'upgrade_unit'):
+        if not xp2 and action['kind'] in ('purchase', 'promote_unit', 'upgrade_unit', 'policies', 'policy_unlock','government','retain_government','send_envoy','retain_envoys'):
             raise ValueError('Expansion command requires the verified XP2 route')
-        if (xp2 and action['kind'] not in UNIT_WORK_FIELDS and action['kind'] not in
+        if (xp2 and action['kind'] not in UNIT_WORK_FIELDS
+                and action['kind'] not in TRADE_KINDS
+                and action['kind'] not in ESPIONAGE_KINDS
+                and action['kind'] not in SPY_COMPLETION_KINDS
+                and action['kind'] not in CONGRESS_KINDS
+                and action['kind'] not in GOVERNOR_KINDS and action['kind'] not in
                 ('found_city','research','civic','production','end_turn','force_end_turn','unready_turn',
-                 'world_select_unit','world_deselect_unit','world_plot_click','unit_order',
-                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit')):
+                 'world_select_unit','world_deselect_unit','world_plot_click','world_war_response','diplomacy_initiate','unit_order',
+                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit','policies','policy_unlock','government','retain_government','send_envoy','retain_envoys')):
             raise ValueError('XP2 command family is not yet source-qualified in this session')
         return self._transition(action,session=session,pump=False)
+
+    def flush_trade_feedback(self):
+        if self.trade_feedback is None:
+            raise ValueError('Native BBG trade feedback is not installed')
+        return self.trade_feedback.flush()
 
     def advance(self,session):
         """One explicit native update through the same retained owner."""
@@ -193,7 +289,15 @@ class SavedContinuation:
         from .xp1_load_capability import capability_source_scope
         is_turn=pump or action['kind'] in ('end_turn','force_end_turn','unready_turn')
         from civ6_host.contracts.capability_world_input import WORLD_KINDS
-        is_world=not pump and action['kind'] in WORLD_KINDS
+        is_war_response=not pump and action['kind']=='world_war_response'
+        is_initial_diplomacy=not pump and action['kind']=='diplomacy_initiate'
+        is_trade=not pump and action['kind'] in TRADE_KINDS
+        is_espionage=not pump and action['kind'] in ESPIONAGE_KINDS
+        is_spy_completion=not pump and action['kind'] in SPY_COMPLETION_KINDS
+        is_congress_auto=not pump and action['kind']=='automatic_congress_empty_phase'
+        is_congress=not pump and (action['kind'] in CONGRESS_KINDS or is_congress_auto)
+        congress_turn=is_congress and (is_congress_auto or action['kind']=='congress_confirm_ballot')
+        is_world=not pump and (action['kind'] in WORLD_KINDS or is_war_response)
         is_order=not pump and action['kind']=='unit_order'
         is_queue=not pump and action['kind'] in ('queue_append','queue_remove','queue_swap')
         is_placement=not pump and action['kind'] in ('production_placement','production_resume')
@@ -204,10 +308,15 @@ class SavedContinuation:
         is_purchase=not pump and action['kind']=='purchase'
         is_promotion=not pump and action['kind']=='promote_unit'
         is_upgrade=not pump and action['kind']=='upgrade_unit'
+        is_policy=not pump and action['kind'] in ('policies', 'policy_unlock')
+        is_government=not pump and action['kind'] in ('government','retain_government')
+        is_envoy=not pump and action['kind'] in ('send_envoy','retain_envoys')
+        is_governor=not pump and action['kind'] in GOVERNOR_KINDS
         has_observation_effect = (is_world or is_order or is_queue or is_placement or is_attack
                                   or is_city or is_city_shot or is_work or is_purchase or is_promotion
-                                  or is_upgrade)
-        if is_turn or has_observation_effect:
+                                  or is_upgrade or is_policy or is_government or is_envoy or is_governor
+                                  or is_trade or is_espionage or is_spy_completion or is_congress)
+        if is_turn or has_observation_effect or is_initial_diplomacy:
             from .xp1_saved_load_owner import SavedLoadOwner
             if (type(session) is not SavedLoadOwner or session.continuation is not self
                     or session.backend is not self.owner or not session._running):
@@ -232,6 +341,25 @@ class SavedContinuation:
                         advance(session,boundary=boundary)
                     else:
                         effect=submit(session,action,pid,boundary=boundary)
+                elif is_war_response:
+                    from .xp2_world_war import respond
+                    effect=respond(session,action,before_observation)
+                elif is_initial_diplomacy:
+                    from .xp2_diplomacy_overview import initiate
+                    effect=initiate(session,action,before_observation)
+                elif is_trade:
+                    from .xp2_trade import apply
+                    effect=apply(session,action,before_observation)
+                elif is_espionage:
+                    from .xp2_espionage import apply
+                    effect=apply(session,action,before_observation)
+                elif is_congress:
+                    from .xp2_world_congress import apply, advance_empty_phase
+                    effect = (advance_empty_phase(session, before_observation) if is_congress_auto
+                              else apply(session, action, before_observation))
+                elif is_spy_completion:
+                    from .xp2_spy_completion import apply
+                    effect=apply(session,action,before_observation)
                 elif is_world:
                     from .xp1_world_input import apply
                     effect=apply(session,action,before_observation)
@@ -240,7 +368,16 @@ class SavedContinuation:
                     effect = {'observation': apply(self, p, action, turn, before_observation, player_id=pid)}
                 elif is_purchase:
                     from .xp2_plot_purchases import apply
-                    effect = dict(observation=apply(session, action, before_observation))
+                    effect = dict(observation=apply(session, action, before_observation, allow_faith=True))
+                elif is_government:
+                    from .xp2_government import apply
+                    effect=apply(session,action,before_observation)
+                elif is_policy:
+                    if action['kind'] == 'policy_unlock':
+                        from .xp2_policy_unlock import apply
+                    else:
+                        from .xp2_policies import apply
+                    effect = apply(session, action, before_observation)
                 elif is_promotion:
                     from .xp2_promotions import apply
                     effect = dict(observation=apply(session, action, before_observation))
@@ -276,6 +413,12 @@ class SavedContinuation:
                 elif is_city:
                     from .expansion_city_controls import apply
                     effect=apply(session,action,before_observation)
+                elif is_governor:
+                    from .xp2_governors import apply
+                    effect=apply(session,action,before_observation)
+                elif is_envoy:
+                    from .xp2_envoys import apply
+                    effect=apply(session,action,before_observation)
                 elif kind=='found_city':
                     effect=p.inspect_found_city(pid,unit_id=action['unit_id'],
                                                 expected_x=action['x'],expected_y=action['y'])
@@ -297,14 +440,21 @@ class SavedContinuation:
                 else:
                     from .explicit_production_operation import apply
                     apply(self,p,action,turn,player_id=pid,core_sha256=b.load_abi.core_sha256)
+                feedback_owner = getattr(self, 'trade_feedback', None)
+                if feedback_owner is not None and feedback_owner.events:
+                    feedback = self.flush_trade_feedback()
+                    if feedback:
+                        b.emit('xp2_bbg_trade_gameplay_delivered', feedback=feedback)
                 action_done = perf_counter()
-                self.transport.require_empty_native_queue();control=b.control(empty=True)
+                self.transport.require_empty_native_queue()
+                pending_statement=(is_war_response or is_initial_diplomacy) and effect.get('pending_statement_retained') is True
+                control=b.control(empty=True,**({'allow_diplomacy':True} if pending_statement else {}))
                 observed=observe_player(self.runtime,self.ui_child,before_observation['player_id'])
                 if has_observation_effect and observed!=effect['observation']:
                     raise ValueError('Native action effect differs from the final player observation')
-                if not is_turn and observed['turn']!=turn:
+                if not (is_turn or congress_turn) and observed['turn']!=turn:
                     raise ValueError('Native explicit choice changed the turn unexpectedly')
-                if is_turn and observed['turn'] not in (turn,turn+1):
+                if (is_turn or congress_turn) and observed['turn'] not in (turn,turn+1):
                     raise ValueError('One native turn transition crossed an unqualified turn interval')
                 if kind=='found_city' and (len(observed['cities'])!=len(before_observation['cities'])+1
                         or len(observed['units'])!=len(before_observation['units'])-1):

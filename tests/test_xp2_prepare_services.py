@@ -1,6 +1,8 @@
 """Real shared host callback ownership; only native memory/calls are fixtures."""
 import ctypes as C
 import struct
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
@@ -80,9 +82,41 @@ class XP2PrepareServicesTests(unittest.TestCase):
         host._xp2_teardown_binding=host.context_teardown_receipt
         self.host=host
         self.core=NS(_handle=self.base,_name='fixture-core.dll',_diagnostic_host=host)
-        self.profile=NS(ruleset='xp2',mode='context',core_sha256=XP2_CORE_SHA256)
+        self.profile=profiles.NativeCoreContextProfile(
+            ruleset='xp2',mode='context',core_path=Path(self.core._name),
+            core_sha256=XP2_CORE_SHA256,create_context_rva=0,destroy_context_rva=0,
+            context_vtable_rva=0,context_vtable_bytes=b'',initialized_getter_rva=0,
+            initialized_getter_bytes=b'',shared_dependency_directory=Path('fixture-only'),
+            dependency_sha256={})
         self.native_calls=[];self.buffers=[]
         return host
+
+    def test_init_teardown_guard_accepts_actual_and_reference_core_pair(self):
+        host=self.fixture()
+        live={'host_globals':host.context_init_receipt['host_globals_after_set']}
+        # Historical no-image receipts keep their original, single Core field.
+        prepare._require_lifecycle(self.core,host,self.contract,live,self.profile)
+
+        from civ6_host.runtime.execution_images import known_path,select
+        image=select('xp2-gamecore-current-092abfbb',
+            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        current=replace(self.profile,core_path=Path(image.path),
+            core_sha256=image.image_sha256,
+            reference_core_sha256=image.reference_core_sha256,
+            execution_image=image)
+        from civ6_host.runtime.xp2_saved_init import stamp_context_init_receipt
+        stamped=stamp_context_init_receipt(current,dict(core_sha256=image.image_sha256))
+        self.assertEqual(stamped['execution_image_sha256'],image.image_sha256)
+        self.assertEqual(stamped['reference_core_sha256'],XP2_CORE_SHA256)
+        for receipt in (host.context_init_receipt,host.context_teardown_receipt):
+            receipt['core_sha256']=image.image_sha256
+            receipt['execution_image_sha256']=image.image_sha256
+            receipt['reference_core_sha256']=image.reference_core_sha256
+        prepare._require_lifecycle(self.core,host,self.contract,live,current)
+
+        host.context_init_receipt['reference_core_sha256']='0'*64
+        with self.assertRaisesRegex(ValueError,'actual/reference identities differ'):
+            prepare._require_lifecycle(self.core,host,self.contract,live,current)
 
     def string(self,name):
         raw=name.encode('ascii');buffer=C.create_string_buffer(raw)
@@ -127,7 +161,9 @@ class XP2PrepareServicesTests(unittest.TestCase):
         return call
 
     def invoke(self,factory=None,profile=None):
-        def localize(host,directory):host.localization_initialized=True;self.native_calls.append('localization')
+        def localize(host,directory,*,shared_dependency_profile=None):
+            self.assertIsNone(shared_dependency_profile)
+            host.localization_initialized=True;self.native_calls.append('localization')
         with patch.object(profiles,'profile_for_core',return_value=self.profile), \
              patch.object(profiles,'validate_loaded_modules'), \
              patch.object(native_probe.Windows,'modules',return_value=['fixture-crt.dll']), \
@@ -206,7 +242,7 @@ class XP2PrepareServicesTests(unittest.TestCase):
     def test_wrong_engine_and_null_tuner_flag_refuse_before_callbacks(self):
         host=self.fixture()
         with self.assertRaisesRegex(ValueError,'engine'):
-            self.invoke(profile=NS(ruleset='xp1',mode='context',core_sha256=XP1_CORE_SHA256))
+            self.invoke(profile=replace(self.profile,ruleset='xp1',core_sha256=XP1_CORE_SHA256))
         for value in (False,None,1,'true'):
             with self.assertRaises(ValueError):prepare.require_null_tuner_diagnostic(host,value)
         host._bind(host.aux_vtable,0,None,[C.c_void_p],host._unsupported('aux',0))

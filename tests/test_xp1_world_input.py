@@ -28,7 +28,7 @@ hook_path=HERE/'extraction_xp1_world_input.py'
 if not hook_path.is_file():hook_path=HOST/'tools/extraction_xp1_world_input.py'
 profile=load('civ6_host.runtime.xp1_world_input_profile',profile_path)
 hook=load('world_input_extraction_fixture',hook_path)
-from civ6_host.runtime.configuration_profiles import BASE_CORE_SHA256 as BASE, XP1_CORE_SHA256 as XP1
+from civ6_host.runtime.configuration_profiles import BASE_CORE_SHA256 as BASE, XP1_CORE_SHA256 as XP1, XP2_CORE_SHA256 as XP2
 from civ6_host.runtime.native import native_world_input as original_world
 from civ6_host.runtime.native import native_world_click as original_click
 from civ6_host.runtime.native import native_saved_combat as original_combat
@@ -102,7 +102,7 @@ class WorldInputTests(unittest.TestCase):
         self.assertEqual(world.catalog_source(0,8),original_world.catalog_source(0,8))
         self.assertEqual(click.request_source(0,8,17,6),original_click.request_source(0,8,17,6))
         self.assertEqual(combat.queued_destination_source(0,8,17),original_combat.queued_destination_source(0,8,17))
-        for text,fn,callnames in ((WORLD,'apply',{'observe','click.request_source','click.parse_request_result','queued_destination'}),
+        for text,fn,callnames in ((WORLD,'apply',{'observe','build_request','click.parse_request_result','queued_destination'}),
              (WORLD,'observe',{'catalog_source'}),(COMBAT,'queued_destination',{'queued_destination_source'})):
             tree=ast.parse(text);body=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==fn)
             calls=[n for n in ast.walk(body) if isinstance(n,ast.Call) and ast.unparse(n.func) in callnames]
@@ -151,6 +151,34 @@ class WorldInputTests(unittest.TestCase):
                         with self.assertRaises(ValueError):click.parse_request_result(raw_result.encode(),0,8,17,dest)
                     if name=='hidden_target':self.assertEqual(war_count,0)
 
+    @unittest.skipUnless(LuaRuntime,'Stock Lua interpreter unavailable; source/owner tests remain separate')
+    def test_xp2_swap_uses_the_official_can_start_gate_and_existing_click_parameters(self):
+        def run(values, destination):
+            declarations=';'.join(k+'='+('true' if v is True else 'false' if v is False else str(v))
+                                  for k,v in values.items())+'\n'
+            raw=click.request_source(0,8,17,destination,core_sha256=XP2).decode('utf8')
+            raw=re.sub(r':\s*(?:number|table|string|boolean)\b','',raw)
+            script=declarations+LUA_SETUP+'\nlocal function run_click()\n'+raw+'\nend\nreturn run_click(),sent,sentOp,sentX,sentY,sentModifiers,canQueries\n'
+            return LuaRuntime(max_memory=4*1024*1024).execute(script)
+
+        payload,sent,operation,x,y,modifiers,can_queries=run({'enabled':22},6)
+        parsed=click.parse_request_result(payload.encode(),0,8,17,6,core_sha256=XP2)
+        self.assertEqual((sent,parsed['status'],parsed['operation_name']),(1,'request','SWAP_UNITS'))
+        self.assertEqual(parsed['operation'],22)  # fixture enum value is not a production ID
+        self.assertEqual({name:value for name,key,value in parsed['parameters']},
+                         {'x':2,'y':1,'modifiers':16400})
+        self.assertEqual((x,y,modifiers,can_queries),(2,1,16400,3))
+
+        refused,refused_sent,*_=run({'enabled':21},6)
+        refused_result=click.parse_request_result(refused.encode(),0,8,17,6,core_sha256=XP2)
+        self.assertEqual((refused_sent,refused_result['status']),(0,'unsupported'))
+        self.assertFalse(refused_result['native_callback_invoked'])
+
+        # The old XP1 route remains immutable and continues to refuse SWAP.
+        xp1_source=click.request_source(0,8,17,6,core_sha256=XP1).decode('utf8')
+        self.assertIn("operationName~='MOVE_TO'",xp1_source)
+        self.assertNotIn("operationName~='SWAP_UNITS'",xp1_source)
+
     def test_shared_apply_unsupported_preserves_state_but_is_not_gameplay_success(self):
         # Equal state proves non-mutation only. The client must retain this as
         # unavailable capability/refusal, never promote it to completed/noop.
@@ -190,6 +218,7 @@ class WorldInputTests(unittest.TestCase):
         import test_found_unit_a0 as fixture
         from civ6_host.runtime.a0_family_source import family_profile
         fixture.PROFILE=family_profile();f=fixture.Fixture()
+        f.deferred.cache_core_sha256=BASE
         memory={0x70000000:struct.pack('<HHI',0,1,17),0x70000010:struct.pack('<II',2,1)}
         reads=[]
         def read(address,size):

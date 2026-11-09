@@ -13,16 +13,40 @@ from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 from .native.native_session_checkpoint import SessionSaveBackend, private_paths, run_sequence
 
 
-def admit_resumed_bundle(original, resumed, manifest):
+def _validate_save_execution_identity(backend, selected_core_sha256):
+    """Keep a live image identity separate from the source-selected Load ABI."""
+    image = getattr(getattr(backend, 'core', None),
+                    '_civ6_host_execution_image', None)
+    profile = getattr(backend, 'profile', None)
+    if getattr(profile, 'execution_image', None) is not image:
+        raise ValueError('Save backend execution image differs from its retained Core profile')
+    if image is not None:
+        if (getattr(profile, 'core_sha256', None) != image.image_sha256
+                or getattr(profile, 'source_core_sha256', None)
+                    != image.reference_core_sha256
+                or getattr(getattr(backend, 'load_abi', None), 'core_sha256', None)
+                    != image.reference_core_sha256
+                or selected_core_sha256 != image.reference_core_sha256):
+            raise ValueError('Save backend actual image and Load ABI identities differ')
+    return image
+
+
+def admit_resumed_bundle(original, resumed, manifest, *, compatibility=None):
     from .captured_session_profile import select
-    selected = select(original.content_profile['engine']['gamecore_sha256']).candidate
+    from .captured_saved_load import _sha
+    selected = select(_sha(original),
+                      official_bundle=original.reference).candidate
     REFERENCE, validate_candidate_inputs = selected.reference, selected.validate_inputs
     from .native.native_official_bundle import (
         _reuse_prepared_bundle, _remember_prepared_bundle,
         _prepared_bundle_validator_digests, _PARENT_ADMISSION_TOKEN)
     validate_candidate_inputs(original.inputs, original)
     _reuse_prepared_bundle(original, REFERENCE, selected.family, _input_only=True)
-    if (resumed.reference != original.reference
+    from . import network_checkpoint
+    network_checkpoint._require_checkpoint_runtime(
+        manifest, getattr(original, 'execution_image', None), compatibility)
+    if (resumed.execution_image is not original.execution_image
+            or resumed.reference != original.reference
             or resumed.inputs.profile is not original.inputs.profile
             or resumed.inputs.checkpoint is None
             or resumed.content_profile != original.content_profile
@@ -40,12 +64,15 @@ def validate_resumed_inputs(inputs, bundle):
     from .native.native_official_bundle import _reuse_prepared_bundle
     from .network_checkpoint import validate_inputs
     from .captured_session_profile import select
-    selected = select(bundle.content_profile['engine']['gamecore_sha256']).candidate
+    from .captured_saved_load import _sha
+    selected = select(_sha(bundle),
+                      official_bundle=bundle.reference).candidate
     REFERENCE = selected.reference
     _reuse_prepared_bundle(bundle, REFERENCE, selected.family, _input_only=True)
     if inputs.official_bundle != REFERENCE:
         raise ValueError('XP1 resumed inputs belong to another official capture')
-    m = validate_inputs(inputs)
+    image=getattr(bundle,'execution_image',None)
+    m = validate_inputs(inputs,**({'execution_image':image} if image is not None else {}))
     if (bundle.initial_turn != m['observed_game_turn']
             or bundle.expected_readback != expected_readback(m['observation'])):
         raise ValueError('XP1 resumed diagnostic fields differ from the actual saved observation')
@@ -103,6 +130,8 @@ class SavedSessionSaveBackend(SessionSaveBackend):
         from .captured_session_profile import for_backend
         selected = for_backend(saved.backend).candidate
         self.core_sha256 = selected.core_sha256
+        self.execution_image = _validate_save_execution_identity(
+            saved.backend, selected.core_sha256)
         if (closure.get('checkpoint_on_close') is not True or closure.get('input_profile') != selected.family
                 or json.loads(Path(closure_path).read_bytes()) != closure
                 or getattr(saved.backend, 'session_checkpoint_attempt', None) is not None
@@ -115,7 +144,8 @@ class SavedSessionSaveBackend(SessionSaveBackend):
         self.host_state_owner = saved.continuation
         self.expected_state, self.decisions = deepcopy(observation), deepcopy(decisions)
         self.closure, self.closure_path = deepcopy(closure), Path(closure_path).resolve()
-        self.provenance = save_provenance(self.inputs, closure)
+        self.provenance = save_provenance(self.inputs, closure,
+                                          execution_image=self.execution_image)
         self.network_boundary = boundary(saved)
         self.publisher = self.host_state_owner.publisher
         self.facade = self.publisher._facades
@@ -176,12 +206,17 @@ def save(saved, observation, decisions, closure, closure_path, protocol_sequence
     from .xp1_session_inputs import _write_once
     backend = SavedSessionSaveBackend(saved, observation, decisions, closure, closure_path)
     b, t = saved.backend, saved.continuation
+    if t.trade_feedback is not None:
+        t.trade_feedback.check_checkpoint()
     identity = (t.identity, t.sequence, t.publication_count)
     saved.emit('before_xp1_saved_checkpoint', protocol_sequence=protocol_sequence)
     with saved._attempt():
         from .xp1_continuation import ACTIVE, READY
         b.stage, b.busy = ACTIVE, True
         saved._check_active()
+        if getattr(saved, 'world_congress_diagnostic', False):
+            from .xp2_world_congress import check_checkpoint
+            check_checkpoint(saved)
         with capability_source_scope(b, 'continuation'):
             before = b.jobs_snapshot('before'); require_quiescent(before)
             control = b.control(empty=True)
@@ -205,13 +240,15 @@ def save(saved, observation, decisions, closure, closure_path, protocol_sequence
     return result
 
 
-def manifest_sources(backend, reference):
+def manifest_sources(backend, reference, *, execution_image=None):
     """Select provenance only; file writing and the manifest schema stay shared."""
     from .native import native_checkpoint_provider as provider, native_checkpoint_jobs as jobs
     from .native import native_checkpoint_stream as stream
     from .paths import resource_root
     root = resource_root()
     engine = getattr(backend, 'core_sha256', provider.CORE_SHA256)
+    if execution_image is None:
+        execution_image = getattr(backend, 'execution_image', None)
     paths = [stream.PROOF_PATH, root/'work/native-checkpoint-stream-contract341.json']
     if engine == XP1_CORE_SHA256:
         from .xp1_checkpoint_profile import source_dependencies
@@ -226,7 +263,8 @@ def manifest_sources(backend, reference):
         from .xp1_checkpoint_profile import source_dependencies
         from .configuration_profiles import codec_source
         codec_source(engine)
-        paths.extend(Path(path) for path in source_dependencies(core_sha256=engine)
+        paths.extend(Path(path) for path in source_dependencies(core_sha256=engine,
+                                                               execution_image=execution_image)
                      if Path(path).is_relative_to(root))
     elif engine == provider.CORE_SHA256:
         paths.extend((root/'evidence/native-checkpoint-configuration-stream-v3'/

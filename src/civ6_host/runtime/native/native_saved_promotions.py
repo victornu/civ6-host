@@ -126,7 +126,7 @@ def request_source(action, pid, turn):
     w = wire(action)
     return preamble(pid, turn) + f"\nlocal _,offers=snapshot();local chosen=nil\nfor _,a in ipairs(offers) do if a.wire=='{w}' then assert(not chosen,'duplicate promotion choice');chosen=a end end\nassert(chosen,'promotion choice changed or unavailable');ready()\nUnitManager.RequestCommand(chosen.unit,command,{{[UnitCommandTypes.PARAM_PROMOTION_TYPE]=chosen.index}})\nreturn 'submitted'\n".encode()
 
-def apply(owner, prefix, action, turn, before, *, player_id=0):
+def apply(owner, prefix, action, turn, before, *, player_id=0, after_delivery=None):
     validate_action(action)
     start = catalog(prefix, turn, player_id=player_id)
     if action not in start['offers']:
@@ -138,6 +138,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0):
         raise RuntimeError('Promotion did not enqueue one native command')
     prefix.actions.deliver_one()
     prefix.deferred_events.drain_empty_receivers()
+    if after_delivery is not None:
+        after_delivery()
     prefix.view_publisher.publish()
     end = catalog(prefix, turn, player_id=player_id)
     after = observe_player(prefix.runtime, prefix.ui_child, player_id)

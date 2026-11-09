@@ -185,18 +185,20 @@ def callback_mapping():
     })
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     """Return exact source pins needed by the selected input-event families."""
     p = source()
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]),
             *(dict(path=path, sha256=digest) for path, digest in PARENT_PINS.values())]
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     for provider in (
         lambda: __import__("civ6_host.runtime.xp2_turn_notification_source", fromlist=["source_dependencies"]).source_dependencies(),
-        lambda: __import__("civ6_host.runtime.xp2_world_input_source", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
-        lambda: __import__("civ6_host.runtime.xp2_unit_orders_source", fromlist=["source_dependencies"]).source_dependencies(),
-        lambda: __import__("civ6_host.runtime.found_unit_event_profiles", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
-        lambda: __import__("civ6_host.runtime.foundation_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256),
-        lambda: __import__("civ6_host.runtime.xp2_absent_event_source", fromlist=["source_dependencies"]).source_dependencies(),
+        lambda: __import__("civ6_host.runtime.xp2_world_input_source", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
+        lambda: __import__("civ6_host.runtime.xp2_unit_orders_source", fromlist=["source_dependencies"]).source_dependencies(**execution_options),
+        lambda: __import__("civ6_host.runtime.found_unit_event_profiles", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
+        lambda: __import__("civ6_host.runtime.foundation_event_profile", fromlist=["source_dependencies"]).source_dependencies(core_sha256=XP2_CORE_SHA256, **execution_options),
+        lambda: __import__("civ6_host.runtime.xp2_absent_event_source", fromlist=["source_dependencies"]).source_dependencies(**execution_options),
     ):
         for path, digest in provider().items():
             refs.append(dict(path=str(path), sha256=digest, absolute=True))

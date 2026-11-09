@@ -89,7 +89,7 @@ def observe(owner, obs, *, core_sha256=_WORLD_BASE_CORE_SHA256):
     validate(state, pid, turn, own_ids=[u['id'] for u in obs['units']], width=obs['width'], height=obs['height'])
     return state
 
-def apply(owner, action, turn, before, *, core_sha256=_WORLD_BASE_CORE_SHA256, snapshot_reader=None):
+def apply(owner, action, turn, before, *, core_sha256=_WORLD_BASE_CORE_SHA256, snapshot_reader=None, request_source_reader=None):
     if core_sha256 != _WORLD_BASE_CORE_SHA256 and action.get('kind') == 'world_war_response':
         raise ValueError('XP1 war confirmation is not qualified')
     from civ6_host.runtime.native.native_player_observation import observe_player
@@ -100,6 +100,9 @@ def apply(owner, action, turn, before, *, core_sha256=_WORLD_BASE_CORE_SHA256, s
         snapshot = snapshot_reader
     from civ6_host.runtime.native.native_saved_combat import queued_destination
     from civ6_host.runtime.native import native_world_click as click
+    build_request = click.request_source if request_source_reader is None else request_source_reader
+    if not callable(build_request):
+        raise TypeError('World click request source reader must be callable')
     pid = before['player_id']
     p = owner.prefix
     state = observe(owner, before, core_sha256=core_sha256)
@@ -123,7 +126,7 @@ def apply(owner, action, turn, before, *, core_sha256=_WORLD_BASE_CORE_SHA256, s
     elif kind == 'world_deselect_unit':
         owner.world_input_selections[pid] = None
     elif kind == 'world_plot_click':
-        raw = p.runtime.evaluate_text(p.ui_child, click.request_source(pid, turn, action['unit_id'], action['plot_id'], core_sha256=core_sha256), b'@official_world_click', capacity=4097)
+        raw = p.runtime.evaluate_text(p.ui_child, build_request(pid, turn, action['unit_id'], action['plot_id'], core_sha256=core_sha256), b'@official_world_click', capacity=4097)
         request = click.parse_request_result(raw, pid, turn, action['unit_id'], action['plot_id'], core_sha256=core_sha256)
         if request['status'] == 'request':
             if len(p.actions.pending) != 1 or p.deferred_events.pending:

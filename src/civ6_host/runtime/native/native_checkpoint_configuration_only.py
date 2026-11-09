@@ -114,11 +114,14 @@ class _NativeBackend:
         self.core, self.context, self.fixture, self.dll_directory = (core, context, fixture, _resolve_resource_path(Path(dll_directory)))
         self.profile, self.emit = (profile, emit)
         from civ6_host.runtime.configuration_profiles import configuration_abi
-        self.configuration_abi = configuration_abi(profile.core_sha256)
-        if self.configuration_abi.load.ruleset != profile.ruleset or proof['images']['core']['sha256'] != profile.core_sha256:
+        from civ6_host.runtime.native.native_core_context_profiles import require_executable_profile
+        require_executable_profile(profile)
+        self.configuration_abi = configuration_abi(profile.source_core_sha256)
+        if self.configuration_abi.load.ruleset != profile.ruleset or proof['images']['core']['sha256'] != profile.source_core_sha256:
             raise ValueError('Configuration provider/context engine identities disagree')
         self.runtime = provider._Runtime()
-        self.runtime.image(core._handle, proof)
+        self.runtime.image(core._handle, proof, execution_image=profile.execution_image,
+                           actual_core_sha256=profile.core_sha256)
         if os.path.normcase(str(self.dll_directory)) != os.path.normcase(str(profile.shared_dependency_directory)):
             raise ValueError('Dependency directory differs from pinned shared dependencies')
         self.thread = self.runtime.thread()
@@ -152,7 +155,7 @@ class _NativeBackend:
         self.host = initialize_context(self.core, self.context, self.fixture, self.dll_directory, self.emit, context_profile=self.profile, **candidate_options)
 
     def clone(self):
-        self.owner = NativeApplicationConfiguration(self.core, self.context, emit=self.emit, core_sha256=self.profile.core_sha256)
+        self.owner = NativeApplicationConfiguration(self.core, self.context, emit=self.emit, core_sha256=self.profile.source_core_sha256)
         self.core._civ6rl_application_configuration = self.owner
         self.host.application_configuration = self.owner
 

@@ -31,6 +31,10 @@ class ProtocolError(ValueError):
     """A malformed/foreign reply or a stale local choice; not a game victory."""
 
 
+class InformationUnavailable(RuntimeError):
+    """The requested information is not present at this cached native boundary."""
+
+
 class SessionBackend(Protocol):
     """Trusted, bounded native provider. Refusals are raised, never substituted."""
     def reset(self) -> dict: ...
@@ -62,6 +66,51 @@ def _public_contracts(decisions, observation, ended):
             research=decisions["research"], candidates=None if ended else decisions["candidates"])
     if "plot_info" in decisions:
         plot_display990.validate_and_index(decisions["plot_info"], pid, turn, decisions["player_map"])
+    if ('trade_routes' in decisions or 'trade_origins' in decisions
+            or any(row['action'].get('kind') in ('make_trade_route', 'change_trade_origin')
+                   for row in decisions['candidates'])):
+        from .contracts.trade import validate_decisions as validate_trade_decisions
+        validate_trade_decisions(decisions, observation, actions_closed=ended)
+    if ('espionage' in decisions
+            or any(row['action'].get('kind') in ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')
+                   for row in decisions['candidates'])):
+        from .contracts import espionage, network_turn
+        if decisions.get('schema') not in network_turn.ESPIONAGE_CAPABILITY_SCHEMAS:
+            raise ValueError('Espionage requires its explicit capability revision')
+        catalogue = decisions.get('espionage')
+        if catalogue is not None:
+            espionage.compare_own(catalogue, observation)
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in espionage.ACTION_FIELDS]
+        if offered != ([] if ended else espionage.actions(catalogue)):
+            raise ValueError('Espionage choices differ from the native catalogue')
+    if ('spy_completion' in decisions
+            or any(row['action'].get('kind') in ('spy_renew', 'spy_completion_dismiss')
+                   for row in decisions['candidates'])):
+        from .contracts import spy_completion, network_turn
+        if decisions.get('schema') not in network_turn.SPY_COMPLETION_CAPABILITY_SCHEMAS:
+            raise ValueError('Spy completion requires its explicit capability revision')
+        catalogue = decisions.get('spy_completion')
+        if catalogue is not None:
+            spy_completion.compare_own(catalogue, observation)
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in spy_completion.ACTION_FIELDS]
+        if offered != ([] if ended else spy_completion.actions(catalogue)):
+            raise ValueError('Spy completion choices differ from the native catalogue')
+
+    if ('world_congress' in decisions
+            or any((type(row['action'].get('kind')) is str and row['action'].get('kind').startswith('congress_'))
+                   for row in decisions['candidates'])):
+        from .contracts import world_congress, network_turn
+        if decisions.get('schema') not in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS:
+            raise ValueError('Congress requires its explicit capability revision')
+        catalogue = decisions.get('world_congress')
+        if catalogue is not None:
+            world_congress.compare_own(catalogue, observation, decisions['sequence'])
+        offered = [row['action'] for row in decisions['candidates']
+                   if row['action'].get('kind') in world_congress.CANDIDATE_FIELDS]
+        if offered != ([] if ended else world_congress.actions(catalogue)):
+            raise ValueError('Congress choices differ from the source catalogue')
 
 
 class HotseatClient:
@@ -152,6 +201,12 @@ class HotseatClient:
                                             prior["player_id"], prior["turn"])
                 if _digest(applied) != _digest(dict(kind="policies", candidate=candidate)):
                     raise ProtocolError("Policy choice was substituted")
+            elif (type(chosen.get("kind")) is str and chosen.get("kind").startswith("congress_")):
+                from .contracts import world_congress
+                selected = world_congress.choose(prior["world_congress"], chosen,
+                    request["selection"].get("parameters"))
+                if _digest(applied) != _digest(selected):
+                    raise ProtocolError("Congress choice was substituted")
             elif _digest(applied) != _digest(chosen):
                 raise ProtocolError("Applied action differs from caller choice")
         self._reply = copy.deepcopy(response)
@@ -202,6 +257,27 @@ class HotseatClient:
     def observe(self):
         return self._send("observe")
 
+    def information(self, group, *, player_id=None, channel='public'):
+        """Read trade information for the current actor from the accepted reply."""
+        self._check_owner()
+        from .contracts.information import envelope, project, required_fields
+        if group != 'trade' or channel != 'public':
+            raise ValueError('Hotseat supports the public trade information group')
+        if player_id is not None and (type(player_id) is not int or not 0 <= player_id < 64):
+            raise ValueError('player_id must be an integer in [0, 63]')
+        response = self._reply
+        if (response is None or self._closed
+                or any(response['outcome'][key] for key in ('terminated', 'truncated'))):
+            raise InformationUnavailable('Reset and observe an active hotseat session first')
+        observation, decisions = response['observation'], response['decisions']
+        if player_id is not None and player_id != observation['player_id']:
+            raise InformationUnavailable('Trade information requires this player to be the current actor')
+        if any(decisions.get(field) is None for field in required_fields(group)):
+            raise InformationUnavailable('Trade information is unavailable at this hotseat boundary')
+        data = project(group, observation, decisions)
+        sources = {'decision_catalogue': decisions['schema']} if 'schema' in decisions else {}
+        return envelope(response, group, channel, data, sources)
+
     def player_view(self, player_id):
         """Read one backend-authorized public perspective without changing choices."""
         self._check_owner()
@@ -245,6 +321,12 @@ class HotseatClient:
             try:
                 policies.choose(action["slots"], parameters["assignments"],
                                 decisions["player_id"], decisions["turn"])
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+        elif (type(action.get("kind")) is str and action.get("kind").startswith("congress_")):
+            from .contracts import world_congress
+            try:
+                world_congress.choose(decisions["world_congress"], action, parameters)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
         elif parameters is not None:

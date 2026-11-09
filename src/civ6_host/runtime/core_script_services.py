@@ -124,7 +124,8 @@ class BorrowedCoreServices:
 
 
 def prepare(runtime,owner,context,core,*,core_sha256):
-    from .native.native_core_context_profiles import profile_for_core,validate_loaded_modules
+    from .native.native_core_context_profiles import (profile_for_core,
+        require_executable_profile, validate_loaded_modules)
     from .native.native_probe import Windows
     from .native.native_setup import local_reader
     from .profile_script_binding import (verify_source_build,_current_executable,
@@ -138,8 +139,10 @@ def prepare(runtime,owner,context,core,*,core_sha256):
              and getattr(owner,'localization_initialized',False) is True
              and not runtime.lua['gettop'](runtime.root),
              'Profiled script services require fresh owned root and initialized localization')
-    selected=profile_for_core(core._name,mode='context')
-    _require(selected.ruleset=='xp2' and selected.core_sha256==core_sha256,
+    selected=profile_for_core(core._name,mode='context',
+        execution_image=getattr(core,'_civ6_host_execution_image',None))
+    require_executable_profile(selected)
+    _require(selected.ruleset=='xp2' and selected.source_core_sha256==core_sha256,
              'Borrowed-service Core differs from selected engine')
     validate_loaded_modules(selected,Windows().modules())
     for library,name in ((owner.database,'DatabaseDLL_FinalRelease.dll'),

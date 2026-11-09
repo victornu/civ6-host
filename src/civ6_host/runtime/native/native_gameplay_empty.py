@@ -17,11 +17,13 @@ from civ6_host.runtime.native.native_resolved_content import EXE_SHA
 from civ6_host.runtime.native.native_resolved_content import MAX_USER_ADDRESS
 from civ6_host.runtime.native.native_resolved_content import ContentSnapshotError
 from civ6_host.runtime.native.native_gameplay_selection994 import BASE_CORE_SHA256
+from civ6_host.runtime.native.native_gameplay_selection994 import CURRENT_EXE_SHA256
 from civ6_host.runtime.native.native_gameplay_selection994 import MAX_CAPTURE_SECONDS
 from civ6_host.runtime.native.native_gameplay_selection994 import _Deadline
 from civ6_host.runtime.native.native_gameplay_selection994 import _file_digest
 from civ6_host.runtime.native.native_gameplay_selection994 import capture_process as capture_selection_process
 from civ6_host.runtime.gameplay_active_profiles import SUPPORTED_CORES as _active_supported
+from civ6_host.runtime.gameplay_active_profiles import CURRENT_XP2_CORE_SHA256 as _current_xp2_core
 from civ6_host.runtime.gameplay_active_profiles import expansion_profile as _active_profile
 from civ6_host.runtime.gameplay_active_profiles import source_digest as _active_source_sha
 from civ6_host.runtime.gameplay_active_profiles import state_schema as _active_state_schema
@@ -115,10 +117,19 @@ def read_gameplay_state(read_memory, core_base, *, core_sha256=BASE_CORE_SHA256,
     game_initialized = read(game + layout['game_initialized_offset'], 1, 'Game initialized')[0]
     if (context_initialized, game_initialized, loading) != (1, 1, 0):
         raise ContentSnapshotError('Gameplay state is uninitialized or loading')
-    auxiliary = pointer(core_base + layout['auxiliary_global_rva'], 'script service')
-    auxiliary_vtable = pointer(auxiliary, 'script service vtable')
-    if expected_auxiliary_vtable is not None and auxiliary_vtable != expected_auxiliary_vtable:
-        raise ContentSnapshotError('Gameplay script service differs from official interface')
+    current_xp2 = core_sha256 == _current_xp2_core
+    if current_xp2:
+        # This profile proves the active-list chain, not the legacy auxiliary
+        # service interface in the EXE. Keep that unrelated pointer opaque.
+        auxiliary = None
+        auxiliary_vtable = None
+        if expected_auxiliary_vtable is not None:
+            raise ContentSnapshotError('Current XP2 has no qualified auxiliary interface guard')
+    else:
+        auxiliary = pointer(core_base + layout['auxiliary_global_rva'], 'script service')
+        auxiliary_vtable = pointer(auxiliary, 'script service vtable')
+        if expected_auxiliary_vtable is not None and auxiliary_vtable != expected_auxiliary_vtable:
+            raise ContentSnapshotError('Gameplay script service differs from official interface')
     manager = pointer(inner + layout['script_manager_offset'], 'script manager')
     storage = pointer(manager + layout['storage_offset'], 'record storage', nullable=True)
     header = read(manager + layout['active_count_offset'], 12, 'active list header')
@@ -134,13 +145,17 @@ def read_gameplay_state(read_memory, core_base, *, core_sha256=BASE_CORE_SHA256,
     for address, raw, label in reversed(journal):
         if read(address, len(raw), label, remember=False) != raw:
             raise ContentSnapshotError('Gameplay state changed during capture: ' + label)
-    return dict(schema=_active_state_schema(core_sha256), source_sha256=_active_source_sha(core_sha256), core_sha256=core_sha256, core_base=hex(core_base), inner_address=hex(inner), game_address=hex(game), manager_address=hex(manager), auxiliary_address=hex(auxiliary), auxiliary_vtable=hex(auxiliary_vtable), storage_address=hex(storage), active_count=count, head_index=head, tail_index=tail, active_list_empty=count == 0, context_initialized=True, game_initialized=True, loading=False, observed_ranges_unchanged=True, atomic_snapshot_proven=False, load_completion_proven=False, execution_proven=False, training_eligible=False, read_only=True, player_observation=False, memory_read_calls=calls, memory_bytes_read=consumed, journal_ranges=len(journal))
+    result = dict(schema=_active_state_schema(core_sha256), source_sha256=_active_source_sha(core_sha256), core_sha256=core_sha256, core_base=hex(core_base), inner_address=hex(inner), game_address=hex(game), manager_address=hex(manager), auxiliary_address=None if current_xp2 else hex(auxiliary), auxiliary_vtable=None if current_xp2 else hex(auxiliary_vtable), storage_address=hex(storage), active_count=count, head_index=head, tail_index=tail, active_list_empty=count == 0, context_initialized=True, game_initialized=True, loading=False, observed_ranges_unchanged=True, atomic_snapshot_proven=False, load_completion_proven=False, execution_proven=False, training_eligible=False, read_only=True, player_observation=False, memory_read_calls=calls, memory_bytes_read=consumed, journal_ranges=len(journal))
+    if current_xp2:
+        result['auxiliary_identity_checked'] = False
+    return result
 
 def _selection_identity(value):
     """Ignore only the elapsed-budget metadata, never observed native fields."""
     return {key: item for key, item in value.items() if key not in ('bounds',)}
 
-def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic):
+def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic,
+                    executable_sha256=EXE_SHA):
     """Capture selection and active-list headers using one VM_READ-only handle.
 
     The 994 wrapper verifies PID creation identity, module set and image hashes
@@ -150,14 +165,27 @@ def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.
     deadline = _Deadline(timeout_seconds, clock, MAX_CAPTURE_SECONDS)
     original_modules = process.modules()
     deadline.check()
-    first = capture_selection_process(process, timeout_seconds=deadline.check(), clock=clock)
+    if executable_sha256 not in (EXE_SHA, CURRENT_EXE_SHA256):
+        raise ContentSnapshotError('Unsupported gameplay selection executable')
+    current_executable = executable_sha256 == CURRENT_EXE_SHA256
+    first = capture_selection_process(
+        process, timeout_seconds=deadline.check(), clock=clock,
+        **({'executable_sha256': executable_sha256,
+            'include_resolved_content': True} if current_executable else {}))
     state = None
     core = first['gamecore_module']
+    if ((core['sha256'] == _current_xp2_core) is not current_executable
+            or (current_executable and core['sha256'] != _current_xp2_core)):
+        raise ContentSnapshotError('Current EXE and current XP2 active-list profile must be paired')
     supported = core['sha256'] in _active_supported
-    expected_vtable = first['exe_module']['base'] + source_profile(core['sha256'] if supported else BASE_CORE_SHA256)['layout']['auxiliary_exe_vtable_rva']
+    expected_vtable = (None if core['sha256'] == _current_xp2_core else
+                       first['exe_module']['base'] + source_profile(core['sha256'] if supported else BASE_CORE_SHA256)['layout']['auxiliary_exe_vtable_rva'])
     if supported:
         state = read_gameplay_state(process.read, core['base'], core_sha256=core['sha256'], expected_auxiliary_vtable=expected_vtable, timeout_seconds=min(MAX_READER_SECONDS, deadline.check()), clock=clock)
-    second = capture_selection_process(process, timeout_seconds=deadline.check(), clock=clock)
+    second = capture_selection_process(
+        process, timeout_seconds=deadline.check(), clock=clock,
+        **({'executable_sha256': executable_sha256,
+            'include_resolved_content': True} if current_executable else {}))
     for key in ('process', 'exe_module', 'gamecore_module'):
         if first[key] != second[key]:
             raise ContentSnapshotError('Official gameplay capture identity changed: ' + key)
@@ -174,7 +202,7 @@ def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.
     module_key = lambda m: (m['base'], m['name'], m['path'], m['bytes'])
     if sorted(original_modules, key=module_key) != sorted(final_modules, key=module_key) or first['exe_module'] not in final_modules or {k: v for k, v in core.items() if k != 'sha256'} not in final_modules:
         raise ContentSnapshotError('Official modules changed after final active-list read')
-    if _file_digest(first['exe_module']['path'], deadline.check) != EXE_SHA or _file_digest(core['path'], deadline.check) != core['sha256']:
+    if _file_digest(first['exe_module']['path'], deadline.check) != executable_sha256 or _file_digest(core['path'], deadline.check) != core['sha256']:
         raise ContentSnapshotError('Official module file changed after final active-list read')
     if process.identity() != first['process']:
         raise ContentSnapshotError('Official process changed after final module read')
@@ -207,11 +235,18 @@ def stable_capture_identity(report):
     if type(core_sha) is not str or len(core_sha) != 64 or any((c not in '0123456789abcdef' for c in core_sha)):
         raise ContentSnapshotError('Invalid gameplay empty capture image hash')
     selection = report['selection']
-    if type(selection) is not dict or selection.get('schema') != 'civ6rl.official_gameplay_selection994.capture.v1' or any((selection.get(k) != report[k] for k in ('process', 'exe_module', 'gamecore_module'))) or (selection.get('execution_proven') is not False):
+    current_selection = type(selection) is dict and selection.get('schema') == 'civ6rl.official_gameplay_selection994.capture.v2'
+    expected_selection_schema = ('civ6rl.official_gameplay_selection994.capture.v2' if current_selection else 'civ6rl.official_gameplay_selection994.capture.v1')
+    if type(selection) is not dict or selection.get('schema') != expected_selection_schema or any((selection.get(k) != report[k] for k in ('process', 'exe_module', 'gamecore_module'))) or (selection.get('execution_proven') is not False):
         raise ContentSnapshotError('Gameplay empty capture selection join differs')
     snapshot = selection.get('snapshot')
-    if type(snapshot) is not dict or snapshot.get('schema') != 'civ6rl.gameplay_selection994.memory_snapshot.v1' or type(snapshot.get('record_count')) is not int or (not 0 <= snapshot['record_count'] <= 8192) or (type(snapshot.get('records')) is not list) or (len(snapshot['records']) != snapshot['record_count']) or (type(snapshot.get('selected_paths')) is not list):
+    expected_snapshot_schema = ('civ6rl.gameplay_selection994.memory_snapshot.v2' if current_selection else 'civ6rl.gameplay_selection994.memory_snapshot.v1')
+    if type(snapshot) is not dict or snapshot.get('schema') != expected_snapshot_schema or type(snapshot.get('record_count')) is not int or (not 0 <= snapshot['record_count'] <= 8192) or (type(snapshot.get('records')) is not list) or (len(snapshot['records']) != snapshot['record_count']) or (type(snapshot.get('selected_paths')) is not list):
         raise ContentSnapshotError('Invalid gameplay empty capture selection')
+    if current_selection and (snapshot.get('executable_sha256') != CURRENT_EXE_SHA256
+            or snapshot.get('current_correspondence_sha256') != 'b7a84db116b87f28890f89622553768c8024c2def153cf935df155ea09b7e0ca'
+            or snapshot.get('resolved_content_captured') is not True):
+        raise ContentSnapshotError('Current gameplay selection lacks its content-bound correspondence')
     paths = []
     for index, row in enumerate(snapshot['records']):
         if type(row) is not dict or set(row) != {'index', 'path_pointer', 'path', 'consumer_skips'} or type(row['index']) is not int or (row['index'] != index) or (not (row['path'] is None or type(row['path']) is str)) or (row['consumer_skips'] is not (row['path'] in (None, ''))):
@@ -223,10 +258,18 @@ def stable_capture_identity(report):
     state = report['state']
     supported = core_sha in _active_supported
     if supported:
+        current_core = core_sha == _current_xp2_core
         state_fields = {'schema', 'source_sha256', 'core_sha256', 'core_base', 'inner_address', 'game_address', 'manager_address', 'auxiliary_address', 'auxiliary_vtable', 'storage_address', 'active_count', 'head_index', 'tail_index', 'active_list_empty', 'context_initialized', 'game_initialized', 'loading', 'observed_ranges_unchanged', 'atomic_snapshot_proven', 'load_completion_proven', 'execution_proven', 'training_eligible', 'read_only', 'player_observation', 'memory_read_calls', 'memory_bytes_read', 'journal_ranges'}
+        if current_core:
+            state_fields.add('auxiliary_identity_checked')
         if type(state) is not dict or set(state) != state_fields or state.get('schema') != _active_state_schema(core_sha) or (state.get('source_sha256') != _active_source_sha(core_sha)) or (state.get('core_sha256') != core_sha) or (state.get('core_base') != hex(report['gamecore_module']['base'])) or (type(state.get('active_count')) is not int) or (not 0 <= state['active_count'] <= MAX_ACTIVE_CONTEXTS) or (state.get('active_list_empty') is not (state['active_count'] == 0)) or any((state.get(k) is not True for k in ('context_initialized', 'game_initialized', 'observed_ranges_unchanged', 'read_only'))) or any((state.get(k) is not False for k in ('loading', 'atomic_snapshot_proven', 'load_completion_proven', 'execution_proven', 'training_eligible', 'player_observation'))):
             raise ContentSnapshotError('Invalid Base gameplay empty capture state')
-        for name in ('inner_address', 'game_address', 'manager_address', 'auxiliary_address', 'auxiliary_vtable', 'storage_address'):
+        if current_core and (state.get('auxiliary_address') is not None or state.get('auxiliary_vtable') is not None or state.get('auxiliary_identity_checked') is not False):
+            raise ContentSnapshotError('Current XP2 auxiliary service must remain opaque')
+        pointer_names = ('inner_address', 'game_address', 'manager_address', 'storage_address')
+        if not current_core:
+            pointer_names += ('auxiliary_address', 'auxiliary_vtable')
+        for name in pointer_names:
             address = state[name]
             try:
                 pointer_value = int(address, 16) if type(address) is str else -1
@@ -236,7 +279,7 @@ def stable_capture_identity(report):
                 raise ContentSnapshotError('Invalid Base gameplay empty capture pointer')
         layout = source_profile(core_sha)['layout']
         sentinel = layout['sentinel']
-        if state['auxiliary_vtable'] != hex(report['exe_module']['base'] + layout['auxiliary_exe_vtable_rva']):
+        if not current_core and state['auxiliary_vtable'] != hex(report['exe_module']['base'] + layout['auxiliary_exe_vtable_rva']):
             raise ContentSnapshotError('Base gameplay empty capture auxiliary interface differs')
         for name in ('head_index', 'tail_index'):
             if type(state[name]) is not int or not 0 <= state[name] <= sentinel:
@@ -260,7 +303,9 @@ def stable_capture_identity(report):
     accounting = {'bounds', 'memory_bytes_read', 'memory_read_calls', 'journal_ranges'}
     return copy.deepcopy({'process': report['process'], 'exe_module': report['exe_module'], 'gamecore_module': report['gamecore_module'], 'source_sha256': _active_source_sha(core_sha), 'selection': {k: v for k, v in snapshot.items() if k not in accounting}, 'state': None if state is None else {k: v for k, v in state.items() if k not in accounting}, 'selected_and_active_empty': absent, 'status': status})
 
-def capture(pid, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic):
+def capture(pid, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic,
+            executable_sha256=EXE_SHA):
     from civ6_host.runtime.workers.capture_official_content929 import ReadOnlyProcess
     with ReadOnlyProcess(pid) as process:
-        return capture_process(process, timeout_seconds=timeout_seconds, clock=clock)
+        return capture_process(process, timeout_seconds=timeout_seconds, clock=clock,
+                               executable_sha256=executable_sha256)

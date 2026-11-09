@@ -49,8 +49,13 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
     if (core_sha256,host_sha256)==(BASE_CORE_SHA256,BASE_HOST):
         base_verify(source_path)
         return BASE_SOURCE[1]
-    if (core_sha256,host_sha256)==(XP2_CORE_SHA256,XP2_HOST):
-        verify_xp2();selected=XP2_SOURCE
+    from .xp2_bbg_inputs import UI_HOSTS
+    bbg_host = next((host for host in UI_HOSTS if host[1] == host_sha256), None)
+    if core_sha256 == XP2_CORE_SHA256 and (host_sha256 == XP2_HOST or bbg_host is not None):
+        verify_xp2()
+        if bbg_host is not None:
+            _verify_bbg_ui_host(bbg_host)
+        selected = XP2_SOURCE
     elif (core_sha256,host_sha256)==(XP1_CORE_SHA256,XP1_HOST):
         verify_xp1();selected=XP1_SOURCE
     else:
@@ -61,6 +66,14 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
         except RuntimeError as exc:
             raise ValueError('stdout decoder source changed') from exc
     return selected[1]
+
+
+@lru_cache(maxsize=3)
+def _verify_bbg_ui_host(host):
+    from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA, xp2_component_requirements
+    executable = resolve_path(resource_root() / host[0])
+    verify_source_build(executable, required_components=xp2_component_requirements(
+        executable, {'gamecore_python_host.c': XP2_HOST_COMPONENT_SHA}))
 
 
 @lru_cache(maxsize=1)

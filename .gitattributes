@@ -1,0 +1,3 @@
+# Native/source manifests authenticate exact bytes, including line endings.
+# A checkout must not silently convert LF/CRLF on another Windows machine.
+* -text

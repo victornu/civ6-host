@@ -13,6 +13,7 @@ import hashlib, json, os, struct, threading
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_subscriber_code.py')))).resolve().parents[1]
 SOURCE_SHA = '0c3f9d6c4c744a6e87cc64c8bfc1af8b5d367b0f32a0872981d9645a58625804'
 EXE_SHA = 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
+_CAPTURED_EXE_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\Base\Binaries\Win64Steam\CivilizationVI.exe"
 BODY_SHA = {618288: '4e17440fadb1c1e2de92f6c92fbbde66786772148a98eb87f2b23c6c79467c08', 901328: '326ad0582020365181be9ed3b3e0f595e1bf834ef24f5afdf167d9ae56292bca'}
 
 def source_profile(root=ROOT):
@@ -23,6 +24,19 @@ def source_profile(root=ROOT):
     if p['image']['sha256'] != EXE_SHA or p['rip_relative_data_dependencies']:
         raise ValueError('Subscriber source image/dependencies changed')
     return p
+
+def _verify_captured_exe_identity(source, execution_image):
+    if execution_image is None:
+        return False
+    from civ6_host.runtime.execution_images import identity
+    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    selected = identity(execution_image)
+    if selected['reference_core_sha256'] != XP2_CORE_SHA256:
+        raise ValueError('Subscriber capture requires the canonical XP2 execution profile')
+    if (source.get('image', {}).get('path') != _CAPTURED_EXE_PATH
+            or source.get('image', {}).get('sha256') != EXE_SHA):
+        raise ValueError('Pinned subscriber capture executable identity differs')
+    return True
 
 def build_image(p):
     """Preserve code-relative displacements; relocate only unwind table RVAs."""
@@ -83,29 +97,31 @@ class RuntimeFunction(C.Structure):
 class NativeSubscriberCode:
     """Thread-affine original code owner; no hidden empty-subscriber profile."""
 
-    def __init__(self, *, root=ROOT):
+    def __init__(self, *, root=ROOT, execution_image=None):
         if os.name != 'nt' or C.sizeof(C.c_void_p) != 8:
             raise RuntimeError('Original subscriber code needs Win64')
         self.source = source_profile(root)
         self.layout = build_image(self.source)
+        selected_current = _verify_captured_exe_identity(self.source, execution_image)
         self.owner = threading.get_ident()
         self.busy = False
         self.closed = False
         self.pointer = 0
         self.registered = False
-        original = _resolve_resource_path(_resolve_resource_path(Path(self.source['image']['path']))).read_bytes()
-        if hashlib.sha256(original).hexdigest() != EXE_SHA:
-            raise ValueError('Installed EXE identity changed')
-        for f in self.source['functions'].values():
-            raw = bytes.fromhex(f['raw_hex'])
-            offset = f['file_offset']
-            if original[offset:offset + len(raw)] != raw:
-                raise ValueError('Subscriber code differs from installed original')
-        for r in self.source['unwind_rows']:
-            raw = bytes.fromhex(r['unwind_hex'])
-            offset = r['unwind_file_offset']
-            if original[offset:offset + len(raw)] != raw:
-                raise ValueError('Subscriber unwind differs from installed original')
+        if not selected_current:
+            original = _resolve_resource_path(_resolve_resource_path(Path(self.source['image']['path']))).read_bytes()
+            if hashlib.sha256(original).hexdigest() != EXE_SHA:
+                raise ValueError('Installed EXE identity changed')
+            for f in self.source['functions'].values():
+                raw = bytes.fromhex(f['raw_hex'])
+                offset = f['file_offset']
+                if original[offset:offset + len(raw)] != raw:
+                    raise ValueError('Subscriber code differs from installed original')
+            for r in self.source['unwind_rows']:
+                raw = bytes.fromhex(r['unwind_hex'])
+                offset = r['unwind_file_offset']
+                if original[offset:offset + len(raw)] != raw:
+                    raise ValueError('Subscriber unwind differs from installed original')
         k = self.kernel = C.WinDLL('kernel32', use_last_error=True)
         n = self.ntdll = C.WinDLL('ntdll', use_last_error=True)
         k.VirtualAlloc.argtypes = [C.c_void_p, C.c_size_t, C.c_uint32, C.c_uint32]

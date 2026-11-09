@@ -1,6 +1,9 @@
 """Composed service owners and FIFO with source bytes, no native GameCore run."""
 import ctypes as C
+import hashlib
+from pathlib import Path
 import struct
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
@@ -152,6 +155,62 @@ class XP2PreloadServices(unittest.TestCase):
         self.assertTrue(a.quarantined)
         self.assertEqual(a.count,0)
         self.assertEqual(d.pending,[])
+
+    def test_update_reuses_static_cache_proof_but_checks_live_context_each_time(self):
+        from civ6_host.runtime import retained_game_source, xp2_cache_source
+
+        profile = xp2_cache_source.source()['profile']
+        ownership = profile['ownership']
+        base, context, inner, service, owner, game = 0x300000000, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000
+        values = {
+            context: base + profile['outer_vtable_rva'],
+            context + 8: inner,
+            inner: base + profile['inner_vtable_rva'],
+            base + ownership['inner_global_rva']: inner,
+            inner + 0x1A68: service,
+            service: base + ownership['service_vtable_rva'],
+            base + ownership['service_global_rva']: service,
+            service + 8: owner,
+            owner: base + ownership['owner_vtable_rva'],
+            owner + 0x20: service,
+            inner + 0x60: game,
+            base + ownership['game_global_rva']: game,
+        }
+
+        def read(address, size):
+            self.assertEqual(size, 8)
+            return struct.pack('<Q', values[address])
+
+        with patch.object(xp2_cache_source, '_verified_source',
+                          wraps=xp2_cache_source._verified_source) as verify:
+            with xp2_cache_source.update_source_scope():
+                self.assertEqual(retained_game_source.context_state(
+                    base, context, read, core_sha256=XP2_CORE_SHA256)['game'], game)
+                values[base + ownership['game_global_rva']] = 0
+                with self.assertRaisesRegex(ValueError, 'live identity differs'):
+                    retained_game_source.context_state(base, context, read, core_sha256=XP2_CORE_SHA256)
+                self.assertEqual(verify.call_count, 1)
+            self.assertEqual(verify.call_count, 2)
+
+    def test_cache_source_scope_rejects_changed_dependency_before_publication(self):
+        from civ6_host.runtime import xp2_cache_source
+        from civ6_host.runtime.paths import resource_root
+
+        proof = _copy(xp2_cache_source.source())
+        original = b'original pinned contents'
+        with TemporaryDirectory(dir=resource_root()/'work') as temp:
+            dependency = Path(temp)/'source.txt'
+            dependency.write_bytes(original)
+            proof['references'] = {'test': {
+                'path': dependency.relative_to(resource_root()).as_posix(),
+                'sha256': hashlib.sha256(original).hexdigest(),
+            }}
+            with patch.object(xp2_cache_source, '_source', return_value=proof):
+                with self.assertRaisesRegex(ValueError, 'cache source dependency differs'):
+                    with xp2_cache_source.update_source_scope():
+                        dependency.write_bytes(b'changed contents')
+                with self.assertRaisesRegex(ValueError, 'cache source dependency differs'):
+                    xp2_cache_source.source()
 
 
 if __name__=='__main__':unittest.main()

@@ -81,10 +81,12 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return proof
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_initial_choice_source import source_dependencies as selected
-        return selected('production')
+        return selected('production', execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 production source ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown production source engine")
     from .paths import resource_root
     from .resource_resolution import resolve_path
@@ -102,10 +104,11 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return result
 
 
-def verify_live(base, read, core_sha256=XP1_CORE_SHA256):
+def verify_live(base, read, core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_initial_choice_source import verify_live as selected
-        return selected(base,read,'production')
+        return selected(base,read,'production',execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected production image requires the XP2 source ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown production live source engine")
     if type(base) is not int or base <= 0 or not callable(read):
         raise ValueError('Expected XP1 module base and memory reader')
@@ -155,6 +158,9 @@ def bind_owner(owner, core, read):
                 or existing.source_sha256 != selected_source[1]):
             raise ValueError('XP1 production receipt belongs to another lifetime')
         return existing
-    receipt = VerifiedProductionSource(owner, core, core._handle, selected_source[1], verify_live(core._handle, read,core_sha256=core_sha))
+    image=getattr(core,'_civ6_host_execution_image',None)
+    receipt = VerifiedProductionSource(owner, core, core._handle, selected_source[1],
+        verify_live(core._handle, read,core_sha256=core_sha,
+                    **({'execution_image':image} if image is not None else {})))
     owner._xp1_production_source_receipt = receipt
     return receipt

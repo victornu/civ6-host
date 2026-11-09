@@ -87,7 +87,13 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
         self.closure_path = _resolve_resource_path(_resolve_resource_path(Path(closure_path))).resolve()
         self.closure = copy.deepcopy(closure)
         from civ6_host.runtime.native.native_session_resume import save_provenance
-        self.provenance = save_provenance(self.inputs, self.closure)
+        self.execution_image = getattr(owner.core, '_civ6_host_execution_image', None)
+        if self.execution_image is None:
+            self.provenance = save_provenance(self.inputs, self.closure)
+        else:
+            from civ6_host.runtime.network_checkpoint import save_provenance as lan_save_provenance
+            self.provenance = lan_save_provenance(self.inputs, self.closure,
+                execution_image=self.execution_image)
         self.paths = private_paths(closure_path)
         self.attempted = self.native_call_attempted = False
         self.memory = self.stream = self.save_call = None
@@ -140,7 +146,8 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
         from civ6_host.runtime.native import native_checkpoint_jobs as jobs
         profile = self.inputs.profile
         from civ6_host.runtime.xp1_session_checkpoint import manifest_sources
-        selected_core, selected_sources = manifest_sources(self, reference)
+        selected_core, selected_sources = manifest_sources(
+            self, reference, execution_image=self.execution_image)
         manifest = dict(**self.provenance, components=components, observed_game_turn=self.expected_state['turn'], player_id=0, observation=self.expected_state, decisions=self.decisions, input_profile=profile.name, origin_official_save_sha256=profile.save_sha, input_components_sha256=dict(gamecore=sha(self.inputs.game), application_configuration=sha(self.inputs.configuration)), session_closure=reference(self.closure_path), fixture=reference(_resolve_resource_path(Path(self.closure['fixture']))), database_profile=self.closure['database_profile'], core_sha256=selected_core, source_proofs=selected_sources, configuration_receipt=receipt, native_save_status=0, game_version_prefix=data[:4].hex(), game_stream_calls=self.stream.transport.calls, stream_closed=True, control=control, jobs_before=before_jobs, jobs_after=after_jobs, jobs_quiescent_unchanged=True, host_placement_tracking=[dict(key=list(k), choice=copy.deepcopy(v)) for k, v in getattr(getattr(self, 'host_state_owner', self.owner), 'explicit_placements', {}).items()], native_load_of_new_pair_validated=False, full_civ6save_container=False, scheduler_load_ledger_postrun_required=True, scheduler_load_ledger_reconciled=False, exact_save_database_content_scripts_proven=False, dlc_mod_compatibility_proven=False, eligible_for_training=False)
         if self.inputs.profile.name in ('base-lan-official-capture', 'xp1-lan-official-capture-inputs', 'xp2-lan-official-capture-inputs'):
             from civ6_host.runtime.network_checkpoint import finalize_manifest

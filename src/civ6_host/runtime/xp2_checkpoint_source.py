@@ -129,7 +129,7 @@ def bind_source(session,read,*,core_sha256):
             'native_owner_identity':identity}
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .xp2_configuration_profile import source_dependencies as configuration
@@ -137,7 +137,7 @@ def source_dependencies():
     from .action_transport_profiles import source_dependencies as transport
     from .saved_load_job_observer import XP2_SOURCE
     from .xp2_cache_source import source_dependencies as cache
-    p,s,r=verify_source();pins={}
+    p,s,r=verify_source();pins={};provenance_images=[]
     def add(reference):
         path=resolve_path(resource_root()/reference['path']).resolve(strict=True)
         digest=reference['sha256']
@@ -149,8 +149,22 @@ def source_dependencies():
     for ref in (SOURCE,SUPPLEMENT,RULES,XP2_SOURCE):add(dict(path=ref[0],sha256=ref[1]))
     for proof in (p,s,r):
         for name in ('image','exe','extractor','capture_script','source','previous'):
-            if name in proof:add(proof[name])
+            if name not in proof:
+                continue
+            ref=proof[name]
+            if execution_image is not None and name in ('image','exe'):
+                if 'path' in ref and 'sha256' in ref:
+                    provenance_images.append(ref)
+                continue
+            add(ref)
         for row in proof.get('references',()):add(row)
-    for group in (configuration(),normalization(),transport(core_sha256=XP2_CORE_SHA256),cache()):
+    for group in (configuration(),normalization(),
+                  transport(core_sha256=XP2_CORE_SHA256,execution_image=execution_image),cache()):
         for path,digest in group.items():add(dict(path=path,sha256=digest))
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(
+            pins,execution_image=execution_image,provenance_images=provenance_images)
+        from .a0_family_source import verify_pinned_files
+        verify_pinned_files(pins)
     return pins

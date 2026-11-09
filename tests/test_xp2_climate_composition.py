@@ -31,6 +31,8 @@ class ClimateCompositionTests(unittest.TestCase):
                 memory.put(memory.core_base + rva, raw)
             for rva, raw in lifecycle.core_fragments():
                 memory.put(memory.core_base + rva, raw)
+            for rva, raw in codec.terrain_core_fragments():
+                memory.put(memory.core_base + rva, raw)
             owner.arguments.reader.core_sha256 = backend.load_abi.core_sha256
             original(owner, backend)
             events.enable(owner, backend)

@@ -16,6 +16,7 @@ import uuid
 from civ6_host.runtime.native.native_gameplay_selection994 import _Deadline
 from civ6_host.runtime.native.native_gameplay_selection994 import _file_digest
 from civ6_host.runtime.native.native_resolved_content import ROOT
+from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
 from civ6_host.runtime.native.native_resolved_content import EXE_SHA
 from civ6_host.runtime.native.native_resolved_content import MAX_USER_ADDRESS
 from civ6_host.runtime.native.native_resolved_content import ContentSnapshotError
@@ -23,21 +24,40 @@ ROUTE_PATH = ROOT / 'work/official-capture/localization-tuner-route.json'
 ROUTE_SHA = '2c145e47ec82432bcbf5fe461e8a25253244772d44e1d6e268eb362d2a9f3953'
 LOCALIZATION_SHA = '0becd5c425a3d6edc88f5315c01af3dd30dd7cb158271d56f4bba7ff2bb4e056'
 DATABASE_SHA = 'e6577e873f946224df65c02f6c4bc3b385607e2a82d957b0fd613e01cbe78b0c'
+CURRENT_SHARED_SHA = '2907bbb5b41e8c015c4779e1c49c3940b06b6a719ca815cec61eac41c1340823'
 MAX_ICU_BYTES = 64 * 1024 * 1024
 MAX_READ_CALLS = 4096
 MAX_READ_BYTES = MAX_ICU_BYTES * 2 + 64 * 1024
 MAX_SECONDS = 30.0
 
-def source_profile():
+def source_profile(executable_sha256=EXE_SHA):
+    if executable_sha256 not in (EXE_SHA, CURRENT_EXE_SHA):
+        raise ContentSnapshotError('Unsupported Localization executable')
     raw = _resolve_resource_path(ROUTE_PATH).read_bytes()
     if hashlib.sha256(raw).hexdigest() != ROUTE_SHA:
         raise ContentSnapshotError('Localization capture source changed')
     value = json.loads(raw)
     if value['schema'] != 'civ6rl.localization_tuner_route.v1' or value['images']['localization']['sha256'] != LOCALIZATION_SHA or value['images']['database']['sha256'] != DATABASE_SHA or (value['native_export_allowed'] is not False):
         raise ContentSnapshotError('Unsupported Localization capture source')
-    return value
+    if executable_sha256 == EXE_SHA:
+        return value
+    raw = _resolve_resource_path(ROOT / 'work/official-capture/current-localization-shared-bindings.json').read_bytes()
+    if hashlib.sha256(raw).hexdigest() != CURRENT_SHARED_SHA:
+        raise ContentSnapshotError('Current Localization correspondence changed')
+    current = json.loads(raw)
+    for kind in ('localization', 'database'):
+        spans = current['body_span_correspondence'][kind]['spans']
+        if not spans or any((row['exact_same_rva_bytes'] is not True for row in spans)):
+            raise ContentSnapshotError('Incomplete current Localization/Database correspondence')
+    if any((row['exact_same_rva_bytes'] is not True for row in current['route_leaf_correspondence'])):
+        raise ContentSnapshotError('Current Localization accessor correspondence differs')
+    images = {'exe': {**value['images']['exe'], 'sha256': CURRENT_EXE_SHA}}
+    for kind, filename in (('localization', 'Localization_FinalRelease.dll'), ('database', 'DatabaseDLL_FinalRelease.dll'), ('havok', 'HavokScript_FinalRelease.dll')):
+        image = current['source_images'][filename]
+        images[kind] = dict(path=image['current_path'], sha256=image['current_sha256'], base=value['images'][kind]['base'])
+    return dict(images=images, reader_contract=value['reader_contract'], leaves={kind: value['leaves'][kind] for kind in ('localization', 'database')}, lookup_sql=value['lookup_sql'], current_shared_source_sha256=CURRENT_SHARED_SHA, native_export_allowed=False)
 
-def read_localization_state(read_memory, localization_base, database_base, *, timeout_seconds=MAX_SECONDS, clock=time.monotonic, max_icu_bytes=MAX_ICU_BYTES, max_read_calls=MAX_READ_CALLS):
+def read_localization_state(read_memory, localization_base, database_base, *, timeout_seconds=MAX_SECONDS, clock=time.monotonic, max_icu_bytes=MAX_ICU_BYTES, max_read_calls=MAX_READ_CALLS, executable_sha256=EXE_SHA):
     """Return ``(snapshot, complete_icu_bytes)`` using exact, bounded copies.
 
     The caller supplies a read-only reader and verifies module/process identity.
@@ -51,7 +71,7 @@ def read_localization_state(read_memory, localization_base, database_base, *, ti
         if type(base) is not int or not 65536 <= base <= MAX_USER_ADDRESS - 2097152:
             raise ContentSnapshotError('Invalid Localization module base')
     deadline = _Deadline(timeout_seconds, clock, MAX_SECONDS)
-    profile = source_profile()
+    profile = source_profile(executable_sha256)
     calls = consumed = 0
     journal = []
 
@@ -139,9 +159,9 @@ def read_localization_state(read_memory, localization_base, database_base, *, ti
         if read(address, len(expected), False) != expected:
             raise ContentSnapshotError('Localization metadata changed during capture')
     deadline.check()
-    return ({'schema': 'civ6rl.localization_memory_snapshot.v1', 'route_source_sha256': ROUTE_SHA, 'locale': locale, 'dictionary_flag': policy == 'strict', 'fallback_policy': policy, 'fallback_policy_sql': sql, 'fallback_policy_sql_sha256': hashlib.sha256(sql.encode()).hexdigest(), 'dictionary_address': hex(dictionary), 'connection_address': hex(connection), 'lookup_result_address': hex(lookup), 'auxiliary_result_address': hex(auxiliary), 'statement_address': hex(statement), 'icu_address': hex(icu), 'icu_sha256': digest, 'icu_bytes': size, 'language_address': hex(language), 'language_index': index, 'languages_begin': hex(begin), 'languages_end': hex(end), 'memory_read_calls': calls, 'memory_read_bytes': consumed, 'observed_ranges_unchanged': True, 'atomic_snapshot_proven': False, 'database_exported': False, 'database_lifetime_lease_proven': False, 'save_identity_bound': False, 'training_eligible': False}, bytes(payload))
+    return ({'schema': 'civ6rl.localization_memory_snapshot.v2' if executable_sha256 == CURRENT_EXE_SHA else 'civ6rl.localization_memory_snapshot.v1', 'route_source_sha256': ROUTE_SHA, 'locale': locale, 'dictionary_flag': policy == 'strict', 'fallback_policy': policy, 'fallback_policy_sql': sql, 'fallback_policy_sql_sha256': hashlib.sha256(sql.encode()).hexdigest(), 'dictionary_address': hex(dictionary), 'connection_address': hex(connection), 'lookup_result_address': hex(lookup), 'auxiliary_result_address': hex(auxiliary), 'statement_address': hex(statement), 'icu_address': hex(icu), 'icu_sha256': digest, 'icu_bytes': size, 'language_address': hex(language), 'language_index': index, 'languages_begin': hex(begin), 'languages_end': hex(end), 'memory_read_calls': calls, 'memory_read_bytes': consumed, 'observed_ranges_unchanged': True, 'atomic_snapshot_proven': False, 'database_exported': False, 'database_lifetime_lease_proven': False, 'save_identity_bound': False, 'training_eligible': False, **({'current_shared_source_sha256': CURRENT_SHARED_SHA, 'executable_sha256': executable_sha256} if executable_sha256 == CURRENT_EXE_SHA else {})}, bytes(payload))
 
-def capture_process(process, output_dir, *, nonce=None, timeout_seconds=MAX_SECONDS, clock=time.monotonic):
+def capture_process(process, output_dir, *, nonce=None, timeout_seconds=MAX_SECONDS, clock=time.monotonic, executable_sha256=EXE_SHA):
     """Copy ICU to a fresh private folder; inspect an existing read-only handle.
 
     The 929 process interface is reused (identity/modules/read). No debugger,
@@ -152,7 +172,7 @@ def capture_process(process, output_dir, *, nonce=None, timeout_seconds=MAX_SECO
     nonce = uuid.uuid4().hex if nonce is None else nonce
     if type(nonce) is not str or not re.fullmatch('[0-9a-f]{32}', nonce):
         raise ContentSnapshotError('Invalid Localization capture nonce')
-    profile = source_profile()
+    profile = source_profile(executable_sha256)
     folder = _resolve_resource_path(Path(output_dir))
     workspace = _resolve_resource_path(ROOT / 'work').resolve()
     if not folder.is_absolute() or _resolve_resource_path(folder).exists():
@@ -180,7 +200,7 @@ def capture_process(process, output_dir, *, nonce=None, timeout_seconds=MAX_SECO
     if len(cores) != 1:
         raise ContentSnapshotError('Localization capture requires one active GameCore')
     pinned['gamecore'] = {**cores[0], 'sha256': _file_digest(cores[0]['path'], deadline.check)}
-    state, payload = read_localization_state(process.read, pinned['localization']['base'], pinned['database']['base'], timeout_seconds=deadline.check(), clock=clock)
+    state, payload = read_localization_state(process.read, pinned['localization']['base'], pinned['database']['base'], timeout_seconds=deadline.check(), clock=clock, executable_sha256=executable_sha256)
     if process.identity() != identity or process.modules() != modules:
         raise ContentSnapshotError('Localization process/modules changed during capture')
     for module in pinned.values():
@@ -196,7 +216,7 @@ def capture_process(process, output_dir, *, nonce=None, timeout_seconds=MAX_SECO
         raise ContentSnapshotError('Localization ICU copy differs')
     if process.identity() != identity or process.modules() != modules:
         raise ContentSnapshotError('Localization process/modules changed before publication')
-    report = {'schema': 'civ6rl.localization_capture.v1', 'process': identity, 'nonce': nonce, 'modules': pinned, 'snapshot': state, 'locale': state['locale'], 'dictionary_flag': state['dictionary_flag'], 'icu_data': {'path': str(target), 'sha256': state['icu_sha256'], 'bytes': len(payload)}, 'database': None, 'native_export_allowed': False, 'database_lifetime_lease_proven': False, 'runtime_memory_copied': True, 'game_executable_launched': False, 'remote_code_executed': False, 'memory_written': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False, 'collector_source_sha256': hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_localization_capture.py')))).read_bytes()).hexdigest(), 'route_source_sha256': ROUTE_SHA, 'process_identity_unchanged_before_after': True, 'module_set_unchanged_before_after': True}
+    report = {'schema': 'civ6rl.localization_capture.v2' if executable_sha256 == CURRENT_EXE_SHA else 'civ6rl.localization_capture.v1', 'process': identity, 'nonce': nonce, 'modules': pinned, 'snapshot': state, 'locale': state['locale'], 'dictionary_flag': state['dictionary_flag'], 'icu_data': {'path': str(target), 'sha256': state['icu_sha256'], 'bytes': len(payload)}, 'database': None, 'native_export_allowed': False, 'database_lifetime_lease_proven': False, 'runtime_memory_copied': True, 'game_executable_launched': False, 'remote_code_executed': False, 'memory_written': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False, 'collector_source_sha256': hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_localization_capture.py')))).read_bytes()).hexdigest(), 'route_source_sha256': ROUTE_SHA, 'process_identity_unchanged_before_after': True, 'module_set_unchanged_before_after': True, **({'current_shared_source_sha256': CURRENT_SHARED_SHA, 'executable_sha256': executable_sha256} if executable_sha256 == CURRENT_EXE_SHA else {})}
     deadline.check()
     with _resolve_resource_path(folder / 'localization-manifest.json').open('x', encoding='utf8') as stream:
         json.dump(report, stream, indent=2)

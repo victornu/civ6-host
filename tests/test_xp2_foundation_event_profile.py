@@ -160,10 +160,15 @@ class XP2FoundationEventProfileTests(unittest.TestCase):
         from civ6_host.runtime import xp2_turn_notification_source as turn_source
         from civ6_host.runtime import a0_found_unit_event as found_unit
         from civ6_host.runtime.native import native_found_city_event as codec
+        from civ6_host.runtime.execution_images import known_path, select
 
         graph = turn_notifications.XP2ComposedNotifications().graph()
-        proof = query_profiles._xp2_source()
-        query_abi = query_profiles.query_abi(XP2_CORE_SHA256)
+        image = select('xp2-gamecore-current-092abfbb',
+            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        graph.owner.deferred.core._civ6_host_execution_image = image
+        proof = query_profiles._xp2_source(execution_image=image)
+        query_abi = query_profiles.query_abi(XP2_CORE_SHA256,
+            execution_image=image)
         bodies = list(proof['unit']['bodies'].values())
         bodies.extend(proof['query_map']['bodies'].values())
         bodies.extend(proof['application']['bodies'][name] for name in ('constructor', 'delete'))

@@ -65,6 +65,15 @@ class SavedTurnBoundary:
         if profile.core_sha256!=self.core_sha256:
             raise ValueError('XP1 update transport profile changed')
 
+    def turn_segment(self,saved,player_id,turn):
+        # Historical Base/XP1/v36 paths perform no additional read.
+        if (self.core_sha256 != XP2_CORE_SHA256
+                or getattr(saved, 'world_congress_diagnostic', False) is not True):
+            return None
+        self._check(saved)
+        from .xp2_turn_segment import read
+        return read(saved, player_id, turn)
+
     def unchanged_request(self,saved,action,before,after):
         saved._check_active()
         from .network_turns import same_readiness

@@ -83,23 +83,71 @@ def source():
     return p
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .paths import resource_root
     from .provenance import installed_host_source_reference
     from .resource_resolution import resolve_path
+    from .execution_images import runtime_source_pins
     p = source()
-    refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), *p['references'],
-            p['image'], p['comparison_image']]
+    if execution_image is None:
+        image_rows = (p['image'], p['comparison_image'])
+    else:
+        if (execution_image.reference_core_sha256 != XP2_CORE_SHA256
+                or execution_image.path != p['image']['path']
+                or execution_image.image_sha256 == XP2_CORE_SHA256):
+            raise ValueError('XP2 turn source execution image does not match its captured ABI')
+        image_rows = (p['image'],)
+    refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), *p['references']]
     pins = {}
+    sdk_pins = None
     for row in refs:
         installed = installed_host_source_reference(row['path'])
         path = (installed or resolve_path(resource_root() / row['path'])).resolve()
+        if installed is not None and installed.name == 'native_host.py':
+            from .xp1_saved_load_logger import (
+                HOST_INIT_COMPATIBILITY, _checked_host_sdk_compatibility,
+                source_dependencies as logger_source_dependencies,
+            )
+            sdk = _checked_host_sdk_compatibility()
+            if (row['sha256'] != sdk['prior_host_sha256']
+                    or HOST_INIT_COMPATIBILITY[1] != sdk['prior_compatibility']['sha256']):
+                raise ValueError('Historical turn host row is not covered by the logger SDK transition')
+            if sdk_pins is None:
+                sdk_pins = logger_source_dependencies(core_sha256=XP2_CORE_SHA256)
+            for dependency, digest in sdk_pins.items():
+                if dependency in pins and pins[dependency] != digest:
+                    raise ValueError('Turn/logger host compatibility pin conflict: ' + dependency)
+                pins[dependency] = digest
+            continue
         with path.open('rb') as stream:
             if hashlib.file_digest(stream, 'sha256').hexdigest() != row['sha256']:
                 raise ValueError('XP2 turn/service dependency differs: ' + str(path))
         if 'bytes' in row and path.stat().st_size != row['bytes']:
             raise ValueError('XP2 turn/service dependency extent differs')
         pins[str(path)] = row['sha256']
+    if execution_image is not None:
+        image_pin = runtime_source_pins(
+            {p['image']['path']: p['image']['sha256']},
+            execution_image=execution_image,
+        )
+        image_path = Path(p['image']['path']).resolve(strict=True)
+        image_hash = image_pin[p['image']['path']]
+        with image_path.open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != image_hash:
+                raise ValueError('XP2 turn/service current Core image differs from its selected profile')
+        if image_path.stat().st_size != execution_image.image_size_bytes:
+            raise ValueError('XP2 turn/service current Core size differs from its selected profile')
+        pins[str(image_path)] = image_hash
+    else:
+        for row in image_rows:
+            path = (installed_host_source_reference(row['path'])
+                    or resolve_path(resource_root() / row['path'])).resolve()
+            with path.open('rb') as stream:
+                if hashlib.file_digest(stream, 'sha256').hexdigest() != row['sha256']:
+                    raise ValueError('XP2 turn/service dependency differs: ' + str(path))
+            if 'bytes' in row and path.stat().st_size != row['bytes']:
+                raise ValueError('XP2 turn/service dependency extent differs')
+            pins[str(path)] = row['sha256']
     return pins
 
 
@@ -141,9 +189,31 @@ def require_prepared_owner(backend):
             or backend.configuration_abi.core_sha256 != XP2_CORE_SHA256
             or backend.runtime.read is None):
         raise ValueError('XP2 turn service requires its actual saved configuration owner')
-    with Path(backend.core._name).open('rb') as stream:
-        if hashlib.file_digest(stream, 'sha256').hexdigest() != XP2_CORE_SHA256:
-            raise ValueError('XP2 turn service binary differs')
+    execution_image = getattr(backend.core, '_civ6_host_execution_image', None)
+    if execution_image is None:
+        # Preserve the original exact-image path when no selected execution
+        # profile is attached. This accepts only the historical captured Core
+        # bytes; the repaired/current installation cannot inherit that pin.
+        import hashlib
+        from pathlib import Path
+        path = Path(backend.core._name)
+        if not path.is_file():
+            raise ValueError('XP2 turn service requires its exact reference Core image')
+        with path.open('rb') as stream:
+            actual_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual_sha256 != XP2_CORE_SHA256:
+            raise ValueError('XP2 turn service requires its exact reference Core image')
+    else:
+        from .native.native_core_context_profiles import profile_for_core, require_executable_profile
+        profile = profile_for_core(backend.core._name, mode='context', execution_image=execution_image)
+        require_executable_profile(profile)
+        if (profile.execution_image is not execution_image
+                or profile.core_sha256 != execution_image.image_sha256
+                or profile.source_core_sha256 != XP2_CORE_SHA256
+                or execution_image.reference_core_sha256 != XP2_CORE_SHA256):
+            raise ValueError('XP2 turn service image/ABI owner differs')
+    from .xp1_saved_load_logger import _checked_host_sdk_compatibility
+    _checked_host_sdk_compatibility()
     from .xp2_action_transport_source import _equal
     _equal(backend.runtime.read, backend.context, struct.pack('<Q', backend.core._handle + 0xA101E8),
            'turn service outer owner')

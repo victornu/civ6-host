@@ -26,6 +26,199 @@ CACHE_COMPARISON_SHA = '7d3a6874c34a82cc8179cf77c6c76399f89e5d33d6179bb38be8aa8d
 CACHE_GAMEPLAY_SHA = '4abe921833989c6c6f44f5a894de796c3b811ff7c0447d4858285c5fcf2bcd09'
 CACHE_CONFIGURATION_SHA = 'b86a6eeaf917865417a3718961cf4c3470923a3c344b7feb718a8973355ec590'
 BASE_CONFIGURATION_SHA = 'abe7c77954f598bcc63d24c75c83fad4362ebdb8fc45677ea500efd12ebbb612'
+CURRENT_XP2_INVENTORY_PATH = 'evidence/native-app-ownership-current-inventory/092abfbb.json'
+CURRENT_XP2_INVENTORY_SHA256 = '5b2b319ba96f3bf8041019a66284cd6bf9896b2e091f93ff05e0f4d5d937b625'
+CURRENT_XP2_IMAGE_IDENTITY = {
+    'profile_id': 'xp2-gamecore-current-092abfbb',
+    'image_sha256': '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f',
+    'reference_core_sha256': '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c',
+    'path': r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll",
+}
+CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS = {
+    ('Base/Assets/Civ6_9ae5ab5ed97dd296.xml', 6): 'F3B8C333D68AE286A998A9096A090EE8885DF3E6',
+    ('Base/Assets/Civ6_9ae5ab5ed97dd296.xml', 7): '583C8AE23049AAB4AE7A9138FD35B3FD10942210',
+    ('Base/Assets/Civ6_a445179b5a244001.xml', 0): '5BD6F91200A6CCCF9312380E4051B97A737E0BC7',
+}
+CURRENT_XP2_CHANGED_BLP_FILES = frozenset(path for path, _index in CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS)
+
+
+def _execution_image_for_ownership(candidate_backend):
+    """Return only the canonical selected XP2 runtime identity, or legacy None."""
+    if candidate_backend is None:
+        return None
+    image = getattr(getattr(candidate_backend, 'core', None),
+                    '_civ6_host_execution_image', None)
+    if image is None:
+        return None
+    from civ6_host.runtime.execution_images import identity
+    selected = identity(image)
+    if selected != CURRENT_XP2_IMAGE_IDENTITY:
+        raise ValueError('AppOwnership current inventory requires the canonical XP2 execution image')
+    return selected
+
+
+def _validate_current_xp2_inventory_receipt(receipt, original_rows, selected_image,
+                                             host_proof, producer_proof):
+    """Validate the narrow, source-backed inventory transition; no entitlement scope."""
+    from civ6_host.runtime.native.native_session_resume import plain
+    receipt = plain(receipt)
+    original_rows = plain(original_rows)
+    host_proof = plain(host_proof)
+    producer_proof = plain(producer_proof)
+    if (type(receipt) is not dict
+            or receipt.get('schema') != 'civ6-host.app-ownership.current-inventory-transition.v1'
+            or receipt.get('execution_image') != CURRENT_XP2_IMAGE_IDENTITY
+            or selected_image != CURRENT_XP2_IMAGE_IDENTITY):
+        raise ValueError('AppOwnership current inventory receipt or image identity differs')
+    source_proofs = [
+        {'path': 'evidence/native-host-capability-status/77ed09ed4c69e5f23c83e72e45bad0d0ee5aec62bcebc66dfe3d4dff526ba620.json',
+         'sha256': abi.PROOF_SHA256},
+        {'path': 'evidence/native-app-ownership-capability-catalogue/' + PRODUCER_PROOF_SHA256 + '.json',
+         'sha256': PRODUCER_PROOF_SHA256},
+    ]
+    if (receipt.get('source_proofs') != source_proofs
+            or host_proof.get('schema') != 'civ6rl.native_host_capability_status.static.v1'
+            or producer_proof.get('schema') != 'civ6rl.native_app_ownership_capability_catalogue.static.v1'):
+        raise ValueError('AppOwnership current inventory source proofs differ')
+    registry = producer_proof['registry_model']
+    functions = host_proof['exe_functions']
+    literals = host_proof['literals']
+    expected_dataflow = receipt.get('source_dataflow')
+    type_domain_instructions = [instruction
+        for fragment in functions['xml_type_domain']['fragments']
+        for instruction in fragment['instructions']]
+    type_domain_pairs = {
+        (instruction['va'], instruction['text'])
+        for instruction in type_domain_instructions}
+    if not {
+            ('0x14003ed32', 'lea rdx, [rip + 0xf5f30f]'),
+            ('0x14003ed39', 'mov rcx, rbx'),
+            ('0x14003ed3c', 'call 0x140983740'),
+            ('0x14003ed45', 'mov eax, 0xc9e7d17c'),
+            ('0x14003ed50', 'lea rdx, [rip + 0xf5f2f9]'),
+            ('0x14003ed5a', 'call 0x140983740'),
+            ('0x14003ed61', 'mov edx, 0x62d100f0'),
+            ('0x14003ed68', 'cmove ecx, edx'),
+    }.issubset(type_domain_pairs):
+        raise ValueError('AppOwnership BLP/CAPABILITY type-domain source path differs')
+    if (type(expected_dataflow) is not dict
+            or expected_dataflow.get('xml_type_domain') != {
+                'start_va': functions['xml_type_domain']['start_va'],
+                'end_va_exclusive': functions['xml_type_domain']['end_va_exclusive'],
+                'code_sha256': functions['xml_type_domain']['code_sha256'],
+                'blp_literal_va': '0x140f9e048', 'blp_domain_u32': '0xc9e7d17c',
+                'capability_literal_va': '0x140f9e050', 'capability_domain_u32': '0x62d100f0'}
+            or literals['0x140f9e048']['text'] != 'blp'
+            or literals['0x140f9e050']['text'] != 'capability'
+            or functions['xml_type_domain']['code_sha256'] != 'f8e2f84fff2bd548acc0fa7d138ccef1bb86706220ce746db347051007331c68'
+            or functions['xml_value']['code_sha256'] != 'c2e73ff16432fb6ae6965594429b8955324c7e6dca301005bd35f8119fde2d92'
+            or functions['numeric_entry_lookup']['code_sha256'] != '3a7d255df2c34921752c4dd9f2174f0b4f41fdb880157954cb27f5c8e7ed2e51'
+            or functions['ownership_load_catalogues']['code_sha256'] != 'a3ff2f852129ffdfa0c0d8d5b059d306941ea86a0cc5a89e59ad60ee518bf22e'
+            or expected_dataflow.get('xml_value', {}).get('code_sha256') != functions['xml_value']['code_sha256']
+            or expected_dataflow.get('numeric_lookup', {}).get('code_sha256') != functions['numeric_entry_lookup']['code_sha256']
+            or expected_dataflow.get('item_loader', {}).get('code_sha256') != functions['ownership_load_catalogues']['code_sha256']
+            or registry['xml_value_path'] != '03ED80 special-cases MOD/CONTENT GUID and C9E7D17C only; CAPABILITY takes03EF75->7A1D80, writes tag5 string atentry+8 and F8690 CRC atentry+0.'
+            or registry['lookup_numeric'] != '03DF40 matches domain entry+4 and only tag2/3 atentry+8, then exact DWORD. It never compares cached CRC entry+0.'
+            or registry['other_producer'] != '0409C0 produces tag7 GUID entries; its only two callers pass CONTENT3E7F314C andMOD7EACEE3D, neverCAPABILITY.'
+            or len(registry['capability_entries_possible_from_fixed_files']) != 6
+            or any(row.get('domain_u32') != 0x62d100f0
+                   or row.get('loaded_variant_tag') != 5
+                   or row.get('eligible_for_numeric_lookup_03df40') is not False
+                   for row in registry['capability_entries_possible_from_fixed_files'])
+            or registry['numeric_capability_values_possible_from_known_initializers'] != []):
+        raise ValueError('AppOwnership current inventory numeric-domain source correspondence differs')
+
+    if (type(original_rows) is not list or len(original_rows) != 65
+            or type(receipt.get('current_inventory')) is not list
+            or len(receipt['current_inventory']) != 65
+            or receipt.get('comparison', {}).get('old_inventory_rows') != 65
+            or receipt['comparison'].get('current_inventory_rows') != 65
+            or receipt['comparison'].get('unchanged_path_presence_size_and_sha_rows') != 63):
+        raise ValueError('AppOwnership current inventory row counts differ')
+    current_rows = receipt['current_inventory']
+    changed = set()
+    child_profiles = {
+        'Base/Assets/Civ6_9ae5ab5ed97dd296.xml': ('512035', 9),
+        'Base/Assets/Civ6_a445179b5a244001.xml': ('645401', 3),
+    }
+    for old, new in zip(original_rows, current_rows):
+        path = old['installed_relative_path']
+        if (new.get('installed_relative_path') != path
+                or new.get('present') is not old['present']):
+            raise ValueError('AppOwnership current inventory paths or presence differ')
+        if old['present'] is False:
+            if set(new) != {'installed_relative_path', 'present'}:
+                raise ValueError('AppOwnership absent inventory entry gained data')
+            continue
+        if path not in CURRENT_XP2_CHANGED_BLP_FILES:
+            if (new.get('byte_length') != old['byte_length']
+                    or new.get('sha256') != old['sha256']
+                    or set(new) != {'installed_relative_path', 'present', 'byte_length', 'sha256'}):
+                raise ValueError('AppOwnership unchanged inventory input differs: ' + path)
+            continue
+        changed.add(path)
+        if (new.get('byte_length') != old['byte_length']
+                or set(new) != {'installed_relative_path', 'present', 'byte_length', 'sha256',
+                                'parsed_items', 'parsed_children', 'private_copy'}):
+            raise ValueError('AppOwnership changed inventory input shape differs: ' + path)
+        if path.endswith('9ae5ab5ed97dd296.xml'):
+            expected_sha = 'c5940fdd251272053ff536eb6db29b541c46275a557163893ab91442bd487ffb'
+        else:
+            expected_sha = '837f7986c71b0e627be876cd29d52aed6bfac207bcf237bab18549077fed0127'
+        if new['sha256'] != expected_sha:
+            raise ValueError('AppOwnership changed inventory input digest differs: ' + path)
+        expected_items = [dict(item) for item in old['entries']]
+        allowed_indexes = {index for item_path, index in CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS
+                           if item_path == path}
+        for index, item in enumerate(expected_items):
+            if item.get('type') != 'blp':
+                raise ValueError('AppOwnership changed XML contains a non-BLP Item')
+            if index in allowed_indexes:
+                first, second = item['value'].split(';')
+                item['value'] = CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS[(path, index)] + ';' + second
+        if (expected_items != new['parsed_items']
+                or len(new['parsed_items']) != child_profiles[path][1]):
+            raise ValueError('AppOwnership changed BLP Item projection differs: ' + path)
+        steam_app, item_count = child_profiles[path]
+        if len(new['parsed_children']) != item_count:
+            raise ValueError('AppOwnership current BLP child projection count differs: ' + path)
+        for children in new['parsed_children']:
+            if children != [
+                    {'tag': 'NonOwnerAllowance',
+                     'attributes': {'type': 'host', 'mode': 'multiplayer'}, 'text': None},
+                    {'tag': 'SteamApp', 'attributes': {'id': steam_app}, 'text': None}]:
+                raise ValueError('AppOwnership current BLP child projection differs: ' + path)
+        private = new['private_copy']
+        if (type(private) is not dict or set(private) != {'path', 'byte_length', 'sha256'}
+                or private.get('sha256') != new['sha256']
+                or private.get('byte_length') != new['byte_length']):
+            raise ValueError('AppOwnership current XML private copy pin differs: ' + path)
+    if changed != CURRENT_XP2_CHANGED_BLP_FILES:
+        raise ValueError('AppOwnership current inventory changed path set differs')
+    return current_rows
+
+
+def _read_current_xp2_fixed_inventory(root, original_rows, candidate_backend,
+                                      host_proof, producer_proof):
+    selected_image = _execution_image_for_ownership(candidate_backend)
+    if selected_image is None:
+        return read_fixed_inventory(root, original_rows)
+    receipt = load_pinned_json(abi.ROOT / CURRENT_XP2_INVENTORY_PATH,
+                               CURRENT_XP2_INVENTORY_SHA256)
+    current_rows = _validate_current_xp2_inventory_receipt(
+        receipt, original_rows, selected_image, host_proof, producer_proof)
+    snapshots = read_fixed_inventory(root, current_rows)
+    for row in current_rows:
+        private = row.get('private_copy')
+        if private is None:
+            continue
+        copy_path = _resolve_resource_path(abi.ROOT / private['path']).resolve()
+        if (not copy_path.is_relative_to(abi.ROOT.resolve())
+                or not copy_path.is_file()
+                or copy_path.stat().st_size != private['byte_length']
+                or sha256(copy_path.read_bytes()).hexdigest() != private['sha256']):
+            raise ValueError('AppOwnership private current XML copy changed')
+    return snapshots
 
 def _verify_captured_bundle_profile(manifest, catalogue_gameplay_sha, captured_bundle, required_mode):
     """Join a validated PreparedBundle to its private worker database copies."""
@@ -277,7 +470,8 @@ class ClosedBaseOwnership:
         if count != expected_count or sorted(((a, b, c, d & 4294967295) for a, b, c, d in actual_rows)) != expected_rows:
             raise ValueError('Loaded Base capability names/types differ')
         fixed = self.proof['catalogue_evidence']['fixed_files']
-        self.inventory = read_fixed_inventory(installation, fixed)
+        self.inventory = _read_current_xp2_fixed_inventory(
+            installation, fixed, candidate_backend, self.proof, self.producer_proof)
         if len(self.inventory) != 65 or sum((row['present'] for row in self.inventory)) != 35:
             raise ValueError('Closed AppOwnership inventory is incomplete')
         restrictions = self.proof['catalogue_evidence']['capability_restrictions']

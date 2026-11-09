@@ -102,9 +102,15 @@ def dispatch(owner, kind, fields):
         source = binding.source
         if source.validate_empty_owner(owner) != POLICY:
             raise ValueError('Empty presentation source policy changed')
-        copied = source.decode_fields(kind, fields, owner.read).to_admin()
+        decoded = source.decode_fields(kind, fields, owner.read)
+        copied = decoded.to_admin()
         if source.validate_empty_owner(owner) != POLICY:
             raise ValueError('Empty presentation source policy changed during input copy')
+        # Fixed host bookkeeping for an already received Congress callback.
+        # This is not an EXE observer, a new native event or a queued record.
+        from . import xp2_congress_presentation as congress
+        if source is congress:
+            congress.record_callback(owner, decoded)
         sequence, pending, notifications, metadata = before
         if (owner._sequence != sequence or len(owner.pending) != len(pending)
                 or any(a is not b for a, b in zip(owner.pending, pending))

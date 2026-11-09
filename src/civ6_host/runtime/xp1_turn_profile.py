@@ -99,11 +99,12 @@ def require_profile(profile, core_sha256):
     return expected
 
 
-def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_turn_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown turn transport source engine')
+    if execution_image is not None:raise ValueError('XP1 turn source does not accept an XP2 execution image')
     from .paths import resource_root
     from .resource_resolution import resolve_path
     p=source()

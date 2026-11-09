@@ -16,6 +16,22 @@ from .xp1_saved_load import validate_private_bootstrap
 from .saved_load_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 
+def xp2_script_binding(bundle):
+    from . import xp2_bbg_inputs
+    if xp2_bbg_inputs.is_reference(bundle.reference):
+        return xp2_bbg_inputs.script_binding(bundle)
+    from .native.native_official_bundle import _manifest
+    from .script_wire_paths import registry_from_capture
+    from .xp2_bundle_inputs import SELECTED_PATHS, SCRIPT_SHA256
+
+    _, capture = _manifest(bundle.reference)
+    registry, hashes, dependencies = registry_from_capture(
+        capture['selected_gameplay_sources']['manifest'], process=capture['preflight']['process'])
+    if tuple(registry.wire_paths) != SELECTED_PATHS or list(hashes.values()) != [SCRIPT_SHA256]:
+        raise ValueError('XP2 registry differs from its captured WorldCongress source')
+    return registry, hashes, dependencies
+
+
 def compose_saved_load_services(backend):
     from .native.native_official_bundle import _manifest, _file, validate_fixture
     from .native.native_gameplay_script_registry import NativeGameplayScriptRegistry
@@ -35,6 +51,14 @@ def compose_saved_load_services(backend):
     if core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
         raise ValueError('Unknown captured service engine')
     xp2 = core_sha256 == XP2_CORE_SHA256
+    review_requested = getattr(backend, '_xp2_world_congress_review_requested', False)
+    if (type(review_requested) is not bool or review_requested and (
+            not xp2 or getattr(backend, '_xp1_commands_requested', False) is not True
+            or getattr(backend.core, '_civ6_host_execution_image', None) is None)):
+        raise ValueError('Congress review composition requires its explicit XP2 command image')
+    if (xp2 and getattr(backend, '_xp1_commands_requested', False)
+            and not getattr(backend, '_xp2_postload_requested', False)):
+        raise ValueError('XP2 command composition requires postload services')
     validate_fixture(backend.captured_bundle, backend.fixture)
     host = backend.host
     validate_private_bootstrap(host.manifest, backend.captured_bundle.fixture['localization_bootstrap'],
@@ -45,18 +69,14 @@ def compose_saved_load_services(backend):
             or getattr(host, 'execution_lock', None) is not None):
         raise ValueError('XP1 services require the actual captured private Localization and ICU')
 
-    _, capture = _manifest(backend.captured_bundle.reference)
-    source_ref = capture['selected_gameplay_sources']['manifest']
+    from . import xp2_bbg_inputs
+    bbg = xp2 and xp2_bbg_inputs.is_reference(backend.captured_bundle.reference)
     if xp2:
-        from .script_wire_paths import registry_from_capture
-        from .xp2_bundle_inputs import SELECTED_PATHS, SCRIPT_SHA256
-        registry, script_hashes, script_dependencies = registry_from_capture(source_ref,
-            process=capture['preflight']['process'])
-        if (tuple(registry.wire_paths) != SELECTED_PATHS or len(script_hashes) != 1
-                or set(script_hashes.values()) != {SCRIPT_SHA256}):
-            raise ValueError('XP2 registry differs from its captured WorldCongress source')
+        registry, script_hashes, script_dependencies = xp2_script_binding(backend.captured_bundle)
         backend._saved_script_dependencies = script_dependencies
     else:
+        _, capture = _manifest(backend.captured_bundle.reference)
+        source_ref = capture['selected_gameplay_sources']['manifest']
         scripts = json.loads(_file(source_ref, {}, maximum=4 * 1024 ** 2))
         script_profile = backend.captured_bundle.content_profile.get('gameplay_scripts')
         count_fields = ('selected_path_count', 'active_count', 'source_records', 'source_files')
@@ -69,7 +89,14 @@ def compose_saved_load_services(backend):
         registry = NativeGameplayScriptRegistry((), selected_scripts=())
         script_hashes = {}
     havok = Path(host.dll_directory) / 'HavokScript_FinalRelease.dll'
-    if hashlib.sha256(havok.read_bytes()).hexdigest() != HAVOK_SHA256:
+    shared = getattr(host, '_civ6_host_shared_dependencies', None)
+    expected_havok = HAVOK_SHA256
+    if shared is not None:
+        paths = shared.verify_files()
+        if paths['HavokScript_FinalRelease.dll'] != havok.resolve():
+            raise ValueError('Selected HKS path differs from the retained dependency owner')
+        expected_havok = shared.dependency_sha256['HavokScript_FinalRelease.dll']
+    if hashlib.sha256(havok.read_bytes()).hexdigest() != expected_havok:
         raise ValueError('XP1 saved-service HKS binary changed')
     kernel = C.WinDLL('kernel32', use_last_error=True)
     kernel.GetModuleHandleW.argtypes, kernel.GetModuleHandleW.restype = [C.c_wchar_p], C.c_void_p
@@ -86,7 +113,12 @@ def compose_saved_load_services(backend):
             fields['gameplay_event_name'] = fields.pop('event_name')
         backend.emit(stage, **fields)
 
-    runtime = NativeScriptRuntime(C.WinDLL(str(havok)), executable, emit)
+    runtime_class = NativeScriptRuntime
+    if bbg:
+        from .xp2_bbg_nested_events import runtime_type
+        runtime_class = runtime_type(backend)
+    runtime = runtime_class(C.WinDLL(str(havok)), executable, emit,
+        **({'shared_dependency_profile': shared} if shared is not None else {}))
     backend._xp1_service_roots.append(runtime)
     if xp2:
         runtime.bind_core_services(host, backend.context,
@@ -100,14 +132,29 @@ def compose_saved_load_services(backend):
         runtime.namespaces.register(child, namespace)
     runtime.bind_native_game_api(child, backend.context, backend.core, core_sha256=core_sha256)
     runtime.attach_game_events(child)
-    # No include snapshot is fabricated. XP1 selection is empty; the exact XP2
-    # WorldCongress source names no direct includes. Dynamic unbound requests
-    # still raise an error through script_include_unavailable.
+    if bbg:
+        from .native.native_include_registry import IncludeSource
+        from .script_context_service import bootstrap_cached_context
+        from .script_exposed_members import attach_exposed_members
+        support_path = Path(host.dll_directory).parents[2] / xp2_bbg_inputs.SUPPORT_PATH
+        support = support_path.read_bytes()
+        if hashlib.sha256(support).hexdigest() != xp2_bbg_inputs.SUPPORT_SHA256:
+            raise ValueError('BBG PoC SupportFunctions candidate differs')
+        runtime.set_include_sources((IncludeSource(xp2_bbg_inputs.SUPPORT_PATH, support),))
 
-    def bootstrap(context_child, name):
-        # ScriptContextService.acquire rejects every name in an empty selected
-        # registry before reaching this callback. Keep direct use strict too.
-        raise ValueError('Captured empty gameplay selection cannot create a script context')
+        def bootstrap(context_child, name):
+            selected_bbg = name == b'bbg_script'
+            bootstrap_cached_context(runtime, context_child, name, include=selected_bbg)
+            if selected_bbg:
+                runtime.attach_event_category(context_child, 1)
+                attach_exposed_members(runtime, (context_child,))
+                from .xp2_bbg_view_ready import install as install_view_ready
+                install_view_ready(runtime, context_child)
+    elif xp2:
+        bootstrap = None
+    else:
+        def bootstrap(context_child, name):
+            raise ValueError('Captured empty gameplay selection cannot create a script context')
 
     lock = NativeCoreLock(host, executable)
     backend._xp1_service_roots.append(lock)
@@ -123,11 +170,14 @@ def compose_saved_load_services(backend):
             from .xp2_host_achievement_service import install as install_achievements
             install_achievements(backend)
     services = SavedLoadServices(backend, runtime, child, registry,
-        core_sha256=core_sha256, script_hashes=script_hashes, bootstrap=None if xp2 else bootstrap,
+        core_sha256=core_sha256, script_hashes=script_hashes, bootstrap=bootstrap,
         saved_map_values=backend.inputs.map_values,
         saved_config_sha=hashlib.sha256(backend.inputs.configuration).hexdigest())
     backend._xp1_service_roots.append(services)
     services.emit = services.events.emit = emit
+    if bbg:
+        from .xp2_bbg_property_table import PropertyTableWriter
+        services.bbg_property_tables = PropertyTableWriter(services)
     services.install_application_mirror()
     from .xp1_load_capability import install_saved_load_capabilities
     install_saved_load_capabilities(backend)
@@ -185,13 +235,29 @@ def compose_saved_load_services(backend):
             enable_natural_wonder(consumer, backend)
             from .a0_xp2_turn_events import enable as enable_climate_events
             enable_climate_events(consumer, backend)
+            from .a0_policy_unlock import enable as enable_policy_unlock_events
+            enable_policy_unlock_events(consumer, backend)
             from . import xp2_feature_reveal_source
             from .empty_presentation_events import enable as enable_empty_presentation
             enable_empty_presentation(consumer, backend, xp2_feature_reveal_source)
+            if getattr(backend.core, '_civ6_host_execution_image', None) is not None:
+                from . import xp2_congress_presentation
+                enable_empty_presentation(consumer, backend, xp2_congress_presentation)
+                from . import xp2_wmd_fallout_source
+                enable_empty_presentation(consumer, backend, xp2_wmd_fallout_source)
+                from . import xp2_congress_notice_source
+                enable_empty_presentation(consumer, backend, xp2_congress_notice_source)
+                if review_requested:
+                    from .xp2_congress_cycle import enable as enable_congress_review_cycle
+                    enable_congress_review_cycle(backend)
         from .a0_foundation_events import enable_placements
         enable_placements(consumer, backend)
         from .a0_combat_events import enable as enable_combat
         enable_combat(consumer, backend)
+        if (backend.load_abi.core_sha256==XP2_CORE_SHA256
+                and getattr(backend.core,'_civ6_host_execution_image',None) is not None):
+            from .a0_diplomacy_statement import enable as enable_statements
+            enable_statements(consumer,backend)
         from .a0_foundation_events import enable_improvement_changes
         enable_improvement_changes(consumer, backend)
         from .a0_district_damage import enable as enable_district_damage

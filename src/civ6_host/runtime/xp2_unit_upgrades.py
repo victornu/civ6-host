@@ -53,17 +53,19 @@ def _source():
     return path, proof
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     path, proof = _source()
     base = upgrades.verify_source()
     (route_path, _), (stock_path, stock) = _resource_sources()
-    return {str(path.resolve()): SOURCE[1],
+    pins = {str(path.resolve()): SOURCE[1],
             str(resolve_path(upgrades.PROOF).resolve()): upgrades.PROOF_SHA,
             str(route_path.resolve()): RESOURCE_ROUTE[1],
             str(stock_path.resolve()): STOCKPILE_SOURCE[1],
             **{str(resolve_path(Path(row['path'])).resolve()): row['sha256']
                for row in [base['official_ui'], *proof['official_ui'],
                            stock['official_top_panel'], stock['actual_xp2_included_unit_panel']]}}
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 def _resource_sources():

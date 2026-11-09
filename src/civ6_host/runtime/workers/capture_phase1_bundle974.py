@@ -48,6 +48,7 @@ def _sha256_file(path: Path, deadline: float) -> str:
 
 def _file_state(path: Path, deadline: float, limit: int) -> dict:
     from civ6_host.runtime.resource_resolution import historical_reference
+    from civ6_host.runtime.resource_resolution import historical_reference
     source = _resolve_resource_path(path).resolve(strict=True)
     if not _resolve_resource_path(source).is_file():
         raise ValueError(f'Not a regular input file: {source}')
@@ -137,16 +138,22 @@ def _validate_inputs(save: Path, databases: dict[str, Path], logs: dict[str, Pat
 class _OfficialBackend:
     """Thin adapters over the two already-reviewed read-only capture tools."""
 
-    def __init__(self):
+    def __init__(self, *, executable_sha256=None):
         from civ6_host.runtime.workers import capture_official_content929 as content929
         from civ6_host.runtime.workers import capture_official_save907 as save907
+        from civ6_host.runtime.native.native_resolved_content import EXE_SHA
+        from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
+        executable_sha256 = EXE_SHA if executable_sha256 is None else executable_sha256
+        if executable_sha256 not in (EXE_SHA, CURRENT_EXE_SHA):
+            raise BundleCaptureRefused('Unsupported official capture executable')
+        self.executable_sha256 = executable_sha256
         self.content929 = content929
         self.save907 = save907
 
     def pinned_executable(self) -> tuple[Path, str]:
         from civ6_host.runtime.native.native_resolved_content import EXE_SHA
         from civ6_host.runtime.native.native_resolved_content import source_profile
-        return (_resolve_resource_path(_resolve_resource_path(Path(source_profile()['image']['path']))).resolve(strict=True), EXE_SHA)
+        return (_resolve_resource_path(_resolve_resource_path(Path(source_profile(self.executable_sha256)['image']['path']))).resolve(strict=True), self.executable_sha256)
 
     def snapshot_process(self, pid: int, deadline: float) -> dict:
         expected, expected_sha = self.pinned_executable()
@@ -170,7 +177,7 @@ class _OfficialBackend:
         return {'identity': identity, 'exe_module': main[0], 'exe_sha256': expected_sha, 'gamecore_module': {**gamecores[0], 'path': str(core_path), 'sha256': core_sha}, 'module_inventory': sorted(({'name': m['name'], 'path': str(_resolve_resource_path(_resolve_resource_path(Path(m['path']))).resolve(strict=False)), 'base': m['base'], 'bytes': m['bytes']} for m in modules), key=lambda x: (x['name'].casefold(), x['path'].casefold(), x['base']))}
 
     def capture_content(self, pid: int) -> dict:
-        return self.content929.capture(pid)
+        return self.content929.capture(pid, executable_sha256=self.executable_sha256)
 
     def capture_save(self, source: Path, output_dir: Path) -> dict:
         return self.save907.capture(source, output_dir)

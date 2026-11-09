@@ -136,7 +136,10 @@ def source():
     return p
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
     p = source()
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]),
             *[row for row in p['inputs'] if 'path' in row]]

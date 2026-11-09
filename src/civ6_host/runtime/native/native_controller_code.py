@@ -13,6 +13,7 @@ from civ6_host.runtime.native.native_subscriber_code import NativeSubscriberCode
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_controller_code.py')))).resolve().parents[1]
 SOURCE_SHA = 'f164f34ca68ef71c5d7475e4881d84d2c6d88145e9e866532f4fed861adac90b'
 EXE_SHA = 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
+_CAPTURED_EXE_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\Base\Binaries\Win64Steam\CivilizationVI.exe"
 OFFSETS = {'constructor': 0, 'get_flag': 256, 'clock': 512, 'elapsed': 768, 'critical_section': 1024, 'set_flag': 1280}
 IMPORT_OFFSETS = {'QueryPerformanceCounter': 8192, 'QueryPerformanceFrequency': 8200, 'InitializeCriticalSection': 8208}
 
@@ -21,9 +22,28 @@ def source_profile():
     if hashlib.sha256(raw).hexdigest() != SOURCE_SHA:
         raise ValueError('Controller source pin changed')
     p = json.loads(raw)
-    if p['schema'] != 'civ6rl.native_controller911.source.v1' or p['image']['sha256'] != EXE_SHA or p['mutable_globals']['frequency']['section']['raw_backed'] is not False:
+    expected_imports = {'QueryPerformanceCounter', 'QueryPerformanceFrequency', 'InitializeCriticalSection'}
+    if (p['schema'] != 'civ6rl.native_controller911.source.v1'
+            or p['image']['sha256'] != EXE_SHA
+            or p['mutable_globals']['frequency']['section']['raw_backed'] is not False
+            or set(p.get('imports', {})) != expected_imports
+            or any(row.get('name') != name or row.get('dll', '').casefold() != 'kernel32.dll'
+                   for name, row in p['imports'].items())):
         raise ValueError('Controller image or fresh zero-backed global differs')
     return p
+
+def _verify_captured_exe_identity(source, execution_image):
+    if execution_image is None:
+        return False
+    from civ6_host.runtime.execution_images import identity
+    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    selected = identity(execution_image)
+    if selected['reference_core_sha256'] != XP2_CORE_SHA256:
+        raise ValueError('Controller capture requires the canonical XP2 execution profile')
+    if (source.get('image', {}).get('path') != _CAPTURED_EXE_PATH
+            or source.get('image', {}).get('sha256') != EXE_SHA):
+        raise ValueError('Pinned controller capture executable identity differs')
+    return True
 
 def build_image(source, imports):
     """Small closed island: code RX, unwind/imports RO, clock-frequency cache RW."""
@@ -85,7 +105,7 @@ def build_image(source, imports):
 class NativeControllerCode:
     """Executable owner. Controllers must close before their code/unwind owner."""
 
-    def __init__(self):
+    def __init__(self, *, execution_image=None):
         if os.name != 'nt' or C.sizeof(C.c_void_p) != 8:
             raise RuntimeError('Controller requires Win64')
         self.owner = threading.get_ident()
@@ -96,19 +116,21 @@ class NativeControllerCode:
         self.registered = False
         self.objects = set()
         self.source = source_profile()
-        original = _resolve_resource_path(_resolve_resource_path(Path(self.source['image']['path']))).read_bytes()
-        if hashlib.sha256(original).hexdigest() != EXE_SHA:
-            raise ValueError('Installed EXE hash changed')
-        for row in self.source['functions'].values():
-            raw = bytes.fromhex(row['raw_hex'])
-            offset = row['file_offset']
-            if original[offset:offset + len(raw)] != raw:
-                raise ValueError('Original controller instructions differ')
-        for row in self.source['unwind_rows']:
-            raw = bytes.fromhex(row['unwind_hex'])
-            offset = row['file_offset']
-            if original[offset:offset + len(raw)] != raw:
-                raise ValueError('Original controller unwind differs')
+        selected_current = _verify_captured_exe_identity(self.source, execution_image)
+        if not selected_current:
+            original = _resolve_resource_path(_resolve_resource_path(Path(self.source['image']['path']))).read_bytes()
+            if hashlib.sha256(original).hexdigest() != EXE_SHA:
+                raise ValueError('Installed EXE hash changed')
+            for row in self.source['functions'].values():
+                raw = bytes.fromhex(row['raw_hex'])
+                offset = row['file_offset']
+                if original[offset:offset + len(raw)] != raw:
+                    raise ValueError('Original controller instructions differ')
+            for row in self.source['unwind_rows']:
+                raw = bytes.fromhex(row['unwind_hex'])
+                offset = row['file_offset']
+                if original[offset:offset + len(raw)] != raw:
+                    raise ValueError('Original controller unwind differs')
         k = self.kernel = C.WinDLL('kernel32', use_last_error=True)
         n = self.ntdll = C.WinDLL('ntdll', use_last_error=True)
         imports = {name: C.cast(getattr(k, name), C.c_void_p).value for name in IMPORT_OFFSETS}

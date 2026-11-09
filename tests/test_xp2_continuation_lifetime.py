@@ -16,6 +16,7 @@ from civ6_host.runtime import xp2_action_transport_source as actions
 from civ6_host.runtime import xp1_continuation as continuation
 from civ6_host.runtime import xp1_load_capability as capability
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256
+from civ6_host.runtime.execution_images import select
 from civ6_host.runtime.xp1_action_transport import SavedActionTransport
 from civ6_host.runtime.native.native_events import NativeEventRecorder
 import test_xp2_loaded_lifetime as post_fixture
@@ -29,6 +30,8 @@ class ContinuationLifetimeTests(unittest.TestCase):
         # Source-backed memory composes the already selected postload and
         # command families under the same actual LoadedCachePublication.
         proof=actions.source();b.core._name=proof['image']['path']
+        b.core._civ6_host_execution_image=select(
+            'xp2-gamecore-current-092abfbb',core_path=b.core._name)
         for body in proof['functions'].values():
             for frag in body['fragments']:f.put(base+int(frag['start_rva'],16),bytes.fromhex(frag['raw_hex']))
         for row in proof['slots']:f.q(base+row['vtable_rva']+row['slot'],base+row['target_rva'])
@@ -85,7 +88,8 @@ class ContinuationLifetimeTests(unittest.TestCase):
         self.assertEqual(b.stage,continuation.READY)
         self.assertEqual(token.continuation_source_receipt['source_sha256'],actions.SOURCE[1])
         self.assertIs(c.publication.post.aux90_validation,p.validate_postload_aux90.return_value)
-        pins=life.source_dependencies(XP2_CORE_SHA256,postload=True,continuation=True)
+        pins=life.source_dependencies(XP2_CORE_SHA256,postload=True,continuation=True,
+            execution_image=b.core._civ6_host_execution_image)
         self.assertEqual(token.continuation_source_dependencies,pins)
         for path,digest in pins.items():self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(),digest)
         token.phase='wrappers';lease.begin_release(token)

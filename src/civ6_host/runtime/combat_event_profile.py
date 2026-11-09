@@ -5,9 +5,10 @@ from .configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256
 from . import xp1_combat_profile as source
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
-        return source.source_dependencies(core_sha256)
+        return source.source_dependencies(core_sha256, execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 combat ABI')
     if core_sha256!=XP1_CORE_SHA256:
         raise ValueError('Combat event dependencies require exact XP1 or XP2')
     from .xp1_world_text_profile import source_dependencies as world_sources
@@ -15,7 +16,7 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
 
 
 @lru_cache(maxsize=2)
-def event_profile(core_sha256=XP1_CORE_SHA256):
+def _event_profile(core_sha256=XP1_CORE_SHA256):
     from .a0_family_source import A0FamilyProfile
     from .native.native_combat_receiver import verify_source_evidence
     from .native.native_event_a479f83f import verify_source_evidence as experience
@@ -34,8 +35,20 @@ def event_profile(core_sha256=XP1_CORE_SHA256):
     return A0FamilyProfile(MappingProxyType(kinds),MappingProxyType(sizes),profile_source_sha)
 
 
-def bind_owner(backend,core,read):
+def event_profile(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires XP2 combat ABI')
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+    return _event_profile(core_sha256)
+
+
+def bind_owner(backend,core,read,*,execution_image=None):
     from .xp1_world_text_profile import bind_owner as bind_world
     core_sha256=backend.load_abi.core_sha256
-    source.bind_owner(backend,core,read);bind_world(backend,core,read)
-    return event_profile(core_sha256)
+    if execution_image is None:
+        execution_image=getattr(core,'_civ6_host_execution_image',None)
+    source.bind_owner(backend,core,read,execution_image=execution_image)
+    bind_world(backend,core,read,execution_image=execution_image)
+    return event_profile(core_sha256,execution_image=execution_image)

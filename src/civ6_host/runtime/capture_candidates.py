@@ -19,7 +19,7 @@ class PrivateCaptureCandidate:
     validate_inputs: object
 
 
-def select_private_candidate(*, xp1_candidate=False, candidate_profile=None):
+def select_private_candidate(*, xp1_candidate=False, candidate_profile=None, official_bundle=None):
     if type(xp1_candidate) is not bool:
         raise ValueError('Candidate input flag must be Boolean')
     if xp1_candidate and candidate_profile is not None:
@@ -37,6 +37,14 @@ def select_private_candidate(*, xp1_candidate=False, candidate_profile=None):
                                        XP1_CORE_SHA256, validate_candidate_inputs)
     from .xp2_bundle_inputs import REFERENCE, XP2_LAN_PROFILE, validate_candidate_inputs
     from .saved_load_profiles import XP2_CORE_SHA256
+    from . import xp2_bbg_inputs as bbg
+    if official_bundle is None:
+        official_bundle = bbg.registered_reference()
+    if bbg.is_reference(official_bundle):
+        reference = ((official_bundle['path'], official_bundle['sha256'])
+                     if type(official_bundle) is dict else official_bundle)
+        return PrivateCaptureCandidate(family, reference, XP2_LAN_PROFILE,
+                                       XP2_CORE_SHA256, bbg.validate_candidate_inputs)
     return PrivateCaptureCandidate(family, REFERENCE, XP2_LAN_PROFILE,
                                    XP2_CORE_SHA256, validate_candidate_inputs)
 
@@ -72,15 +80,28 @@ def prepare_input_handoff(family, destination, *, bundle=None):
         native_execution=False, public_session_admitted=False)
 
 
-def consume_input_handoff(family, reference):
+def consume_input_handoff(family, reference, *, official_bundle=None, execution_image=None):
     """Rehash the compact inputs and their original save/script joins."""
     from . import capture_admission
-    contract = select_private_candidate(candidate_profile=family)
+    from . import xp2_bbg_inputs as bbg
+    contract = select_private_candidate(candidate_profile=family, official_bundle=official_bundle)
     if contract is None:
         raise ValueError('Input consumption requires an explicit private family')
+    if contract.reference == bbg.REFERENCE and reference != bbg.prepared_reference():
+        raise ValueError('BBG requires its exact local recovered handoff')
     capture_admission.configure(reference)
+    if contract.reference == bbg.REFERENCE:
+        return bbg.read_bundle(**({'execution_image': execution_image} if execution_image is not None else {}))
+    capture_admission.require_explicit_stock_execution(reference,execution_image)
+    if execution_image is not None:
+        from . import xp2_bundle_inputs as xp2
+        if family!='xp2-lan' or not (contract.reference==xp2.REFERENCE
+                                    or contract.reference == bbg.registered_reference()):
+            raise ValueError('The selected execution image requires the exact stock XP2 capture')
     bundle = capture_admission.try_bundle(contract.reference, input_profile=family,
-                                         _candidate_profile=family)
+                                         _candidate_profile=family,
+                                         **({'execution_image':execution_image}
+                                            if execution_image is not None else {}))
     if bundle is None:
         raise ValueError('Candidate requires its explicit prepared input package')
     contract.validate_inputs(bundle.inputs, bundle)

@@ -147,7 +147,7 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return source()
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     from .xp1_status_profiles import source_dependencies as status
     from .unit_operation_ui_profile import source_dependencies as operation
     proof=source();transport=_source(TRANSPORT_SOURCE);ui=_source(UI_SOURCE)
@@ -159,11 +159,29 @@ def source_dependencies():
                      sha256=SKIP_OPERATIONS_SHA256))
     inventory=_source(tuple(proof['references'][-1][k] for k in ('path','sha256')))
     refs.extend(inventory['references'])
-    pins={str(_file(ref)):ref['sha256'] for ref in refs}
+    if execution_image is not None:
+        image_path=Path(resolve_path(resource_root()/proof['image']['path'])).resolve()
+        if (str(image_path)!=str(Path(execution_image.path).resolve())
+                or proof['image']['sha256']!=execution_image.reference_core_sha256):
+            raise ValueError('XP2 unit-order provenance differs from the selected execution/reference pair')
+    pins={}
+    for ref in refs:
+        path=Path(resolve_path(resource_root()/ref['path'])).resolve()
+        if execution_image is None or ref != proof['image']:
+            if hashlib.sha256(path.read_bytes()).hexdigest()!=ref['sha256']:
+                raise ValueError('XP2 unit-order source dependency changed: '+str(path))
+        pins[str(path)]=ref['sha256']
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    pins=materialize_runtime_source_pins(pins, execution_image=execution_image,
+        provenance_images=(proof['image'],))
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     for provider in (status,operation):
-        for path,digest in provider(core_sha256=XP2_CORE_SHA256).items():
+        for path,digest in provider(core_sha256=XP2_CORE_SHA256, **execution_options).items():
             if path in pins and pins[path]!=digest:raise ValueError('Conflicting XP2 unit-order source pins')
             pins[path]=digest
+    from .a0_family_source import verify_pinned_files
+    verify_pinned_files(pins)
     return pins
 
 

@@ -5,6 +5,10 @@ save through FileClient.save_snapshot. No gameplay actions are submitted.
 The result is a correlated evidence bundle, not scenario/training admission.
 """
 from __future__ import annotations
+from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
+from civ6_host.runtime.native.native_resolved_content import CURRENT_LAYOUT_SHA
+from civ6_host.runtime.native.native_resolved_content import CURRENT_POPULATION_SHA
+from civ6_host.runtime.native.native_resolved_content import CURRENT_FRAMEWORK_SHA
 from civ6_host.runtime import localization_bulk_export as bulk_export
 from civ6_host.runtime.provenance import historical_source_file as _historical_source_file, historical_module_file as _historical_module_file, worker_path as _worker_path, pin_key as _pin_key, installed_source_pins as _installed_source_pins
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
@@ -42,7 +46,7 @@ from civ6_host.runtime.workers.observe_pid_open_files975 import observe_pid_open
 BRIDGE_FILES = ('Civ6RL.modinfo', 'UI/Civ6RL.lua', 'UI/Civ6RL.xml', 'UI/Civ6RLIncludeProbe.lua', 'UI/Civ6RLFileTransport.lua', 'UI/Civ6RLDatabaseCapture992.lua', 'UI/Civ6RLUIAvailability.lua')
 MAX_SECONDS = 1500.0
 MAX_LOGICAL_CAPTURE_SECONDS = 9000.0
-TOOL_FILES = ('tools/capture_phase1_bundle994.py', 'tools/capture_phase1_bundle974.py', 'tools/prepare_phase1_capture973.py', 'tools/observe_pid_open_files975.py', 'tools/capture_official_content929.py', 'tools/capture_official_save907.py', 'civ6rl/database_capture992.py', 'civ6rl/database_capture_bundle993.py', 'civ6rl/file_client.py', 'civ6rl/log_tail.py', 'civ6rl/log_frames.py', 'civ6rl/protocol.py', 'civ6rl/native_resolved_content.py', 'civ6rl/native_gameplay_selection994.py', 'civ6rl/native_gameplay_empty.py', 'work/official-bundle/scripts-empty-source.json', 'civ6rl/native_ui_availability.py', 'work/ui-availability/source.json', 'work/ui-availability/source-v2.json', 'civ6rl/native_ui_local_state.py', 'work/ui-availability/local-state-source.json', 'civ6rl/native_gameplay_source_capture.py', 'civ6rl/native_localization_capture.py', 'work/official-capture/localization-tuner-route.json', 'civ6rl/native_localization_export.py', 'civ6rl/tuner.py', 'civ6rl/native_localization_logical_export.py', 'civ6rl/native_localization_query.py', 'work/official-capture/localization-export.c', 'work/official-capture/localization-build.py', 'work/official-capture/localization-export-build02/build.json', 'work/official-capture/localization-export-build02/civ6rl-localization-export.dll', 'work/official-capture/localization-lookup-lifetime.json', 'evidence/phase35-thread-context.json', 'evidence/native-database-backup/5d19fa3f7c4348e24fcf66fe4f4eb05b0a9bb6f8b5a76bd93ae0b122840ea06e.json', 'civ6rl/native_gameplay_script_registry.py', 'civ6rl/native_include_registry.py')
+TOOL_FILES = ('tools/capture_phase1_bundle994.py', 'tools/capture_phase1_bundle974.py', 'tools/prepare_phase1_capture973.py', 'tools/observe_pid_open_files975.py', 'tools/capture_official_content929.py', 'tools/capture_official_save907.py', 'civ6rl/database_capture992.py', 'civ6rl/database_capture_bundle993.py', 'civ6rl/file_client.py', 'civ6rl/log_tail.py', 'civ6rl/log_frames.py', 'civ6rl/protocol.py', 'civ6rl/native_resolved_content.py', 'civ6rl/native_gameplay_selection994.py', 'civ6rl/native_gameplay_empty.py', 'work/official-content929/current-exe-source.json', 'work/official-content929/current-exe-content-completion.json', 'work/official-content929/current-exe-provider-framework-binding.json', 'work/official-bundle/scripts-empty-source.json', 'civ6rl/native_ui_availability.py', 'work/ui-availability/source.json', 'work/ui-availability/source-v2.json', 'civ6rl/native_ui_local_state.py', 'work/ui-availability/local-state-source.json', 'civ6rl/native_gameplay_source_capture.py', 'civ6rl/native_localization_capture.py', 'work/official-capture/current-localization-shared-bindings.json', 'work/official-capture/current-localization-query-getters.json', 'work/official-capture/current-exe-localization-bindings.json', 'work/official-capture/localization-tuner-route.json', 'civ6rl/native_localization_export.py', 'civ6rl/tuner.py', 'civ6rl/native_localization_logical_export.py', 'civ6rl/native_localization_query.py', 'work/official-capture/localization-export.c', 'work/official-capture/localization-build.py', 'work/official-capture/localization-export-build02/build.json', 'work/official-capture/localization-export-build02/civ6rl-localization-export.dll', 'work/official-capture/localization-lookup-lifetime.json', 'evidence/phase35-thread-context.json', 'evidence/native-database-backup/5d19fa3f7c4348e24fcf66fe4f4eb05b0a9bb6f8b5a76bd93ae0b122840ea06e.json', 'civ6rl/native_gameplay_script_registry.py', 'civ6rl/native_include_registry.py')
 CONTENT_VECTORS = ('configured_mod_handles', 'active_mod_handles', 'ordered_component_handles')
 RESPONSE_TOOL_FILES = ('civ6rl/response_file_client.py', 'civ6rl/native_response_file_writer.py', 'mod/UI/Civ6RL.lua', 'mod/UI/Civ6RLFileTransport.lua')
 
@@ -54,15 +58,15 @@ class OfficialBackend(legacy._OfficialBackend):
 
     def capture_gameplay_selection(self, pid):
         from civ6_host.runtime.native.native_gameplay_selection994 import capture as capture_selection
-        return capture_selection(pid)
+        return capture_selection(pid, executable_sha256=self.executable_sha256, include_resolved_content=self.executable_sha256 == CURRENT_EXE_SHA)
 
     def capture_gameplay_empty(self, pid):
         from civ6_host.runtime.native.native_gameplay_empty import capture as capture_empty
-        return capture_empty(pid)
+        return capture_empty(pid, executable_sha256=self.executable_sha256) if self.executable_sha256 == CURRENT_EXE_SHA else capture_empty(pid)
 
     def capture_localization(self, pid, output, timeout_seconds):
         from civ6_host.runtime.native.native_localization_capture import capture as capture_localization
-        return capture_localization(pid, output, timeout_seconds=timeout_seconds)
+        return capture_localization(pid, output, timeout_seconds=timeout_seconds, executable_sha256=self.executable_sha256)
 
     def export_localization(self, pid, output, **kwargs):
         from civ6_host.runtime.native.native_localization_export import capture_export
@@ -94,31 +98,42 @@ def _join_native_report(report, process, schema):
     require(report['gamecore_module'].get('sha256') == process['gamecore_module']['sha256'], 'Runtime selection GameCore hash differs')
 
 def _content_semantics(snapshot, process):
-    require(type(snapshot) is dict and snapshot.get('schema') == 'civ6rl.resolved_content929.memory_snapshot.v1', 'Missing resolved-content memory snapshot')
-    require(snapshot.get('source_sha256') == PROVIDER_SHA and snapshot.get('active_population_source_sha256') == ACTIVE_SHA and (snapshot.get('executable_sha256') == EXE_SHA == process['exe_sha256']) and (snapshot.get('image_base') == hex(process['exe_module']['base'])), 'Resolved-content source/image context differs')
+    current = process.get('exe_sha256') == CURRENT_EXE_SHA
+    require(type(snapshot) is dict and snapshot.get('schema') == ('civ6rl.resolved_content929.memory_snapshot.v2' if current else 'civ6rl.resolved_content929.memory_snapshot.v1'), 'Missing resolved-content memory snapshot')
+    require(snapshot.get('source_sha256') == PROVIDER_SHA and snapshot.get('active_population_source_sha256') == ACTIVE_SHA and (snapshot.get('executable_sha256') == process['exe_sha256']) and (process['exe_sha256'] in (EXE_SHA, CURRENT_EXE_SHA)) and (snapshot.get('image_base') == hex(process['exe_module']['base'])), 'Resolved-content source/image context differs')
     require(snapshot.get('observed_ranges_unchanged') is True and snapshot.get('read_only') is True, 'Resolved-content ranges were not verified stable')
     for flag in ('atomic_snapshot_proven', 'content_application_success_proven', 'save_identity_bound', 'database_identity_bound', 'gameplay_scripts_bound', 'strategic_training_ready', 'player_observation'):
         require(snapshot.get(flag) is False, 'Resolved-content report overclaims ' + flag)
     vectors = {}
-    for name in CONTENT_VECTORS:
+    for name in CONTENT_VECTORS[1:] if current else CONTENT_VECTORS:
         value = snapshot.get(name)
         require(type(value) is list and len(value) <= MAX_HANDLES and all((type(x) is int and 0 <= x < 2 ** 32 for x in value)), 'Invalid ordered content vector')
         vectors[name] = value
     headers = snapshot.get('vector_headers_hex')
-    require(type(headers) is dict and set(headers) == set(CONTENT_VECTORS) and all((type(v) is str and re.fullmatch('[0-9a-f]{48}', v) for v in headers.values())), 'Resolved-content vector headers missing')
+    require(type(headers) is dict and set(headers) == set(vectors) and all((type(v) is str and re.fullmatch('[0-9a-f]{48}', v) for v in headers.values())), 'Resolved-content vector headers missing')
     for field in ('manager_address', 'provider_address'):
         require(type(snapshot.get(field)) is str and re.fullmatch('0x[0-9a-f]+', snapshot[field]), 'Missing resolved-content context address')
-    return dict(manager_address=snapshot['manager_address'], provider_address=snapshot['provider_address'], vector_headers_hex=headers, **vectors)
+    result = dict(manager_address=snapshot['manager_address'], provider_address=snapshot['provider_address'], vector_headers_hex=headers, **vectors)
+    if current:
+        require(snapshot.get('current_layout_source_sha256') == CURRENT_LAYOUT_SHA and snapshot.get('current_population_source_sha256') == CURRENT_POPULATION_SHA and (snapshot.get('current_framework_source_sha256') == CURRENT_FRAMEWORK_SHA) and (snapshot.get('provider_registry_relation_checked') is True) and (snapshot.get('opaque_manager_fields_interpreted') is False), 'Current resolved-content correspondence differs')
+        opaque = snapshot.get('opaque_manager_headers')
+        require(type(opaque) is dict and set(opaque) == {'manager_plus_0x1d8'} and (type(opaque['manager_plus_0x1d8']) is str) and (re.fullmatch('[0-9a-f]{48}', opaque['manager_plus_0x1d8']) is not None), 'Current unclassified manager field was interpreted or omitted')
+        result['opaque_manager_headers'] = opaque
+    return result
 
 def _selection_semantics(selection, process, semantic):
     from civ6_host.runtime.native.native_gameplay_selection994 import AUX_SHA256
     from civ6_host.runtime.native.native_gameplay_selection994 import MAX_ROWS
     from civ6_host.runtime.native.native_gameplay_selection994 import ROUTE_SHA256
-    _join_native_report(selection, process, 'civ6rl.official_gameplay_selection994.capture.v1')
+    from civ6_host.runtime.native.native_gameplay_selection994 import CURRENT_SOURCE_SHA256
+    current = process.get('exe_sha256') == CURRENT_EXE_SHA
+    _join_native_report(selection, process, 'civ6rl.official_gameplay_selection994.capture.v2' if current else 'civ6rl.official_gameplay_selection994.capture.v1')
     require(type(selection.get('consumer_core_matches_base_proof')) is bool, 'Gameplay selection consumer proof scope missing')
     state = selection.get('snapshot', {})
-    require(state.get('schema') == 'civ6rl.gameplay_selection994.memory_snapshot.v1' and state.get('observed_ranges_unchanged') is True and (state.get('atomic_snapshot_proven') is False) and (state.get('execution_proven') is False) and (state.get('save_identity_bound') is False), 'Gameplay selection lacks stable read or overclaims execution')
+    require(state.get('schema') == ('civ6rl.gameplay_selection994.memory_snapshot.v2' if current else 'civ6rl.gameplay_selection994.memory_snapshot.v1') and state.get('observed_ranges_unchanged') is True and (state.get('atomic_snapshot_proven') is False) and (state.get('execution_proven') is False) and (state.get('save_identity_bound') is False), 'Gameplay selection lacks stable read or overclaims execution')
     require(state.get('route_source_sha256') == ROUTE_SHA256 and state.get('getter_source_sha256') == AUX_SHA256 and (state.get('executable_sha256') == process['exe_sha256']) and (state.get('image_base') == hex(process['exe_module']['base'])) and (state.get('read_only') is True), 'Gameplay selection source/image context differs')
+    if current:
+        require(state.get('current_correspondence_sha256') == CURRENT_SOURCE_SHA256 and state.get('resolved_content_captured') is True, 'Current selection lacks the explicit content bracket')
     for flag in ('source_file_bytes_bound', 'database_identity_bound', 'training_eligible', 'player_observation'):
         require(state.get(flag) is False, 'Gameplay selection overclaims ' + flag)
     require(_content_semantics(state.get('resolved_content'), process) == semantic and state.get('manager_address') == semantic['manager_address'], 'Gameplay selection belongs to another resolved-content context')
@@ -136,7 +151,7 @@ def _capture_runtime_selections(backend, pid, process):
     from civ6_host.runtime.native.native_gameplay_empty import SCHEMA
     from civ6_host.runtime.native.native_gameplay_empty import stable_capture_identity
     content = backend.capture_content(pid)
-    _join_native_report(content, process, 'civ6rl.official_resolved_content929.capture.v1')
+    _join_native_report(content, process, 'civ6rl.official_resolved_content929.capture.v2' if process.get('exe_sha256') == CURRENT_EXE_SHA else 'civ6rl.official_resolved_content929.capture.v1')
     content_state = _content_semantics(content.get('snapshot'), process)
     selection = backend.capture_gameplay_selection(pid)
     semantic = _selection_semantics(selection, process, content_state)
@@ -162,8 +177,9 @@ def _localization_semantics(report, process, folder, deadline):
     from civ6_host.runtime.native.native_localization_capture import ROUTE_SHA
     from civ6_host.runtime.native.native_localization_capture import source_profile
     from civ6_host.runtime.native.native_localization_capture import MAX_ICU_BYTES
-    profile = source_profile()
-    require(type(report) is dict and report.get('schema') == 'civ6rl.localization_capture.v1' and (report.get('process') == process['identity']) and (report.get('route_source_sha256') == ROUTE_SHA), 'Localization process or source differs')
+    current = process.get('exe_sha256') == CURRENT_EXE_SHA
+    profile = source_profile(process['exe_sha256'])
+    require(type(report) is dict and report.get('schema') == ('civ6rl.localization_capture.v2' if current else 'civ6rl.localization_capture.v1') and (report.get('process') == process['identity']) and (report.get('route_source_sha256') == ROUTE_SHA), 'Localization process or source differs')
     require(report.get('process_identity_unchanged_before_after') is True and report.get('module_set_unchanged_before_after') is True and (report.get('runtime_memory_copied') is True), 'Localization runtime memory was not verified stable')
     for field in ('native_export_allowed', 'database_lifetime_lease_proven', 'game_executable_launched', 'remote_code_executed', 'memory_written', 'save_database_script_bundle_qualified', 'strategic_training_ready'):
         require(report.get(field) is False, 'Localization capture overclaims ' + field)
@@ -178,7 +194,10 @@ def _localization_semantics(report, process, folder, deadline):
         require(len(matching) == 1 and all((matching[0].get(key) == actual.get(key) for key in ('name', 'base', 'bytes'))), 'Localization module inventory differs: ' + kind)
     require(modules['exe']['sha256'] == process['exe_sha256'], 'Localization executable differs')
     state = report.get('snapshot', {})
-    require(state.get('schema') == 'civ6rl.localization_memory_snapshot.v1' and state.get('route_source_sha256') == ROUTE_SHA and (state.get('observed_ranges_unchanged') is True), 'Localization snapshot source/stability differs')
+    require(state.get('schema') == ('civ6rl.localization_memory_snapshot.v2' if current else 'civ6rl.localization_memory_snapshot.v1') and state.get('route_source_sha256') == ROUTE_SHA and (state.get('observed_ranges_unchanged') is True), 'Localization snapshot source/stability differs')
+    if current:
+        from civ6_host.runtime.native.native_localization_export import runtime_identity
+        runtime_identity(report)
     for field in ('atomic_snapshot_proven', 'database_exported', 'database_lifetime_lease_proven', 'save_identity_bound', 'training_eligible'):
         require(state.get(field) is False, 'Localization snapshot overclaims ' + field)
     require(type(state.get('dictionary_flag')) is bool and report.get('dictionary_flag') == state['dictionary_flag'] and (report.get('locale') == state.get('locale')) and (type(state['locale']) is str) and re.fullmatch('[A-Za-z][A-Za-z0-9_@.\\-]{0,62}', state['locale']), 'Localization language/initializer differs')
@@ -667,6 +686,7 @@ def main(argv=None):
     parser.add_argument('--response-file-predecessor', type=Path, help='Explicit authenticated closed response prefix; no command replay or automatic fallback')
     parser.add_argument('--timeout-seconds', type=float, default=MAX_SECONDS, help='Explicit bounded capture budget; larger budgets require logical export')
     parser.add_argument('--tuner-port', type=int, default=4318, help='Explicit FireTuner TCP port (default: 4318); capture only, no port probing')
+    parser.add_argument('--executable-sha256', choices=(EXE_SHA, CURRENT_EXE_SHA), default=EXE_SHA)
     args = parser.parse_args(argv)
     try:
         require(1 <= args.tuner_port <= 65535, 'Tuner port must be between 1 and 65535')
@@ -676,6 +696,8 @@ def main(argv=None):
             require(role in ('gameplay', 'configuration') and role not in exports and path, 'Invalid export role/path')
             exports[role] = _resolve_resource_path(Path(path))
         common = dict(pid=args.pid, inbox=args.inbox, log=args.log, save_directory=args.save_directory, name=args.name, output=args.output, exports=exports, script_roots=args.script_root, response_file_installation=args.response_file_installation, response_file_predecessor=args.response_file_predecessor, script_path_context=args.script_path_context)
+        if args.executable_sha256 != EXE_SHA:
+            common['backend'] = OfficialBackend(executable_sha256=args.executable_sha256)
         result = preflight(**common) if args.mode == 'preflight' else capture(**common, expected_player_id=args.expected_player_id, expected_turn=args.expected_turn, ui_availability=args.ui_availability, localization_state=args.localization_state, localization_export_ui_context=args.localization_export_ui_context, ui_local_state=args.ui_local_state, tuner_port=args.tuner_port, localization_query_installation=args.localization_query_installation, localization_cache=args.localization_cache, timeout_seconds=args.timeout_seconds)
     except Exception as exc:
         print(json.dumps(dict(status='refused', training_eligible=False, error=type(exc).__name__ + ': ' + str(exc)), ensure_ascii=True))

@@ -10,9 +10,11 @@ from unittest.mock import Mock, patch
 
 from civ6_host.runtime import xp1_turn_profile as profiles
 from civ6_host.runtime import xp2_turn_source as source
+from civ6_host.runtime import xp2_turn_event_profile as climate
 from civ6_host.runtime import xp1_host_thread_gate as thread_gate
 from civ6_host.runtime import xp1_host_slot78 as slot78
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+from civ6_host.runtime.execution_images import select
 from civ6_host.runtime.native import native_action_transport as calls, native_forced_endturn as forced
 from civ6_host.runtime.native import native_host
 from civ6_host.runtime.native.native_host_thread_gate import HostThreadGate, PROFILE
@@ -74,6 +76,8 @@ class Memory(action_fixture.Memory):
 class Fixture(action_fixture.Fixture):
     def __init__(self):
         with patch.object(action_fixture,'Memory',Memory):super().__init__()
+        self.backend.core._civ6_host_execution_image = select(
+            'xp2-gamecore-current-092abfbb', core_path=self.backend.core._name)
         self.backend.busy=True
         self.backend._saved_load_candidate=True
         for slot in (0x58,0x60,0x78):
@@ -116,13 +120,56 @@ class XP2TurnServicesTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'slot'):
                     profiles.verify_live(m.base,m.context,m.read,core_sha256=XP2_CORE_SHA256)
                 m.bytes[at]^=1
-        pins=source.source_dependencies()
+        execution_image=select('xp2-gamecore-current-092abfbb',
+            core_path=p['image']['path'])
+        pins=source.source_dependencies(execution_image=execution_image)
         for path,digest in pins.items():self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(),digest)
         for mod in (profiles,thread_gate,slot78):
-            self.assertEqual(mod.source_dependencies(core_sha256=XP2_CORE_SHA256),pins)
+            self.assertEqual(mod.source_dependencies(core_sha256=XP2_CORE_SHA256,
+                execution_image=execution_image),pins)
             with self.assertRaises(ValueError):mod.source_dependencies(core_sha256='unknown')
+        self.assertEqual(pins[execution_image.path], execution_image.image_sha256)
+        self.assertNotIn(str(Path(source.source()['comparison_image']['path']).resolve()),pins)
+        self.assertNotIn(str(Path(native_host.__file__).resolve()),pins)
+        self.assertTrue(any('actual-core-092-integration\\before\\2026-11-06T0920'
+                            in path and path.endswith('native_host.py') for path in pins))
+        self.assertTrue(climate.source_dependencies(execution_image=execution_image))
+        self.assertEqual(climate.event_profile(core_sha256=XP2_CORE_SHA256,
+            execution_image=execution_image).source_sha256, climate.SCOPE_SOURCE[1])
         self.assertIs(profiles.turn_profile(XP2_CORE_SHA256),source.ABI)
         with self.assertRaises(ValueError):profiles.require_profile(replace(source.ABI),XP2_CORE_SHA256)
+
+    def test_current_owner_requires_the_retained_execution_profile_and_sdk_transition(self):
+        f=self.fixture();backend=f.backend
+        source.require_prepared_owner(backend)
+        selected=backend.core._civ6_host_execution_image
+        self.assertEqual(selected.image_sha256,
+                         '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f')
+        self.assertEqual(selected.reference_core_sha256,XP2_CORE_SHA256)
+        del backend.core._civ6_host_execution_image
+        with self.assertRaisesRegex(ValueError,'exact reference Core image'):
+            source.require_prepared_owner(backend)
+
+    def test_unprofiled_legacy_owner_requires_exact_reference_core_bytes(self):
+        f=self.fixture();backend=f.backend
+        del backend.core._civ6_host_execution_image
+        with self.assertRaisesRegex(ValueError,'exact reference Core image'):
+            source.require_prepared_owner(backend)
+
+    def test_unprofiled_reference_core_path_keeps_legacy_owner_route(self):
+        from tempfile import TemporaryDirectory
+        f=self.fixture();backend=f.backend
+        del backend.core._civ6_host_execution_image
+        with TemporaryDirectory() as temp:
+            path=Path(temp)/'GameCore_XP2_FinalRelease.dll'
+            path.write_bytes(b'reference-image-fixture-bytes')
+            backend.core._name=str(path)
+            with patch('hashlib.file_digest',return_value=NS(hexdigest=lambda:XP2_CORE_SHA256)):
+                source.require_prepared_owner(backend)
+
+    def test_legacy_turn_image_pin_does_not_alias_the_installed_current_core(self):
+        with self.assertRaisesRegex(ValueError,'turn/service dependency differs'):
+            source.source_dependencies()
 
     def test_actual_saved_requests_parameter_types_fifo_and_canary(self):
         f=self.fixture();t=f.install();m=f.memory

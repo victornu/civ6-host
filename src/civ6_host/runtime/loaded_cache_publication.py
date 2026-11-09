@@ -176,8 +176,14 @@ class LoadedCachePublication:
                 or self.identity['game']!=b.bound_identity['game']
                 or exact(b.runtime.read,self.identity['game']+0x2A4,1)!=b'\1'):
             raise RuntimeError('Candidate loaded-cache ownership or phase changed')
-        if any(tuple(table)!=snapshot for table,snapshot in self.tables) or b.host._slot_bindings!=self.bindings:
+        if b.host._slot_bindings!=self.bindings:
             raise RuntimeError('Candidate host callback binding changed')
+        for table, snapshot in self.tables:
+            if tuple(table) == snapshot:
+                continue
+            from .xp2_trade_table_variant import matches_active_binding
+            if not expected_busy or not matches_active_binding(self, table, snapshot):
+                raise RuntimeError('Candidate host callback binding changed')
         if self.core_sha256==XP2_CORE_SHA256:
             from .xp2_cache_source import source
             globals_=source()['profile']['host_globals']

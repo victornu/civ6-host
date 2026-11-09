@@ -23,8 +23,15 @@ _AVAILABILITY_PROOF = _ROOT / 'evidence/native-policy-availability' / f'{AVAILAB
 TRANSITIONS_EVIDENCE_SHA256 = '53039e04ddf73f2187d5394f17dd2623aca688872d2c18c453de028b64c07d91'
 _TRANSITIONS_PROOF = _ROOT / 'evidence/native-policy-transitions' / f'{TRANSITIONS_EVIDENCE_SHA256}.json'
 
-def verify_source() -> None:
+def verify_source(core_sha256=_CORE_SHA256) -> None:
     """Verify both native wrapper proof and installed free-policy UI guards."""
+    if core_sha256 != _CORE_SHA256:
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        if core_sha256 != XP2_CORE_SHA256:
+            raise ValueError('Unknown policy source engine')
+        from civ6_host.runtime.xp2_policy_source import verify_source as verify_xp2
+        verify_xp2()
+        return
     raw = _resolve_resource_path(_PROOF).read_bytes()
     if hashlib.sha256(raw).hexdigest() != _PROOF_SHA256:
         raise RuntimeError('Pinned policy-change route proof changed')
@@ -50,7 +57,10 @@ def verify_source() -> None:
     if transition.get('schema') != 'civ6rl.native_policy_transitions.static.v1' or transition.get('core_sha256') != _CORE_SHA256 or transition['government_screen']['sha256'] != _GOVERNMENT_SCREEN_SHA256 or (transition['upstream_pins']['native-policy-change-route'] != _PROOF_SHA256) or (transition['upstream_pins']['native-policy-slot-readback'] != _SLOT_READBACK_SHA256) or (transition['upstream_pins']['native-policy-availability'] != AVAILABILITY_EVIDENCE_SHA256):
         raise RuntimeError('Pinned policy transition source changed')
 
-def verify_slot_readback_source() -> None:
+def verify_slot_readback_source(core_sha256=_CORE_SHA256) -> None:
+    if core_sha256 != _CORE_SHA256:
+        verify_source(core_sha256)
+        return
     raw = _resolve_resource_path(_SLOT_READBACK_PROOF).read_bytes()
     if _SLOT_READBACK_SHA256 == 'PENDING' or hashlib.sha256(raw).hexdigest() != _SLOT_READBACK_SHA256:
         raise RuntimeError('Pinned GetSlotPolicy source proof changed')
@@ -185,7 +195,7 @@ def parse_candidate(payload: bytes, expected_player: int, expected_turn: int | N
         result['prior_indices'] = tuple(prior_indices)
     return result
 
-def request_source(player_id: int, candidate: dict) -> bytes:
+def request_source(player_id: int, candidate: dict, *, core_sha256=_CORE_SHA256) -> bytes:
     """Revalidate and submit the candidate through RequestPolicyChanges."""
     pid = int(_player_id(player_id))
     required = {'status', 'player_id', 'turn', 'slot_count', 'assignments'}
@@ -218,7 +228,7 @@ def request_source(player_id: int, candidate: dict) -> bytes:
             raise ValueError('Policy hashes must be unique')
         seen_hashes.add(policy_hash & 4294967295)
         normalized.append((slot, policy_hash_bytes))
-    verify_source()
+    verify_source(core_sha256)
     prefix = _lua_common(_player_id(pid), _uint(turn, 'game turn'))
     assignment_literals = b','.join((b'{' + str(slot).encode('ascii') + b',' + h + b'}' for slot, h in normalized))
     prior_literals = b','.join((str(index).encode('ascii') for index in prior_indices))
@@ -240,14 +250,14 @@ def parse_request_result(payload: bytes, expected_player: int, expected_turn: in
         raise ValueError('Policy request result does not match candidate')
     return {'accepted': True, 'player_id': pid, 'turn': turn, 'slot_count': slots}
 
-def effect_source(player_id: int, candidate: dict) -> bytes:
+def effect_source(player_id: int, candidate: dict, *, core_sha256=_CORE_SHA256) -> bytes:
     """Read back current slot occupants and verify their policy row indices.
 
     The source UI treats GetSlotPolicy's numeric result as GameInfo.Policies' row
     index. This is a read-only post-action check; it does not infer acceptance.
     """
-    verify_source()
-    verify_slot_readback_source()
+    verify_source(core_sha256)
+    verify_slot_readback_source(core_sha256)
     pid = int(_player_id(player_id))
     if type(candidate) is not dict or candidate.get('status') != 'candidate' or candidate.get('player_id') != pid or (type(candidate.get('turn')) is not int):
         raise ValueError('Expected a candidate for this player')

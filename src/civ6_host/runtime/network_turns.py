@@ -49,6 +49,9 @@ class BaseTurnBoundary:
         from .native.native_ai_round_pump import verify_source_evidence
         verify_source_evidence()
 
+    def turn_segment(self, owner, player_id, turn):
+        return None
+
     def unchanged_request(self, owner, action, before, after):
         raise RuntimeError('Native turn request was delivered but its effect is unresolved')
 
@@ -164,6 +167,7 @@ def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
     refusal=boundary.refusal(owner,action,before,player_id)
     if refusal is not None:
         return dict(status='refused',reason=refusal,requested_action=action)
+    before_segment = boundary.turn_segment(owner, player_id, before['turn'])
     if action['kind'] == 'unready_turn':
         emitted = p.actions.request_unready_turn(player_id,
             player_ids=owner.network_reference['major_player_ids'])
@@ -181,15 +185,22 @@ def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
     _completion(owner, core_sha256=boundary.core_sha256)
     after_session = boundary.state(owner)
     after = boundary.controls(owner, after_session, player_id)
-    unchanged = same_readiness(before, after)
+    after_segment = boundary.turn_segment(owner, player_id, after['turn'])
+    if (before_segment is None) != (after_segment is None):
+        raise RuntimeError('Turn-segment observation scope changed during request')
+    segment_changed = before_segment is not None and before_segment != after_segment
+    unchanged = same_readiness(before, after) and not segment_changed
     receipt = (boundary.unchanged_request(owner, action, before, after) if unchanged
-               else dict(status='completed', reason=None, requested_action=action))
+               else dict(status='completed', reason=('endturn_segment_changed' if segment_changed else None),
+                         requested_action=action))
     boundary.retain(owner)
     boundary.control(owner)
+    segment_trace = ({} if before_segment is None else dict(before_turn_segment=before_segment,
+        after_turn_segment=after_segment, turn_segment_changed=segment_changed))
     owner.emit('official_lan_turn_request_submitted' if unchanged else 'official_lan_turn_request_effect', player_id=player_id,
         action=action, before=before, after=after,
         network_ack_inferred=False, turn_advanced=after['turn'] > before['turn'],
-        strategic_training_ready=False)
+        strategic_training_ready=False, **segment_trace)
     return receipt
 
 
@@ -210,15 +221,23 @@ def advance(owner, *, boundary=BASE_BOUNDARY):
     if p.actions.pending or p.deferred_events.pending:
         raise RuntimeError('LAN update cannot discard pending native work')
     reader_scope = nullcontext()
+    cache_source_scope = nullcontext()
     if boundary.core_sha256 == XP2_CORE_SHA256:
+        from .xp2_cache_source import update_source_scope
         from .xp2_preload_source import event_reader_scope
         reader = p.event_arguments.reader
         reader_scope = event_reader_scope(reader.base, reader.read)
+        cache_source_scope = update_source_scope()
     before_update = perf_counter()
-    with measure() as callback_timing, reader_scope:
-        p.actions.update_game_once()
-    after_update = perf_counter()
-    drain_seconds, refresh_seconds = _publish(owner)
+    # The FIFO consumes the same synchronous native update. Its per-record
+    # Player/context checks need the same immutable source proof, while still
+    # rereading live ownership, slots and locks on every call. Keep the reader
+    # scope and callback timing limited to the actual GameCore update.
+    with cache_source_scope:
+        with measure() as callback_timing, reader_scope:
+            p.actions.update_game_once()
+        after_update = perf_counter()
+        drain_seconds, refresh_seconds = _publish(owner)
     after_publication = perf_counter()
     _completion(owner, core_sha256=boundary.core_sha256)
     after_completion = perf_counter()

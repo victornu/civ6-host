@@ -42,6 +42,18 @@ SOURCE_PAIRS = {
         'c0c71bf871273d00b1e3745eece54e69f93e5741d4306192f784bca9fc367cc0'),
 }
 
+# The exact follow-up adds a hash-checked prefix option to _file and selects
+# BBG Localization only for explicit XP2 inputs. XP1 keeps its reviewed path.
+FOLLOWUP_PAIRS = {
+    'runtime/native/native_official_bundle.py': (SOURCE_PAIRS['runtime/native/native_official_bundle.py'][0],
+        'e31887271a31d1c62bfdea18a309d2c05d89d9ea2b11e54389b54f8aba1b1946'),
+    'runtime/native/native_localization.py': (
+        '9c6c4f9fe1e8498cc15997d4d5a85ce91840f68ff9265e70ff3512538092523e',
+        'b7b4e3218e4e22c9c773155fea86f08c78950d7568923c383aa6ef0b149cb3d7'),
+}
+SOURCE_CACHE_PAIR = ('33a5680d79204bf54944b8dd7f3a386a782ed26fcbd4baa6319b216f17a27457',
+                     '62e3c722719e25a49c5840e4ca79ac56d6b471d3255f0ae1df48f9a77b425dfa')
+
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -137,11 +149,18 @@ def _validate_evidence(host_root: Path, manifest, producer, consumer, validator_
     if any(csrc.get(key) != digest for key, digest in validator_digests.items()):
         raise ValueError('XP1 current input validator changed')
     changed = {key for key in expected_validators if psrc.get(key) != csrc.get(key)}
-    if changed != set(SOURCE_PAIRS):
-        raise ValueError('XP1 prepared-reader changes exceed the six reviewed source pairs')
-    for key, (old, current) in SOURCE_PAIRS.items():
+    pairs = SOURCE_PAIRS
+    if all(csrc.get(key) == current for key, (_, current) in FOLLOWUP_PAIRS.items()):
+        pairs = {**SOURCE_PAIRS, **FOLLOWUP_PAIRS}
+        cache = 'runtime/native/native_source_cache.py'
+        if csrc.get(cache) == SOURCE_CACHE_PAIR[1]:
+            pairs[cache] = SOURCE_CACHE_PAIR
+    if changed != set(pairs):
+        raise ValueError('XP1 prepared-reader changes exceed the reviewed source pairs')
+    for key, (old, current) in pairs.items():
         if psrc.get(key) != old or csrc.get(key) != current:
             raise ValueError('XP1 prepared-reader source pair changed: ' + key)
+    return len(pairs)
 
 
 def admit_retained_package(*, producer, consumer, manifest, reference, validator_digests):
@@ -174,14 +193,14 @@ def admit_retained_package(*, producer, consumer, manifest, reference, validator
         raise ValueError('XP1 official origin manifest changed')
 
     host_root = Path(__file__).resolve().parents[3]
-    _validate_evidence(host_root, manifest, producer, consumer, validator_digests)
+    reviewed_pairs = _validate_evidence(host_root, manifest, producer, consumer, validator_digests)
     return dict(
         transition='xp1_retained_prepared_package_legacy_reader_v1',
         producer_identity_sha256=PRODUCER_IDENTITY_SHA256,
         consumer_identity_sha256=_identity_sha(consumer),
         package=dict(path=str(actual_path), sha256=PACKAGE_SHA256),
         origin=dict(path=ORIGIN_RELATIVE, sha256=ORIGIN_SHA256),
-        reviewed_source_pairs=len(SOURCE_PAIRS),
+        reviewed_source_pairs=reviewed_pairs,
         components_byte_equal=6,
         selected_script_paths=0,
         legacy_database_schema='civ6rl.database_capture_bundle993.v1',

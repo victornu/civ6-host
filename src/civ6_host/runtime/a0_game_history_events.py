@@ -16,6 +16,9 @@ def _selected(kind, core_sha256=XP1_CORE_SHA256):
     elif core_sha256 == XP2_CORE_SHA256:
         from . import xp2_history_event_profile as xp2
         xp2.source()
+        if kind == xp2.PROPERTY_KIND:
+            xp2.property_source()
+            return xp2.PROPERTY_SPEC, xp2.PROPERTY_SOURCE[1]
         if kind in xp2.AGE_EVENTS:
             xp2.age_source()
             return xp2.AGE_EVENTS[kind], xp2.AGE_SOURCE[1]
@@ -67,7 +70,13 @@ def encode(kind, fields, sequence, *, normalizer_transform_present,
         struct.pack_into('<I', result, 0, len(result))
         struct.pack_into('<HHIII', result, 88, descriptor.owner, 2, descriptor.item_id, *values)
         return bytes(result)
-    if core_sha256 == XP2_CORE_SHA256 and record in (0x107, 0x108):
+    if core_sha256 == XP2_CORE_SHA256 and record == 0x106:
+        row.update(callback_shape_group='one_value_two_key', payload_value_count=0)
+        selector, _ = _decode_profile_fields(row, fields)
+        # The callback does not read the property hash from the descriptor.
+        # The writer's undefined DWORD at 84 stays zero in the owned empty row.
+        values = ()
+    elif core_sha256 == XP2_CORE_SHA256 and record in (0x107, 0x108):
         row.update(callback_shape_group='one_value_two_key', payload_value_count=1)
         selector, *values = _decode_profile_fields(row, fields)
     elif core_sha256==XP2_CORE_SHA256 and kind==0x788b7534:

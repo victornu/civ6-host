@@ -7,10 +7,13 @@ selected script. Disk bytes and retained list headers are not execution proof.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from .capture_profiles import CapturedModeProfile
-from .gameplay_active_profiles import XP2_CORE_SHA256, expansion_profile
+from .gameplay_active_profiles import (
+    CURRENT_XP2_CORE_SHA256, XP2_CORE_SHA256, expansion_profile,
+)
 
 
 REFERENCE = (
@@ -19,6 +22,8 @@ REFERENCE = (
 )
 XP2_LAN_PROFILE = CapturedModeProfile('xp2-lan-official-capture-inputs', 'LAN')
 RULESET = 'RULESET_EXPANSION_2'
+CURRENT_EXE_SHA256 = 'd1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe'
+CURRENT_EXECUTION_PROFILE_ID = 'xp2-gamecore-current-092abfbb'
 SELECTED_PATHS = ('../../../DLC/Expansion2/Scripts/WorldCongress.lua',)
 SCRIPT_SHA256 = '26a2eeac85f64a13aed985f9d11ae3ac26c51b6abe50f0e5a89ded63e439c032'
 SCRIPT_BYTES = 17340
@@ -75,8 +80,46 @@ def validate_reference(reference):
         raise ValueError('XP2 inputs require the exact retained official capture')
 
 
-def validate_process(process):
+def verify_current_execution_image(execution_image, *, core_path=None):
+    """Verify the one registered current Core profile mapped to the XP2 ABI."""
+    from .execution_images import from_identity, identity, verify
+
+    try:
+        selected = from_identity(identity(execution_image))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Current XP2 requires its canonical execution-image profile') from exc
+    if (selected.id != CURRENT_EXECUTION_PROFILE_ID
+            or selected.image_sha256 != CURRENT_XP2_CORE_SHA256
+            or selected.reference_core_sha256 != XP2_CORE_SHA256):
+        raise ValueError('Current XP2 execution profile does not map to the pinned XP2 ABI')
+    if core_path is not None:
+        if type(core_path) is not str or not core_path:
+            raise ValueError('Current XP2 process lacks its exact GameCore path')
+        actual = os.path.normcase(os.path.normpath(core_path))
+        expected = os.path.normcase(os.path.normpath(selected.path))
+        if actual != expected:
+            raise ValueError('Current XP2 process GameCore path differs from the execution profile')
+    verification = verify(selected)
+    if (verification.profile_id != selected.id
+            or verification.image_sha256 != CURRENT_XP2_CORE_SHA256
+            or verification.reference_core_sha256 != XP2_CORE_SHA256
+            or verification.executable is not True
+            or verification.native_execution_performed):
+        raise ValueError('Current XP2 execution-image evidence is incomplete')
+    return selected
+
+
+def validate_process(process, *, execution_image=None):
     from .native.official_application_configuration import EXE_SHA256
+    if execution_image is not None:
+        if (type(process) is not dict
+                or process.get('exe_sha256') != CURRENT_EXE_SHA256
+                or type(process.get('gamecore_module')) is not dict
+                or process['gamecore_module'].get('sha256') != CURRENT_XP2_CORE_SHA256):
+            raise ValueError('Current XP2 input requires the exact current EXE and GameCore')
+        selected = verify_current_execution_image(
+            execution_image, core_path=process['gamecore_module'].get('path'))
+        return selected.image_sha256
     if (type(process) is not dict or process.get('exe_sha256') != EXE_SHA256
             or type(process.get('gamecore_module')) is not dict
             or process['gamecore_module'].get('sha256') != XP2_CORE_SHA256):
@@ -113,6 +156,11 @@ def validate_candidate_inputs(inputs, bundle):
     _, maps = parse_configuration(inputs.configuration, 'LAN')
     if inputs.map_values != maps:
         raise ValueError('XP2 candidate map configuration differs')
+    if bundle.execution_image is not None:
+        selected = verify_current_execution_image(bundle.execution_image,
+                                                   core_path=str(bundle.engine_path))
+        if selected.reference_core_sha256 != XP2_CORE_SHA256:
+            raise ValueError('XP2 candidate selected another source ABI')
     if (bundle.content_profile['engine']['gamecore_sha256'] != XP2_CORE_SHA256
             or tuple(bundle.expected_readback[k] for k in ('turn', 'width', 'height', 'player_id'))
                != (bundle.initial_turn, 44, 26, 0)):

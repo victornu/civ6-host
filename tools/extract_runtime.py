@@ -732,16 +732,46 @@ def parameterize_aux_maps(name, raw):
 
 
 def prepare_tree(name, raw):
+    if name == 'civ6rl.native_saved_session':
+        before = '            for pipe in (process.stdin,process.stdout,process.stderr):pipe.close()'
+        after = '''            from civ6_host.runtime.supervisor_cleanup import close_reaped_process_pipes
+            pipe_cleanup_errors = close_reaped_process_pipes(process)
+            if pipe_cleanup_errors and self.error is None:
+                self.error = 'Native pipe cleanup failed: ' + repr(pipe_cleanup_errors)
+                self.stop_reason = self.stop_reason or 'pipe_cleanup_failed' '''.rstrip()
+        if raw.count(before) != 1:
+            raise ValueError('Saved session pipe cleanup boundary changed')
+        raw = raw.replace('        job_assigned=self.job is not None',
+                          '        pipe_cleanup_errors = []\n        job_assigned=self.job is not None', 1)
+        raw = raw.replace(before, after, 1)
+        before = "        write_json(self.run/'supervisor.json',self.report);self.finished=True"
+        if raw.count(before) != 1:
+            raise ValueError('Saved session cleanup receipt boundary changed')
+        raw = raw.replace(before, "        self.report['pipe_cleanup_errors'] = pipe_cleanup_errors\n" + before, 1)
     if name=='civ6rl.native_script_arguments':
         before='def argument_evidence(arguments):'
         if raw.count(before)!=1:raise ValueError('Script argument evidence boundary changed')
         raw=raw.replace(before,before+'''
     arguments = tuple(arguments)
+    from civ6_host.runtime.script_event_strings import has_strings, argument_evidence as string_evidence
+    if has_strings(arguments):
+        return string_evidence(arguments)
     from civ6_host.runtime.script_event_maps import has_maps, argument_evidence as map_evidence
     if has_maps(arguments):
         return map_evidence(arguments)
 ''')
     if name=='civ6rl.native_script_runtime':
+        argument_boundary = '        arguments=tuple(arguments)\n        from .native_script_arguments import HKSArgument, pack_arguments'
+        if raw.count(argument_boundary) != 2:
+            raise ValueError('Protected event string dispatch boundary changed')
+        prefix = '        arguments=tuple(arguments)\n        from civ6_host.runtime.script_event_strings import has_strings, dispatch_strings\n'
+        raw = raw.replace(argument_boundary, prefix + '''        if has_strings(arguments):
+            valid, output = dispatch_strings(self, name, arguments, method='Call', output_initial=0)
+            return bool(output) if valid else False
+        from .native_script_arguments import HKSArgument, pack_arguments''', 1)
+        raw = raw.replace(argument_boundary, prefix + '''        if has_strings(arguments):
+            return dispatch_strings(self, name, arguments, method=method, output_initial=output_initial)
+        from .native_script_arguments import HKSArgument, pack_arguments''', 1)
         # Retain scalar-only exports and their results. Explicit map payloads
         # opt into a new native export using the same protected dispatcher.
         before='''        data=pack_arguments(arguments)
@@ -1594,6 +1624,9 @@ def main():
     prior_map_path=target/'source-map.json'
     prior_map=json.loads(prior_map_path.read_text(encoding='utf-8')) if prior_map_path.is_file() else {}
     maintained_overlays = {
+        'civ6rl.native_policy_catalog': (
+            'host-maintained explicit opt-in active-policy relocation parser; legacy defaults unchanged',
+            '1a1ccd4a1cd2ee51b4c56cddd621a6e583e070b0ee4af9ebb46710080115533e'),
         'civ6rl.native_event_e660_building_pillaged': (
             'host-maintained pinned snapshot archive and transitive codec source dependencies',
             '3c656c627e6b9f795d4ae926634e0f32373008b7096f4c9e5a300829221deb9d'),
@@ -2136,6 +2169,10 @@ def main():
                 'from civ6_host.contracts.policies import choose, validate_slots\n')
                 + text[parser:chooser]).rstrip() + '\n'
             transformations.append('policy assignment validation shared with the portable client')
+        from extraction_player_operations import parameterize as player_operations, MODULE as PLAYER_OPERATION_MODULE, LABEL as PLAYER_OPERATION_LABEL
+        text=player_operations(name,text)
+        if name == PLAYER_OPERATION_MODULE:
+            transformations.append(PLAYER_OPERATION_LABEL)
         mapped=remap(name)
         dest=repo/'src'/Path(*mapped.split('.')).with_suffix('.py')
         if name in maintained_overlays:

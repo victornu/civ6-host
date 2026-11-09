@@ -26,9 +26,14 @@ def install(backend):
             or host.achievement_service_installed is not False):
         raise ValueError('XP2 optional achievement service requires its exclusive prepared owner')
     require_prepared_owner(backend)
-    source.source_dependencies()
-    live = source.verify_live(backend.core._handle, backend.runtime.read,
-                              host_pointer=host.pointer)
+    core, runtime = backend.core, backend.runtime
+    execution_image = getattr(core, '_civ6_host_execution_image', None)
+    options = {'execution_image': execution_image} if execution_image is not None else {}
+    image_fields = ({'execution_image_sha256': execution_image.image_sha256}
+                    if execution_image is not None else {})
+    source.source_dependencies(**options)
+    live = source.verify_live(core._handle, runtime.read,
+                              host_pointer=host.pointer, **options)
     previous = host._slot_bindings.get((C.addressof(host.vtable), 0x20))
     if (previous is None or previous[0] != host.vtable[0x20 // 8]
             or getattr(previous[1], '_native_unavailable', None) != ('host', 0x20)):
@@ -37,14 +42,16 @@ def install(backend):
     def absent_service(this):
         backend.check_thread()
         host._check(this)
-        if (backend.host is not host or backend.destroyed or backend.poisoned
+        if (backend.host is not host or backend.core is not core or backend.runtime is not runtime
+                or getattr(core, '_civ6_host_execution_image', None) is not execution_image
+                or backend.destroyed or backend.poisoned
                 or backend.load_abi.core_sha256 != XP2_CORE_SHA256
                 or host.achievement_service_installed is not False):
             raise ValueError('XP2 optional achievement owner changed')
         frames = capture_stack()
         proof_sha256 = source.select_contract(frames,
-            service_installed=host.achievement_service_installed)
-        backend.emit('native_optional_achievement_service_absent', slot='0x20',
+            service_installed=host.achievement_service_installed, **options)
+        backend.emit('native_optional_achievement_service_absent', slot='0x20', **image_fields,
             core_sha256=XP2_CORE_SHA256, native_stack=frames,
             native_null_branch_used=True, platform_service_installed=False,
             platform_request_submitted=False, platform_success_reported=False,
@@ -53,7 +60,7 @@ def install(backend):
         return None
 
     host._bind(host.vtable, 0x20, C.c_void_p, [C.c_void_p], absent_service)
-    receipt = dict(core_sha256=XP2_CORE_SHA256, source_sha256=source.SOURCE[1],
+    receipt = dict(core_sha256=XP2_CORE_SHA256, source_sha256=source.SOURCE[1], **image_fields,
         slot='0x20', callback_pointer=host.vtable[0x20 // 8],
         source_verification=live, platform_service_installed=False,
         platform_success_reported=False, unknown_service_fallback=False,

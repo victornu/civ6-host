@@ -15,6 +15,12 @@ SOURCE = ('work/host-extensions/xp2-game-history-static/source-profile-v1.json',
 HISTORY_KIND = 0x4710f1a4
 ERA_KIND = 0xf50673b7
 ERA_SCORE_KIND = 0x788b7534
+PROPERTY_KIND = 0x4082a91e
+PROPERTY_SPEC = (0x106, 0, 0x147400, 0x11f8e0, 0xc5f20, 0xd4d50)
+PROPERTY_SOURCE = ('evidence/host-xp2-game-property-notification-source.json',
+                   '3c36a772ea6477dbdf8e5917eb07024261174807c3aea7b61ee7bbcf6cf7e4c9')
+PROPERTY_PRODUCER = ('evidence/host-bbg751-native-turn-property-prefix.json',
+                     'a925e0b80f2f3f0e5c6e858663c58cc3887ee994afcab41560c8264f4d53609c')
 TURN21_KIND = 0xa47d34e3
 TURN21_SPEC = (0x10b, 6, 0x14b9d0, 0x120200, 0xc62e0, 0xd4f30)
 TURN21_SOURCE = ('work/host-extensions/xp2-game-history-static/turn21-event-source.json',
@@ -65,6 +71,54 @@ SECOND_VALUE_KEY = 0xA1FBC372
 
 def _rows(body):
     return [row for fragment in body.get('fragments', ()) for row in fragment['instructions']]
+
+
+@lru_cache(maxsize=1)
+def property_source():
+    from .native.native_host_event_registry import EXE_EVENT_CALLBACKS
+    proof, producer = (_source(ref) for ref in (PROPERTY_SOURCE, PROPERTY_PRODUCER))
+    record, flag, callback, writer, setup, handler = PROPERTY_SPEC
+    receiver = proof['receiver']
+    if (proof['schema'] != 'civ6-host.xp2-game-property-notification.static.v1'
+            or proof['images'] != dict(core_sha256=XP2_CORE_SHA256, exe_sha256=EXE_SHA256)
+            or tuple(proof['previous_live_refusal'][k] for k in ('path', 'sha256')) != PROPERTY_PRODUCER
+            or proof['kind'] != hex(PROPERTY_KIND) or EXE_EVENT_CALLBACKS.get(PROPERTY_KIND) != callback
+            or receiver['event_name'] != 'GameCoreEvent::GamePropertyChanged'
+            or receiver['handler_va'] != hex(0x140000000 + handler)
+            or receiver['initializer'][-1]['text'] != f'call {0x140000000 + setup:#x}'
+            or int(receiver['row_va'], 16) - int(receiver['table_base'], 16) != record * 48
+            or receiver['initialized'] != dict(pre_hook=None, post_hook=None, subscriber_count=0, flags_mask3=0)
+            or proof['shape'] != dict(record_type=record, size=96, header_and_payload_sequence=True,
+                                      payload_undefined_ranges=((84, 88),), metadata_flag=flag)):
+        raise ValueError('XP2 property notification source identity differs')
+    windows = producer['stopped_at']['source_windows']
+    callback_rows = {r['text'] for r in windows['exe']['registered_callback']['instructions']}
+    writer_rows = {r['text'] for r in windows['exe']['queue_writer']['instructions']}
+    if (not {f'call {0x140000000 + writer:#x}', 'mov dword ptr [rsp + 0x38], 0',
+             'cmp dword ptr [rdx], 0x6447c33d'} <= callback_rows
+            or not {f'mov dword ptr [rbx + 4], {record:#x}', 'mov dword ptr [rbx], 0x60',
+                    'lea rax, [rbx + 0x50]', 'mov dword ptr [rax], edi'} <= writer_rows
+            or [r['text'] for r in _rows(proof['bodies']['handler']) if r['text'].startswith('call ')]
+            != ['call 0x14098a780', 'call 0x1400dc0d0', 'call 0x14098a7b0']):
+        raise ValueError('XP2 property notification writer or receiver differs')
+    return proof, windows['xp2']
+
+
+def property_receiver_row():
+    proof, _ = property_source()
+    return dict(event_name=proof['receiver']['event_name'], handler_va=proof['receiver']['handler_va'],
+                record_sizes={96}, handler_body_sha256=proof['bodies']['handler']['code_sha256'],
+                source_sha256=PROPERTY_SOURCE[1])
+
+
+def property_core_fragments():
+    proof, windows = property_source()
+    for name in proof['original_producer_windows']:
+        window = windows[name]
+        raw = b''.join(bytes.fromhex(r['bytes']) for r in window['instructions'])
+        if hashlib.sha256(raw).hexdigest() != window['sha256']:
+            raise ValueError('XP2 property producer fragment differs')
+        yield int(window['start'], 16), raw
 
 
 def _ordered_subsequence(actual, expected):
@@ -383,7 +437,7 @@ def age_core_fragments():
         yield body['rva'], raw
 
 
-def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP2_CORE_SHA256, execution_image=None):
     if core_sha256 != XP2_CORE_SHA256:
         if core_sha256 == XP1_CORE_SHA256:
             return {}
@@ -392,13 +446,15 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     p = source()
+    property_source()
     turn21_source()
     age_source()
     primary, _, _ = turn21_scalar_sources()
     for kind in DESCRIPTOR_EVENTS:
         descriptor_sources(kind)
     refs = [dict(path=path, sha256=digest)
-            for path, digest in (SOURCE, AGE_SOURCE, TURN21_SOURCE, TURN21_RECEIVER, *TURN21_SCALAR_SOURCES,
+            for path, digest in (SOURCE, AGE_SOURCE, PROPERTY_SOURCE, PROPERTY_PRODUCER,
+                                 TURN21_SOURCE, TURN21_RECEIVER, *TURN21_SCALAR_SOURCES,
                                  *TURN21_DESCRIPTOR_SOURCES, *TURN26_DESCRIPTOR_SOURCES)]
     from .native.native_city_descriptor_events import NORMALIZER_PROOF_SHA256
     refs.append(dict(path=f'evidence/native-event-99e85ec6/{NORMALIZER_PROOF_SHA256}.json',
@@ -418,7 +474,8 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
     from .game_era_score_event_profile import source_dependencies as score_dependencies
     from .native.native_two_value_event_family import (
         MISSING_B_PROOF_SHA256, _MISSING_B_PROOF_PATH)
-    for group in (history_dependencies(), score_dependencies(),
+    for group in (history_dependencies(execution_image=execution_image),
+                  score_dependencies(execution_image=execution_image),
                   {str(_MISSING_B_PROOF_PATH.resolve()): MISSING_B_PROOF_SHA256}):
         for path, sha in group.items():
             if path in pins and pins[path] != sha:
@@ -428,11 +485,11 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256):
     return pins
 
 
-def event_profile(*, core_sha256):
+def event_profile(*, core_sha256, execution_image=None):
     if core_sha256 != XP2_CORE_SHA256:
         raise ValueError('XP2 history event profile requires the exact XP2 Core')
     p = source()
-    source_dependencies()
+    source_dependencies(core_sha256=core_sha256,execution_image=execution_image)
     from .a0_family_source import A0FamilyProfile
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     from . import game_history_event_profile as history
@@ -442,9 +499,11 @@ def event_profile(*, core_sha256):
         ERA_KIND: frozenset((0x104,)),
         ERA_SCORE_KIND: frozenset((0x10a,)),
         TURN21_KIND: frozenset((0x10b,)),
+        PROPERTY_KIND: frozenset((PROPERTY_SPEC[0],)),
     }
-    sizes = {0x105: 96, 0x104: 96, 0x10a: 96, 0x10b: 96}
+    sizes = {0x105: 96, 0x104: 96, 0x10a: 96, 0x10b: 96, PROPERTY_SPEC[0]: 96}
     common_rows = history.receiver_rows()
+    common_rows[PROPERTY_SPEC[0]] = property_receiver_row()
     common_rows.update(age_receiver_rows())
     for kind, (record, _) in AGE_EVENTS.items():
         mapping[kind] = frozenset((record,))
@@ -502,4 +561,7 @@ def bind_owner(backend, core, read):
     for rva, raw in age_core_fragments():
         if read(core._handle + rva, len(raw)) != raw:
             raise ValueError('XP2 age notification producer live bytes changed')
+    for rva, raw in property_core_fragments():
+        if read(core._handle + rva, len(raw)) != raw:
+            raise ValueError('XP2 property notification producer live bytes changed')
     return SOURCE[1]

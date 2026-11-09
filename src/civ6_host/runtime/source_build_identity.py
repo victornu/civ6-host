@@ -12,6 +12,32 @@ from .resource_resolution import resolve_path
 XP2_HOST_COMPONENT_SHA='268a43bc7e06b383adfa13d2c084d2d7966ca8ffc9782044a0103ca36967f4f7'
 
 SOURCE_BUILDS = {
+    '106018516854f1e28d34814f24e08d3834eee0272f143b3daba0d4a5c571bc5e': {'reference': ('work/native-host-xp2-current-strings-build01/build.json', '391f78fcb31aff04b3c552122fb1143e3380fdca94ad6bbdb639ffbf63d50fa3'), 'manifest_sha256': '7e67158f208f19cd9d29c36ce940a8c6082096ae750bf925884a63ce51f7b303', 'profile': 'xp2-current-strings-source-v1', 'local_components_sha256': '3395536556c736fc598c0f012097a47cb8406ddc816487b2c412bc0b99e42127'},
+    'c8fa420876ffbdaafaf4df82dfe4ad72187ceb146995afb65f98f5242267e52f': {'reference': ('work/native-host-xp2-current-havok-build01/build.json', '4df115a7abcc3a6906730b7febed4735ca381cfb685d648d04ad9c451808d175'), 'manifest_sha256': '502731d5db3592d62391b7d2b5eeadc1706ac45eee8ffe1e84b8dd38e618fe4d', 'profile': 'xp2-bbg-current-havok-201979', 'local_components_sha256': '5dd9276167f97a115f68db71681ccaebd4f6e26bca36af682af6a825bb564292'},
+    '61953897b696b45a7998126392f5759c7b34ed045551ff7d597ffa3eaa2fafda': {
+        'reference': ('work/native-host-xp2-bbg-ui-build03/build.json',
+                      '0c01abf9c1afc8db20a25cfdc5c1ce54151fd20bb7ac3512f94417679132bd11'),
+        'manifest_sha256': '4ede5cab72b03ba0261f4e0275df48bf99fc3501af6053666b651cb3ff6374d3',
+        'profile': 'xp2-bbg-private-property-table',
+    },
+    '01e6cd9c49af96cc3f1a58aac5f111722cdf02e037916d7de811b005a461ea6f': {
+        'reference': ('work/native-host-xp2-bbg-ui-build02/build.json',
+                      '2e28a78751556086e7e3de97d76ad2b5b93634adab18bd52db1dd6ad325139ce'),
+        'manifest_sha256': '07300f3d5bc052a8eb593751bc11cc3c2261b422e2f1a8f08786a466d4eabc8e',
+        'profile': 'xp2-bbg-private-property-table',
+    },
+    '383bbbdbe57f3ccb453c2584faf98476659c180035a597ae70c8ce5ea78c8da5': {
+        'reference': ('work/native-host-xp2-bbg-ui-build01/build.json',
+                      'aa7ea06faa37b301bdad69b7909f641f3354035d567186728aceb4a13c70358b'),
+        'manifest_sha256': '6b17c31d97eaab204b4a29a8af997e7cf7e61a66ce14d1454738987de1ac8bc5',
+        'profile': 'xp2-bbg-private-property-table',
+    },
+    '99d0847958bf641266b3f352983122b27defa005f729cc644db773cdc5ca88ca': {
+        'reference': ('work/native-host-xp2-bbg-build01/build.json',
+                      '25245e947039f4a7573cc3c9174341402cf401a467c284a8f65b2b445dbd3bca'),
+        'manifest_sha256': 'e67a75ce5c7512ebbc725840cb6925484183acd598d05dee9d561c3b75396e02',
+        'profile': 'xp2-bbg-private-property-table',
+    },
     'a3d977a4aa09d3f4f88a393f59e32f5a34d12d79db48606c39c4b9e09994f799': {
         'reference': ('work/native-host-xp2-ui-build01/build.json',
                       '8c3a8ebdf2212362f633f987b281a767f7b8db79f999d151ff355bf59f95fac2'),
@@ -110,3 +136,52 @@ def verify_source_build(executable, *, required_components):
                 source_manifest_sha256=selected['manifest_sha256'],
                 profile=selected['profile'],sources=sources,
                 executable_path=str(path),native_compatibility_claimed=False)
+
+
+# This reviewed derived host changes typed Havok export guards only. These
+# are distinct actual source hashes, not aliases for historical components.
+CURRENT_HAVOK_HOST_REFERENCE = ('work/native-host-xp2-current-havok-build01/civ6rl-native-python.exe', 'c8fa420876ffbdaafaf4df82dfe4ad72187ceb146995afb65f98f5242267e52f')
+CURRENT_HAVOK_BUILD_PROFILE = 'xp2-bbg-current-havok-201979'
+_CURRENT_HAVOK_COMPONENT_TRANSITION = {'script_game_event_aggregators.inc': ('c9c385462d83ba35b5f23898d310ba3f437313aedeb56dd125f1d8c6b8e375e7', '62ada8288b9bc96689364730e10330b094e13dfca915839caa49e8e6da5b1bb9'), 'gamecore_python_host.c': ('268a43bc7e06b383adfa13d2c084d2d7966ca8ffc9782044a0103ca36967f4f7', '10ea12fc6159a3556ef46af734b113dde8022dfd725191e417fc50f948978c73'), 'script_game_event_result_map.inc': ('b90214047bf68869cfd13c214d7791c2fc6df5c2c61a7fef1106468bc1a65edd', '33f26c314f65b43e51c1172d2489582e1f0cc15863625481f356da396a619e3e'), 'script_aux_b8.inc': ('4dbb70603b94ba654f074e37968fa92e1c42e2991d97e5dd200b200cb10e1771', '5e3958f0725874f8de7585ea6711b0b5723d0769567d880cea02c8724553eea5')}
+
+# An explicit derived composition adds copied string arguments; retained hosts
+# keep their own source transition and are never relabelled as this build.
+CURRENT_STRINGS_HOST_REFERENCE = ('work/native-host-xp2-current-strings-build01/civ6rl-native-python.exe', '106018516854f1e28d34814f24e08d3834eee0272f143b3daba0d4a5c571bc5e')
+CURRENT_STRINGS_BUILD_PROFILE = 'xp2-current-strings-source-v1'
+_CURRENT_STRINGS_COMPONENT_TRANSITION = {
+    **_CURRENT_HAVOK_COMPONENT_TRANSITION,
+    'script_game_event_dispatch_legacy.inc': ('6c666a6f5e8d0702c47f3ed3a5f6ca66037eccb8963ce394b61777e9bf49d73b', '34b1949f2383b776cc59ebfedabeadd5ddb2a3510348505e1e16bb0395093fd0'),
+    'script_game_event_result_map.inc': ('b90214047bf68869cfd13c214d7791c2fc6df5c2c61a7fef1106468bc1a65edd', 'ab7fa2c648238f8b3f6c1eb2ea53897ecfe718df045625788889d2bc29610c1e'),
+}
+
+
+def _xp2_source_component_transitions(host_sha256):
+    if host_sha256 == CURRENT_STRINGS_HOST_REFERENCE[1]:
+        return _CURRENT_STRINGS_COMPONENT_TRANSITION
+    if host_sha256 == CURRENT_HAVOK_HOST_REFERENCE[1]:
+        return _CURRENT_HAVOK_COMPONENT_TRANSITION
+    return {}
+
+
+def xp2_component_requirements(executable, requirements):
+    """Select actual component pins for this explicitly registered host build."""
+    expected = dict(requirements)
+    path = Path(executable).resolve(strict=True)
+    with path.open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    for name, (historical, current) in _xp2_source_component_transitions(digest).items():
+        if name in expected:
+            if expected[name] not in (historical, current):
+                raise ValueError('Selected XP2 host has no transition for component '+name)
+            expected[name] = current
+    return expected
+
+
+def xp2_source_component(build, name, reference_sha256):
+    """Return the actual pin of one component in its reviewed source build."""
+    pair = _xp2_source_component_transitions(build.get('host_sha256')).get(name)
+    if pair is not None:
+        if reference_sha256 not in pair:
+            raise ValueError('No reviewed source transition for '+name)
+        return pair[1]
+    return reference_sha256

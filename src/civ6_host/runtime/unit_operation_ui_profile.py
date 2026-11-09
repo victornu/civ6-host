@@ -41,12 +41,14 @@ def source(root: Path | None = None, *, core_sha256=CORE_SHA256):
     return proof
 
 
-def source_dependencies(root: Path | None = None, *, core_sha256=CORE_SHA256):
+def source_dependencies(root: Path | None = None, *, core_sha256=CORE_SHA256, execution_image=None):
     if core_sha256 == XP2_CORE_SHA256:
         from .xp2_action_transport_source import source_dependencies as selected
-        return selected(root)
+        return selected(root, execution_image=execution_image)
     if core_sha256 != CORE_SHA256:
         raise ValueError('Unknown unit-operation source engine')
+    if execution_image is not None:
+        raise ValueError('XP1 unit-operation source does not accept an XP2 execution image')
     if root is None:
         from civ6_host.runtime.provenance import resource_root
         root = resource_root()

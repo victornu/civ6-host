@@ -4,6 +4,7 @@ This owns only source/build selection, never a second loader or game lifecycle.
 """
 import hashlib
 from .paths import resource_root
+from .source_verification import file_sha256
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
@@ -11,7 +12,7 @@ XP2_UI_HOST = ('work/native-host-xp2-ui-build01/civ6rl-native-python.exe',
                'a3d977a4aa09d3f4f88a393f59e32f5a34d12d79db48606c39c4b9e09994f799')
 
 
-def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False):
+def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False,official_bundle=None,execution_image=None):
     """Pin the exact private sources consumed by this raw XP2 service graph."""
     from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256, _source
     from civ6_host.runtime.resource_resolution import resolve_path
@@ -27,11 +28,17 @@ def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False)
         path=resolve_path(resource_root()/path).resolve(strict=True);name=str(path)
         if (type(expected) is not str or len(expected)!=64
                 or name in pins and pins[name]!=expected
-                or digest(path.read_bytes())!=expected):
+                or file_sha256(path)!=expected):
             raise ValueError('XP2 saved Load source dependency differs: '+name)
         pins[name]=expected
     if (type(postload160) is not bool or type(observe_player) is not bool
             or observe_player and not postload160):raise ValueError('Exact XP2 dependency scope required')
+    from . import xp2_bbg_inputs as bbg
+    bbg_capture=bbg.is_reference(official_bundle)
+    stock_current=False
+    if execution_image is not None and not bbg_capture:
+        from .capture_admission import _stock_xp2_execution
+        stock_current=_stock_xp2_execution(execution_image,origin=official_bundle)
     for path, expected in (a0_xp2_victory_source.SOURCE, a0_xp2_victory_source.COMPARISON):
         add(path, expected)
     for selected in (xp2_configuration_profile.source_dependencies(),
@@ -40,8 +47,9 @@ def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False)
             xp1_load_capability.source_dependencies(XP2_CORE_SHA256),
             xp1_load_options.source_dependencies(XP2_CORE_SHA256),
             xp1_saved_load_logger.source_dependencies(XP2_CORE_SHA256),
-            xp1_loaded_lifetime.source_dependencies(XP2_CORE_SHA256,postload=postload160),
-            cache_update_profiles.source_pins(),a0_notification_scope_source.source_dependencies(),
+            xp1_loaded_lifetime.source_dependencies(XP2_CORE_SHA256,postload=postload160,
+                execution_image=execution_image),
+            cache_update_profiles.source_pins(),a0_notification_scope_source.source_dependencies(execution_image=execution_image),
             script_binding_profiles.source_dependencies(XP2_CORE_SHA256),
             application_mirror_profiles.source_dependencies(XP2_CORE_SHA256),
             a0_controller_source.source_pins()):
@@ -69,13 +77,15 @@ def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False)
     if observe_player:
         from civ6_host.runtime.xp1_ui_binding import source_dependencies as ui_dependencies
         for path,expected in ui_dependencies(core_sha256=XP2_CORE_SHA256).items():add(path,expected)
-        from civ6_host.runtime.source_build_identity import verify_source_build
+        from civ6_host.runtime.source_build_identity import verify_source_build, xp2_component_requirements
         from civ6_host.runtime.xp2_ui_binding_source import UI_COMPONENT_SHA
-        executable=resource_root()/XP2_UI_HOST[0]
-        if digest(executable.read_bytes())!=XP2_UI_HOST[1]:raise ValueError('XP2 UI host changed')
-        build=verify_source_build(executable,required_components={
+        host = (bbg.selected_ui_host(execution_image)
+                if bbg_capture or stock_current else XP2_UI_HOST)
+        executable=resource_root()/host[0]
+        if file_sha256(executable)!=host[1]:raise ValueError('XP2 UI host changed')
+        build=verify_source_build(executable,required_components=xp2_component_requirements(executable, {
             'gamecore_python_host.c':saved_load_job_observer.XP2_HOST_COMPONENT_SHA,
-            'script_core_ui_binding_profiles.inc':UI_COMPONENT_SHA})
+            'script_core_ui_binding_profiles.inc':UI_COMPONENT_SHA}))
         for name,expected in build['build_dependencies'].items():add(name,expected)
     return dict(sorted(pins.items()))
 

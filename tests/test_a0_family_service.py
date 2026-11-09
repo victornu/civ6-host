@@ -193,8 +193,16 @@ class A0FamilyServiceTests(unittest.TestCase):
 
     def test_extracted_embarked_helper_keeps_historical_record_and_poison_rules(self):
         from civ6_host.runtime.native import native_event_84c1fdd6 as event
-        f=retained_module('test_native_event_84c1fdd6')
-        h,d,a,c,r,_,_=self.fixture();fields,memory,read,reads,_=f.fixture()
+        # Reuse the pinned witness as data. A worker may already have enabled
+        # the installed-host boundary; never execute private lab Python here.
+        proof=event.verify_source_evidence()
+        fields={int(k,16):bytes.fromhex(v) for k,v in proof['witness']['fields'].items()}
+        unit=struct.unpack_from('<Q',fields[event.UNIT_KEY],8)[0]
+        memory={unit:bytes.fromhex(proof['witness']['f054_pointer_bytes'])}
+        def read(pointer,size):
+            if pointer not in memory:raise AssertionError('unexpected native-memory read')
+            return memory[pointer][:size]
+        h,d,a,c,r,_,_=self.fixture()
         r.fields.return_value=fields;r.read.side_effect=read
         self.assertEqual(a.dispatch(h.pointer,event.EVENT_KIND,0x8000),0)
         self.assertFalse(c._84c1fdd6_poisoned);self.assertEqual(d.drain(),1)

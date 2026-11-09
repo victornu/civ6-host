@@ -81,13 +81,24 @@ def decode_found_city_fields(fields: dict[int, bytes], read) -> dict[str, int | 
     _identity(result)
     return result
 
-def unit_query_contract(*, core_sha256=PINNED_CORE_SHA256) -> dict:
+def _query_source_identity(core_sha256, execution_image):
+    if execution_image is None:
+        return core_sha256
+    reference = getattr(execution_image, 'reference_core_sha256', None)
+    if (not isinstance(reference, str) or len(reference) != 64
+            or core_sha256 not in (PINNED_CORE_SHA256, reference)):
+        raise ValueError('FoundUnit query source ABI differs from its selected execution image')
+    return reference
+
+
+def unit_query_contract(*, core_sha256=PINNED_CORE_SHA256, execution_image=None) -> dict:
     """Return the statically verified query route; performs no native calls."""
     from civ6_host.runtime.found_unit_event_profiles import query_abi
-    abi = query_abi(core_sha256)
+    core_sha256 = _query_source_identity(core_sha256, execution_image)
+    abi = query_abi(core_sha256, execution_image=execution_image)
     return {'exe_unit_lookup_va': 5370052656, 'core_unit_vtable_va': 6442450944 + abi.tables['unit'][0], 'core_unit_slots': dict(abi.tables['unit'][1]), 'selector_gate': SELECTOR, 'parameter_keys': PARAMETER_KEYS, 'parameter_container_exe_ctor_va': 5376722080, 'parameter_container_exe_dtor_va': 5376722368, 'parameter_lookup_exe_va': 5376726528, 'native_b0_query_implemented': True, 'core_parameter_ctor_rva': abi.constants['CORE_PARAMETER_CTOR'], 'core_parameter_dtor_rva': abi.constants['CORE_PARAMETER_DTOR'], 'core_parameter_lookup_rva': abi.constants['CORE_PARAMETER_LOOKUP'], 'core_parameter_vtable_rva': abi.constants['CORE_PARAMETER_VTABLE'], 'pinned_core_sha256': abi.core_sha256, 'source_proof_sha256': SOURCE_PROOF_SHA256, 'owner_transport': 'uint16; the query sign-extends this WORD to the native +B8 DWORD', 'query_null_policy': 'refuse; no substituted native values', 'query_lifetime': 'units/player release before A8; A8 then parameter ctor/B0/lookups/dtor; unit release before hook/writer/enqueue', 'core_code_pins': {f'{rva:x}:{size}': digest for (rva, size), digest in abi.code_pins.items()}}
 
-def query_unit_parameters(core, context, identity: dict, *, incoming_selector: int, read=None, invoke=None, native_api=None, core_sha256=PINNED_CORE_SHA256) -> dict:
+def query_unit_parameters(core, context, identity: dict, *, incoming_selector: int, read=None, invoke=None, native_api=None, core_sha256=PINNED_CORE_SHA256, execution_image=None) -> dict:
     """Read the callback's A8 result and four B0 parameters from native Core.
 
     The incoming selector is checked before any lookup, as in EXE callback
@@ -98,7 +109,12 @@ def query_unit_parameters(core, context, identity: dict, *, incoming_selector: i
     function deliberately is not a lease spanning the caller's enqueue.
     """
     from civ6_host.runtime.found_unit_event_profiles import query_abi
-    abi = query_abi(core_sha256)
+    attached_image = getattr(core, '_civ6_host_execution_image', None)
+    if execution_image is not None and execution_image is not attached_image:
+        raise ValueError('FoundUnit query image is not owned by its Core')
+    execution_image = attached_image
+    core_sha256 = _query_source_identity(core_sha256, execution_image)
+    abi = query_abi(core_sha256, execution_image=execution_image)
     verify_selector_source()
     if type(incoming_selector) is not int or incoming_selector != SELECTOR:
         raise ValueError('E23B112D selector does not enter the native query path')

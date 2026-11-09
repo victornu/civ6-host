@@ -8,6 +8,7 @@ from types import MappingProxyType
 from .configuration_profiles import _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_verification import file_sha256
 
 SOURCE=('work/host-extensions/a0-family-reuse-static/a0-family-reuse-v1.json',
         '0a1d3e3dabb677d7cb14cce1926dabb8360568c69fe97c5d2d61293c0c114e43')
@@ -62,9 +63,8 @@ def source_pins():
 def verify_pinned_files(pins):
     """Stream source identities once per owner, not once per native event."""
     for name,sha in pins.items():
-        with Path(name).open('rb') as stream:
-            if hashlib.file_digest(stream,'sha256').hexdigest()!=sha:
-                raise ValueError('A0 source closure changed: '+name)
+        if file_sha256(Path(name)) != sha:
+            raise ValueError('A0 source closure changed: '+name)
 
 
 def verify_extracted_sources(references):

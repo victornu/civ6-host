@@ -13,6 +13,8 @@ from .xp2_mutable_map_profile import verify_live as verify_tree
 
 _OWNERSHIP = ('evidence/host-xp2-script-request-child-ownership.json',
               '71629e45819acfa3c5aaefda15a7879bd320f0e8fdd9517ec2706181fbf6ed14')
+LISTENER_AUTHORITY = ('evidence/host-xp2-bbg-listener-request-authority-source.json',
+                     '8efae78960176f272f19d60d8403e7d7881f6b4fe416ae27dadf667812ab94ae')
 _ROOT = VTABLES['parameters']
 _TREE = 0xabf080
 _RESOLVER = 0xabeff8
@@ -22,19 +24,53 @@ _TREE_SLOTS = {0x20: 0x989d0, 0x60: 0x99f5c0, 0xa8: 0x9a0240, 0x108: 0x9a6e40,
                0x130: 0x99fee0, 0x138: 0x9a0d30}
 
 
+def listener_source_dependencies(*, execution_image):
+    from .a0_policy_unlock_current import _require_image, CURRENT_EXE_SHA256
+    from .execution_images import identity
+    from .paths import resource_root
+    _require_image(execution_image)
+    proof = _source(LISTENER_AUTHORITY)
+    if (proof['schema'] != 'civ6-host.xp2-bbg-listener-request-authority-source.v1'
+            or proof['images']['core']['sha256'] != identity(execution_image)['image_sha256']
+            or proof['images']['exe']['sha256'] != CURRENT_EXE_SHA256
+            or proof['native_guard']['execute_script_operation'] != '0xc665ad08'
+            or proof['route']['core_virtual_target']['target_rva'] != hex(ENTRIES['request'])):
+        raise ValueError('Installed-listener request authority source differs')
+    return {resource_root() / LISTENER_AUTHORITY[0]: LISTENER_AUTHORITY[1]}
+
+
 def deliver_script_operation(continuation, player, parameters):
     """Use the retained native action queue inside an active XP2 transition."""
+    return _deliver_script_operation(continuation, player, parameters, listener=False)
+
+
+def deliver_listener_script_operation(continuation, player, parameters):
+    """Internal installed-listener request, preserving the engine's player gate.
+
+    This is not a public arbitrary-script endpoint. Its caller must bind player
+    and parameters to the owned native event and the installed Lua listener.
+    RequestPlayerOperation may return without an archive for an inactive player;
+    that is a filtered request, never successful gameplay delivery.
+    """
+    return _deliver_script_operation(continuation, player, parameters, listener=True)
+
+
+def _deliver_script_operation(continuation, player, parameters, *, listener):
     continuation.check(active=True)
     backend = continuation.owner
     if (backend.load_abi.core_sha256 != XP2_CORE_SHA256
-            or type(player) is not int
-            or continuation.observation['player_id'] != player):
+            or type(player) is not int or not 0 <= player < 64
+            or (not listener and continuation.observation['player_id'] != player)):
         raise ValueError('Script operation requires the active XP2 player view')
     transport = continuation.transport
     transport.require_empty_native_queue()
     receipt = submit_script_operation(
         backend.core, backend.context, player, parameters, read=backend.runtime.read)
     pending = transport.pending
+    if listener and not pending:
+        transport.require_empty_native_queue()
+        return {**receipt, 'native_archive_delivered': False,
+                'native_request_filtered': True}
     # Same official PlayerOperation archive used for research and civics.
     if len(pending) != 1 or pending[0][:4] != struct.pack('<I', 3294486831):
         raise RuntimeError('Script request did not emit exactly one player-operation archive')
@@ -74,7 +110,9 @@ def submit_script_operation(core, context, player, parameters, *, read):
             or type(context) is not int or not 0 < context < (1 << 47)):
         raise ValueError('Invalid XP2 player or context')
     base = core._handle
-    with _script_parameters(base, parameters, read=read) as storage:
+    image = getattr(core, '_civ6_host_execution_image', None)
+    with _script_parameters(base, parameters, read=read,
+                            **({'execution_image':image} if image is not None else {})) as storage:
         if read(context, 8) != struct.pack('<Q', base + VTABLES['outer']):
             raise ValueError('Unexpected XP2 outer interface')
         request = C.WINFUNCTYPE(None, C.c_void_p, C.c_int32, C.c_uint32, C.c_void_p)(
@@ -86,7 +124,7 @@ def submit_script_operation(core, context, player, parameters, *, read):
 
 
 @contextmanager
-def _script_parameters(base, parameters, *, read):
+def _script_parameters(base, parameters, *, read, execution_image=None):
     encode_script_request_table(parameters)
     if type(parameters.get(b'OnStart')) is not bytes or not parameters[b'OnStart']:
         raise ValueError('EXECUTE_SCRIPT requires a named OnStart event')
@@ -102,7 +140,8 @@ def _script_parameters(base, parameters, *, read):
     proof = _source(_OWNERSHIP)
     if proof['core_sha256'] != XP2_CORE_SHA256:
         raise ValueError('Unexpected XP2 script-operation source')
-    verify_live(base, read, 'research')
+    verify_live(base, read, 'research',
+                **({'execution_image':execution_image} if execution_image is not None else {}))
     verify_tree(base, read)
     for address, expected in proof['instructions'].items():
         expected = bytes.fromhex(expected)

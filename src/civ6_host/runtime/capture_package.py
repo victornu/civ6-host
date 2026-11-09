@@ -16,6 +16,10 @@ MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_TOTAL_FILE_BYTES = 4 * 1024 * 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
+_XP2_STOCK_PACKAGE = (
+    "work/host-prepared-captures/xp2-gs-lan-rows-20261102/manifest.json",
+    "6468bf13145fa712438bd276896273630789ca4afb6003d904b66a8aa29e2020",
+)
 _HEX = frozenset("0123456789abcdef")
 _FILE_PATHS = {
     "configuration_stream": "configuration.bin",
@@ -31,6 +35,10 @@ _DATABASE_ROLES = {
     "gameplay": "database_gameplay",
     "localization": "database_localization",
 }
+_CURRENT_XP2_IMAGE_PROFILE = "xp2-gamecore-current-092abfbb"
+_CURRENT_XP2_IMAGE_SHA256 = "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+_XP2_REFERENCE_CORE_SHA256 = "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c"
+_CURRENT_EXE_SHA256 = "d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe"
 
 
 class CapturePackageError(ValueError):
@@ -324,6 +332,54 @@ def _validate_readback(value: object, initial_turn: int) -> None:
         identifiers.add(unit["id"])
 
 
+def _validate_content_profile(content_profile: dict) -> str:
+    schema = content_profile.get("schema")
+    if schema == "civ6rl.official_content_profile.v1":
+        return schema
+    if schema != "civ6rl.official_content_profile.v2":
+        raise CapturePackageError("bundle content profile schema is unsupported")
+    expected = {"schema", "engine", "final_databases", "localization_bootstrap",
+                "resolved_content_vectors", "gameplay_scripts",
+                "cross_capture_equivalence_supported", "limitations", "opaque_manager_headers"}
+    vectors = content_profile.get("resolved_content_vectors")
+    headers = content_profile.get("opaque_manager_headers")
+    engine = content_profile.get("engine")
+    databases = content_profile.get("final_databases")
+    scripts = content_profile.get("gameplay_scripts")
+    if (set(content_profile) != expected
+            or type(engine) is not dict or set(engine) != {"executable_sha256", "gamecore_sha256"}
+            or any(type(engine[key]) is not str or len(engine[key]) != 64
+                   or any(char not in _HEX for char in engine[key])
+                   for key in ("executable_sha256", "gamecore_sha256"))
+            or type(databases) is not dict or set(databases) != set(_DATABASE_ROLES)
+            or any(type(row) is not dict or set(row) != {"sha256", "size_bytes"}
+                   or type(row["sha256"]) is not str or len(row["sha256"]) != 64
+                   or any(char not in _HEX for char in row["sha256"])
+                   or type(row["size_bytes"]) is not int or not 0 < row["size_bytes"] <= MAX_FILE_BYTES
+                   for row in databases.values())
+            or type(scripts) is not dict or set(scripts) != {
+                "selected_path_count", "active_count", "selected_and_active_empty", "source_records", "source_files"}
+            or any(type(scripts[key]) is not int or scripts[key] < 0
+                   for key in ("selected_path_count", "active_count", "source_records", "source_files"))
+            or type(scripts["selected_and_active_empty"]) is not bool
+            or type(vectors) is not dict
+            or set(vectors) != {"active_mod_handles", "ordered_component_handles"}
+            or any(type(values) is not list or len(values) > 65536
+                   or any(type(value) is not int or not 0 <= value < 2**32 for value in values)
+                   for values in vectors.values())
+            or type(headers) is not dict or set(headers) != {"manager_plus_0x1d8"}
+            or type(headers["manager_plus_0x1d8"]) is not str
+            or len(headers["manager_plus_0x1d8"]) != 48
+            or any(char not in _HEX for char in headers["manager_plus_0x1d8"])
+            or content_profile.get("cross_capture_equivalence_supported") is not False
+            or type(content_profile.get("limitations")) is not list
+            or not all(type(item) is str and item for item in content_profile["limitations"])
+            or "Opaque current manager headers are retained as raw bytes and are not persistent content identifiers."
+                not in content_profile["limitations"]):
+        raise CapturePackageError("current content profile v2 has an unexpected opaque/vector shape")
+    return schema
+
+
 def export_capture(bundle, destination, *, source_manifest_bytes,
                    validation_identity, _xp1_candidate=False, _candidate_profile=None) -> dict:
     """Write a new private package from an already-admitted PreparedBundle."""
@@ -384,8 +440,7 @@ def export_capture(bundle, destination, *, source_manifest_bytes,
     if type(expected_readback) is not dict or type(content_profile) is not dict:
         raise CapturePackageError("readback and content profile must be objects")
     _validate_readback(expected_readback, initial_turn)
-    if content_profile.get("schema") != "civ6rl.official_content_profile.v1":
-        raise CapturePackageError("bundle content profile schema is unsupported")
+    content_profile_schema = _validate_content_profile(content_profile)
     map_values = inputs.map_values
     if type(map_values) not in (tuple, list) or len(map_values) != 4:
         raise CapturePackageError("bundle map values must contain the four admitted settings")
@@ -416,6 +471,15 @@ def export_capture(bundle, destination, *, source_manifest_bytes,
     observed_engine_sha, _observed_engine_bytes = _hash_file(engine_path)
     if observed_engine_sha != engine_sha:
         raise CapturePackageError("external engine changed after bundle admission")
+    if content_profile_schema == "civ6rl.official_content_profile.v2":
+        try:
+            execution_image = bundle.execution_image
+        except AttributeError as exc:
+            raise CapturePackageError("current content v2 lacks its selected execution image") from exc
+        _check_registered_current_engine(
+            {"path": reference_path, "sha256": reference_sha}, candidate,
+            {"path": str(engine_path), "sha256": engine_sha}, content_profile,
+            engine_path, execution_image)
 
     if type(localization) is not dict or type(localization.get("icu_data")) is not dict:
         raise CapturePackageError("bundle localization bootstrap is malformed")
@@ -430,6 +494,13 @@ def export_capture(bundle, destination, *, source_manifest_bytes,
         raise CapturePackageError("bundle localization bootstrap differs from content profile")
     database_records = {role: _file_record(databases[role], f"{role} database")
                         for role in _DATABASE_ROLES}
+    if content_profile_schema == "civ6rl.official_content_profile.v2":
+        expected_database_profile = {
+            role: {"sha256": digest, "size_bytes": size}
+            for role, (_path, digest, size) in database_records.items()
+        }
+        if content_profile["final_databases"] != expected_database_profile:
+            raise CapturePackageError("current content profile databases differ from package inputs")
     total_size = (len(inputs.configuration) + len(inputs.game) + len(source_manifest_bytes)
                   + icu_bytes
                   + sum(item[2] for item in database_records.values()))
@@ -554,7 +625,70 @@ def _within(path: Path, root: Path) -> bool:
         return False
 
 
-def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None) -> tuple[dict, Path, dict[str, Path]]:
+def _check_stock_current_engine(reference, origin, candidate, engine, content_profile,
+                                engine_path, execution_image):
+    """Admit only the retained stock XP2 package on the registered current image."""
+    from . import xp2_bundle_inputs as xp2
+    from .execution_images import identity, verify
+    from .paths import resource_root
+
+    expected_path = (resource_root() / _XP2_STOCK_PACKAGE[0]).resolve(strict=True)
+    if (candidate is None or candidate.family != "xp2-lan"
+            or candidate.reference != xp2.REFERENCE
+            or origin != {"path": xp2.REFERENCE[0], "sha256": xp2.REFERENCE[1]}
+            or Path(reference["path"]).resolve(strict=True) != expected_path
+            or reference["sha256"] != _XP2_STOCK_PACKAGE[1]):
+        raise CapturePackageError("current execution image requires the exact retained stock XP2 package")
+    selected = identity(execution_image)
+    if (selected["profile_id"] != "xp2-gamecore-current-092abfbb"
+            or selected["image_sha256"] != "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+            or selected["reference_core_sha256"] != "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c"
+            or engine_path != Path(selected["path"])
+            or engine["sha256"] != selected["reference_core_sha256"]
+            or content_profile["engine"].get("gamecore_sha256") != selected["reference_core_sha256"]):
+        raise CapturePackageError("stock XP2 engine provenance differs from the selected current image")
+    try:
+        verify(execution_image)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        raise CapturePackageError("selected current XP2 image failed its pinned verification") from exc
+    if _hash_file(engine_path)[0] != selected["image_sha256"]:
+        raise CapturePackageError("selected current XP2 engine bytes differ from the registered image")
+
+
+def _check_registered_current_engine(origin, candidate, engine, content_profile,
+                                     engine_path, execution_image):
+    """Admit only the explicitly registered current BBG capture on Core 092."""
+    from . import xp2_bbg_inputs as bbg
+    from .execution_images import identity, verify
+
+    registered = bbg.registered_reference()
+    if (candidate is None or candidate.family != "xp2-lan"
+            or registered is None
+            or candidate.reference != registered
+            or origin != {"path": registered[0], "sha256": registered[1]}):
+        raise CapturePackageError("current content v2 requires the exact registered BBG source capture")
+    try:
+        selected = identity(execution_image)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise CapturePackageError("current content v2 requires a registered execution image") from exc
+    if (selected["profile_id"] != _CURRENT_XP2_IMAGE_PROFILE
+            or selected["image_sha256"] != _CURRENT_XP2_IMAGE_SHA256
+            or selected["reference_core_sha256"] != _XP2_REFERENCE_CORE_SHA256
+            or engine_path != Path(selected["path"])
+            or engine["sha256"] != selected["image_sha256"]
+            or content_profile["engine"].get("executable_sha256") != _CURRENT_EXE_SHA256
+            or content_profile["engine"].get("gamecore_sha256") != selected["image_sha256"]):
+        raise CapturePackageError("registered current BBG engine differs from the selected image profile")
+    try:
+        verify(execution_image)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        raise CapturePackageError("selected current XP2 image failed its pinned verification") from exc
+    if _hash_file(engine_path)[0] != selected["image_sha256"]:
+        raise CapturePackageError("selected current BBG engine bytes differ from the registered image")
+
+
+def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None,
+                 execution_image=None) -> tuple[dict, Path, dict[str, Path]]:
     """Verify the package manifest, every local file and its external engine."""
     if type(reference) is not dict or set(reference) != {"path", "sha256"}:
         raise CapturePackageError("package reference has an unexpected shape")
@@ -611,8 +745,7 @@ def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None) ->
     if type(manifest.get("expected_readback")) is not dict or type(manifest.get("content_profile")) is not dict:
         raise CapturePackageError("package readback/content profile must be objects")
     _validate_readback(manifest["expected_readback"], turn)
-    if manifest["content_profile"].get("schema") != "civ6rl.official_content_profile.v1":
-        raise CapturePackageError("package content profile schema is unsupported")
+    content_profile_schema = _validate_content_profile(manifest["content_profile"])
     maps = manifest.get("map_values")
     if (type(maps) is not list or len(maps) != 4
             or any(type(pair) is not list or len(pair) != 2 or type(pair[0]) is not str
@@ -649,8 +782,19 @@ def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None) ->
             raise CapturePackageError("external engine differs from content profile")
     except (KeyError, TypeError) as exc:
         raise CapturePackageError("content profile does not pin external engine") from exc
-    if _hash_file(engine_path)[0] != engine_sha:
-        raise CapturePackageError("external engine changed since package export")
+    if content_profile_schema == "civ6rl.official_content_profile.v2":
+        if execution_image is None:
+            raise CapturePackageError("current content v2 requires an explicitly selected execution image")
+        _check_registered_current_engine(origin, candidate, engine,
+                                         manifest["content_profile"], engine_path,
+                                         execution_image)
+    elif execution_image is None:
+        if _hash_file(engine_path)[0] != engine_sha:
+            raise CapturePackageError("external engine changed since package export")
+    else:
+        _check_stock_current_engine(reference, origin, candidate, engine,
+                                    manifest["content_profile"], engine_path,
+                                    execution_image)
 
     files = manifest.get("files")
     if type(files) is not dict or set(files) != set(_FILE_PATHS):
@@ -673,6 +817,14 @@ def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None) ->
         if total > MAX_TOTAL_FILE_BYTES:
             raise CapturePackageError("package files exceed aggregate size limit")
         verified_files[role] = path
+
+    if content_profile_schema == "civ6rl.official_content_profile.v2":
+        observed_database_profile = {
+            role: {"sha256": files[file_role]["sha256"], "size_bytes": files[file_role]["bytes"]}
+            for role, file_role in _DATABASE_ROLES.items()
+        }
+        if manifest["content_profile"]["final_databases"] != observed_database_profile:
+            raise CapturePackageError("current content profile database pins differ from package files")
 
     origin_copy = verified_files["origin_manifest"]
     if (files["origin_manifest"]["sha256"] != origin_sha

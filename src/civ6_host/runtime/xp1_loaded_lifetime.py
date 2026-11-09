@@ -30,9 +30,14 @@ def source(core_sha256=XP1_CORE_SHA256):
     for ref in p['references']:_source((ref['path'],ref['sha256']))
     return p
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuation=False):
+def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuation=False,
+                       execution_image=None):
     if type(continuation) is not bool or continuation and (not postload or core_sha256!=XP2_CORE_SHA256):
         raise ValueError('Continuation lifetime dependencies require XP2 postload')
+    if execution_image is not None and core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('XP1 lifetime source does not accept an XP2 execution image')
+    if continuation and execution_image is None:
+        raise ValueError('XP2 continuation source pins require the retained execution image')
     from .paths import resource_root
     from .resource_resolution import resolve_path
     selected=SOURCE
@@ -75,7 +80,11 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuatio
     if continuation:
         from .xp2_action_transport_source import source_dependencies as action_dependencies
         from .xp2_turn_source import source_dependencies as turn_dependencies
-        for group in (action_dependencies(),turn_dependencies()):
+        selected_execution_image = (execution_image if execution_image is not None else None)
+        execution_options = ({'execution_image': selected_execution_image}
+                             if selected_execution_image is not None else {})
+        for group in (action_dependencies(**execution_options),
+                      turn_dependencies(**execution_options)):
             for path,digest in group.items():
                 if path in pins and pins[path]!=digest:
                     raise ValueError('Conflicting XP2 continuation lifetime dependency: '+path)
@@ -385,11 +394,14 @@ class LoadedLifetime:
                       host_pointer=self.host.pointer,auxiliary_pointer=C.addressof(self.host.aux_object))
         if getattr(self,'continuation_source_receipt',None) is None:
             receipt=verify_live(self.core._handle,b.runtime.read,family='transport',context=self.context)
-            self.continuation_source_dependencies=source_dependencies(XP2_CORE_SHA256,postload=True,continuation=True)
             self.continuation_source_receipt=receipt
         elif (self.continuation_source_receipt.get('core_sha256')!=XP2_CORE_SHA256
                 or self.continuation_source_receipt.get('source_sha256')!=action_source[1]):
             raise ValueError('XP2 continuation lifetime retained source receipt changed')
+        execution_image = getattr(self.owner.core, '_civ6_host_execution_image', None)
+        self.continuation_source_dependencies=source_dependencies(
+            XP2_CORE_SHA256, postload=True, continuation=True,
+            execution_image=execution_image)
         self.action_transport=transport
 
     def _validate_saved_player_view(self):

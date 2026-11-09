@@ -22,6 +22,7 @@ from civ6_host.runtime.native.native_resolved_content import ROOT
 BUILD_PATH = ROOT / 'work/official-capture/localization-export-build02/build.json'
 BUILD_SHA = '4a9374a5b896764aa143d02e65960eca27d9eb86d6af786265519384762b7bed'
 READER_SHA = '9998cba445fc6a6e195190b59c84c22ce494f29ed2dad9d7245e42bebf4b12f4'
+CURRENT_READER_SHA = '61b6cefcc2cbb100806097793f96df4d6342f8b91ebd0dd73e0710f22d9d6065'
 SCHEMA = 'civ6rl.localization_export.v1'
 NATIVE_SCHEMA = 'civ6rl.localization_native_export.v1'
 MAX_DB_BYTES = 512 * 1024 * 1024
@@ -75,7 +76,7 @@ def verify_build():
         _file(item, limit=4 * 1024 * 1024)
     _file(build['source_snapshot'])
     _file(build['dll'])
-    _require(_sha(_resolve_resource_path(Path(_historical_module_file(runtime)))) == READER_SHA, 'Frozen Localization reader changed')
+    _require(_sha(_resolve_resource_path(Path(_historical_module_file(runtime)))) in {READER_SHA, CURRENT_READER_SHA}, 'Frozen Localization reader changed')
     return build
 
 def _process(identity):
@@ -83,19 +84,28 @@ def _process(identity):
 
 def runtime_identity(report):
     """Validated settings projection shared with capture994 (no query counters)."""
-    _require(type(report) is dict and report.get('schema') == 'civ6rl.localization_capture.v1' and (report.get('route_source_sha256') == runtime.ROUTE_SHA) and (report.get('collector_source_sha256') == READER_SHA), 'Runtime Localization producer/source differs')
+    _require(type(report) is dict, 'Runtime Localization producer/source differs')
+    executable = report.get('modules', {}).get('exe', {}).get('sha256')
+    _require(executable in (runtime.EXE_SHA, runtime.CURRENT_EXE_SHA), 'Unsupported Localization runtime executable')
+    current = executable == runtime.CURRENT_EXE_SHA
+    profile = runtime.source_profile(executable)
+    accepted_readers = {CURRENT_READER_SHA} if current else {READER_SHA, CURRENT_READER_SHA}
+    _require(report.get('schema') == ('civ6rl.localization_capture.v2' if current else 'civ6rl.localization_capture.v1') and report.get('route_source_sha256') == runtime.ROUTE_SHA and (report.get('collector_source_sha256') in accepted_readers), 'Runtime Localization producer/source differs')
+    if current:
+        _require(report.get('current_shared_source_sha256') == runtime.CURRENT_SHARED_SHA and report.get('executable_sha256') == executable, 'Current Localization correspondence differs')
     _process(report.get('process'))
     _require(report.get('runtime_memory_copied') is True and report.get('process_identity_unchanged_before_after') is True and (report.get('module_set_unchanged_before_after') is True), 'Runtime Localization capture is not stable')
     for flag in ('native_export_allowed', 'database_lifetime_lease_proven', 'game_executable_launched', 'remote_code_executed', 'memory_written', 'save_database_script_bundle_qualified', 'strategic_training_ready'):
         _require(report.get(flag) is False, 'Read-only Localization capture overclaims ' + flag)
     _require(report.get('database') is None, 'Runtime-only capture cannot claim a database')
     state = report.get('snapshot', {})
-    _require(state.get('schema') == 'civ6rl.localization_memory_snapshot.v1' and state.get('route_source_sha256') == runtime.ROUTE_SHA and (state.get('observed_ranges_unchanged') is True), 'Unknown Localization snapshot')
+    _require(state.get('schema') == ('civ6rl.localization_memory_snapshot.v2' if current else 'civ6rl.localization_memory_snapshot.v1') and state.get('route_source_sha256') == runtime.ROUTE_SHA and (state.get('observed_ranges_unchanged') is True), 'Unknown Localization snapshot')
+    if current:
+        _require(state.get('current_shared_source_sha256') == runtime.CURRENT_SHARED_SHA and state.get('executable_sha256') == executable, 'Current Localization snapshot correspondence differs')
     for flag in ('atomic_snapshot_proven', 'database_exported', 'database_lifetime_lease_proven', 'save_identity_bound', 'training_eligible'):
         _require(state.get(flag) is False, 'Runtime Localization snapshot overclaims ' + flag)
     _require(all((k in state for k in IDENTITY_FIELDS)), 'Incomplete runtime Localization identity')
     _require(type(state['locale']) is str and re.fullmatch('[A-Za-z][A-Za-z0-9_@.\\-]{0,62}', state['locale']) and (type(state['dictionary_flag']) is bool) and (state['locale'] == report.get('locale')) and (state['dictionary_flag'] is report.get('dictionary_flag')), 'Invalid locale/fallback identity')
-    profile = runtime.source_profile()
     policy = 'strict' if state['dictionary_flag'] else 'priorities'
     _require(state.get('fallback_policy') == policy and state.get('fallback_policy_sql') == profile['lookup_sql'][policy]['text'] and (state['fallback_policy_sql_sha256'] == profile['lookup_sql'][policy]['sha256']), 'Localization fallback SQL differs')
     for field in ('dictionary_address', 'connection_address', 'lookup_result_address', 'auxiliary_result_address', 'statement_address', 'icu_address', 'language_address', 'languages_begin', 'languages_end'):

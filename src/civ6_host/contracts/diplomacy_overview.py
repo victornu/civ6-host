@@ -7,6 +7,18 @@ SCHEMA = 'civ6-host.diplomacy-overview.v1'
 _FIELDS = {'schema', 'player_id', 'turn', 'capability', 'paused',
            'targets', 'complete_action_space'}
 _SELECTION = {'key', 'disabled', 'supported', 'text', 'tooltip', 'diplomatic_action_type'}
+ACTION_FIELDS = {'diplomacy_initiate': frozenset(('kind', 'target_player_id', 'choice'))}
+
+
+def validate_action(action):
+    if (type(action) is not dict or set(action) != ACTION_FIELDS['diplomacy_initiate']
+            or action['kind'] != 'diplomacy_initiate'
+            or type(action['target_player_id']) is not int
+            or not 0 <= action['target_player_id'] < 64
+            or type(action['choice']) is not str
+            or re.fullmatch(r'CHOICE_[A-Z0-9_]{1,96}', action['choice']) is None):
+        raise ValueError('Malformed initial diplomatic action')
+    return action
 
 
 def validate(value, player_id, turn):

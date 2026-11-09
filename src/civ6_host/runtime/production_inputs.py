@@ -10,7 +10,7 @@ CAPACITY=4*1024*1024
 _XP2_CITY_SUPPORT_SHA256 = '6355e8ed18593225e9b05db74f2861b2f8382833e59569264267b96d3450e959'
 
 
-def source_files(*, xp2=False):
+def source_files(*, xp2=False, execution_image=None):
     from .provenance import resource_root
     from .resource_resolution import resolve_path
     path=resolve_path(resource_root()/SOURCE[0]);raw=path.read_bytes()
@@ -26,7 +26,10 @@ def source_files(*, xp2=False):
         if hashlib.sha256(replacement.read_bytes()).hexdigest() != _XP2_CITY_SUPPORT_SHA256:
             raise ValueError('Gathering Storm CitySupport source changed')
         pins[str(replacement)] = _XP2_CITY_SUPPORT_SHA256
-    return pins
+    elif execution_image is not None:
+        raise ValueError('Execution image profile is only valid for XP2 production sources')
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 def source(pid,turn,*,xp2=False):

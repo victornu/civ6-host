@@ -68,12 +68,12 @@ PILLAGE_SOURCE = (
 )
 
 
-@lru_cache(maxsize=1)
-def pillage_source():
+@lru_cache(maxsize=2)
+def pillage_source(execution_image=None):
     from .native import native_event_e660_building_pillaged as codec
 
     proof = _source(PILLAGE_SOURCE)
-    codec.verify_source_evidence()
+    codec.verify_source_evidence(execution_image=execution_image)
     if (proof['schema'] != 'civ6-host.xp2-turn36-building-pillage-refusal.v1'
             or proof['core_sha256'] != XP2_CORE_SHA256
             or proof['refusal_headers']['dispatch_kind'] != hex(codec.EVENT_KIND)
@@ -84,8 +84,8 @@ def pillage_source():
     return proof
 
 
-def verify_pillage_live(core_base, read):
-    for rva, body in pillage_source()['core_producer'].items():
+def verify_pillage_live(core_base, read, *, execution_image=None):
+    for rva, body in pillage_source(execution_image=execution_image)['core_producer'].items():
         raw = bytes.fromhex(body['raw_hex'])
         if (hashlib.sha256(raw).hexdigest() != body['sha256']
                 or read(core_base + int(rva, 16), len(raw)) != raw):
@@ -115,9 +115,11 @@ def source():
     return p
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown foundation event engine')
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 foundation source')
     p = source()
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]), *p['references'], *p['source_modules']]
     closure = _source(CODEC_DEPENDENCIES)
@@ -147,12 +149,12 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
         selected.update(facade_dependencies(core_sha256=core_sha256))
         from .native import native_event_3182bc8e as initial, native_event_3182bc8e_project as project
         project_source()
-        pillage_source()
+        pillage_source(execution_image=execution_image)
         from .native.native_event_e660_building_pillaged import source_dependencies as pillage_dependencies
         from .xp2_wonder_completion import source_dependencies as wonder_dependencies
         for path, digest in (PILLAGE_SOURCE, PROJECT_SOURCE):
             selected[str(_path(path).resolve())] = digest
-        for path, digest in (*pillage_dependencies().items(), *wonder_dependencies().items()):
+        for path, digest in (*pillage_dependencies(execution_image=execution_image).items(), *wonder_dependencies().items()):
             if path in selected and selected[path] != digest:
                 raise ValueError('Conflicting foundation extended-event dependency')
             selected[path] = digest
@@ -180,13 +182,18 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
             if path in pins and pins[path]!=sha:
                 raise ValueError('Conflicting XP2 WMD visibility dependency')
             pins[path]=sha
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image)
     verify_pinned_files(pins)
     return pins
 
 
-def event_profile(*,core_sha256=XP1_CORE_SHA256):
+def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown foundation event engine')
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 foundation event profile')
     p = source()
     plot = plot_source()
     if core_sha256==XP2_CORE_SHA256:
@@ -199,7 +206,7 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256):
         current=xp2_event_source()
         if set(map(int,current['kind_to_record_types'])) & set(map(int,p['kind_to_record_types'])):
             raise ValueError('XP2 notification families overlap foundation dispatch membership')
-        source_dependencies(core_sha256=core_sha256)
+        source_dependencies(core_sha256=core_sha256,execution_image=execution_image)
     else:
         source_dependencies(core_sha256=core_sha256)
     verify_extracted_sources((*p['source_modules'], *plot['source_modules']))

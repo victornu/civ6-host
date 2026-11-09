@@ -39,7 +39,15 @@ def _reference(saved, player_id):
     return ref, ids
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
+    execution_options = {}
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+        if (core_sha256 != XP2_CORE_SHA256
+                or execution_image.reference_core_sha256 != core_sha256):
+            raise ValueError('Session view execution image does not match its XP2 source ABI')
+        execution_options = {'execution_image': execution_image}
     from .captured_session_profile import select
     from .xp1_status_profiles import source_dependencies as status_dependencies
     from .unit_operation_ui_profile import source_dependencies as unit_dependencies
@@ -47,22 +55,24 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
     from .xp1_production_profile import source_dependencies as production_dependencies
     from .xp1_turn_ui_profile import source_dependencies as turn_ui_dependencies
     selected=select(core_sha256)
-    groups=[status_dependencies(core_sha256=core_sha256),
-            unit_dependencies(core_sha256=core_sha256),
-            research_dependencies(core_sha256=core_sha256),
-            production_dependencies(core_sha256=core_sha256),
-            turn_ui_dependencies(core_sha256=core_sha256)]
+    groups=[status_dependencies(core_sha256=core_sha256,**execution_options),
+            unit_dependencies(core_sha256=core_sha256,**execution_options),
+            research_dependencies(core_sha256=core_sha256,**execution_options),
+            production_dependencies(core_sha256=core_sha256,**execution_options),
+            turn_ui_dependencies(core_sha256=core_sha256,**execution_options)]
     from .xp1_world_input_profile import source_dependencies as world_dependencies
     from .xp1_unit_orders_profile import source_dependencies as order_dependencies
     from .xp1_production_queue_profile import source_dependencies as queue_dependencies
     from .xp1_production_placement_profile import source_dependencies as placement_dependencies
     from .placement_inventory_profile import source_dependencies as inventory_dependencies
-    groups.extend([world_dependencies(core_sha256),order_dependencies(core_sha256),
-                   queue_dependencies(core_sha256),placement_dependencies(core_sha256),
-                   inventory_dependencies(core_sha256)])
+    groups.extend([world_dependencies(core_sha256,**execution_options),
+                   order_dependencies(core_sha256,**execution_options),
+                   queue_dependencies(core_sha256,**execution_options),
+                   placement_dependencies(core_sha256,**execution_options),
+                   inventory_dependencies(core_sha256,**execution_options)])
     if selected.candidate.family in ('xp1-lan','xp2-lan'):
         from .xp1_unit_attack_profile import source_dependencies as attack_dependencies
-        groups.append(attack_dependencies(core_sha256))
+        groups.append(attack_dependencies(core_sha256,**execution_options))
     if core_sha256 == XP2_CORE_SHA256:
         from pathlib import Path
         from .native import native_city_range_attack as city_range, native_combat_actions as combat
@@ -96,35 +106,101 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
                       for row in target_proof['installed_sources'].values())
         groups.append({str((native_saved_unit_work.ROOT / 'work/unit-work932/source.json').resolve()):
                        native_saved_unit_work.SOURCE_SHA})
-        groups.append(work_info_dependencies())
-        groups.append(production_display_dependencies(xp2=True))
-        groups.append(length_locale_dependencies()[0])
-        groups.append(plot_purchase_dependencies())
-        groups.append(promotion_dependencies())
-        groups.append(upgrade_dependencies())
-        groups.append(resource_dependencies())
+        groups.append(work_info_dependencies(**execution_options))
+        groups.append(production_display_dependencies(xp2=True,**execution_options))
+        groups.append(length_locale_dependencies(**execution_options)[0])
+        groups.append(plot_purchase_dependencies(**execution_options))
+        groups.append(promotion_dependencies(**execution_options))
+        groups.append(upgrade_dependencies(**execution_options))
+        groups.append(resource_dependencies(**execution_options))
+        from .xp2_envoys import source_dependencies as envoy_dependencies
+        groups.append(envoy_dependencies(**execution_options))
+        if execution_image is not None:
+            from .xp2_statement_source import source_dependencies as statement_dependencies
+            from .xp2_diplomacy_display_source import source_dependencies as dialogue_dependencies
+            groups.append(statement_dependencies(**execution_options))
+            groups.append(dialogue_dependencies(**execution_options))
     result={}
     for group in groups:
         for path,digest in group.items():
             if path in result and result[path]!=digest:
                 raise ValueError('Captured session source dependency identity conflicts')
             result[path]=digest
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        result=materialize_runtime_source_pins(result,execution_image=execution_image)
     return result
 
 
-def _prepare(saved, player_id):
+def _prepare(saved, player_id, *, allow_diplomacy=False):
     from .xp1_saved_load_owner import SavedLoadOwner
     if type(saved) is not SavedLoadOwner:
         raise TypeError('XP1 session view requires the retained SavedLoadOwner')
     saved._check('commands', requested='unit_commands_candidate')
     saved.continuation.check(active=False)
+    if type(allow_diplomacy) is not bool:
+        raise ValueError('Exact saved diplomacy read mode required')
+    if allow_diplomacy:
+        from .xp2_diplomacy import _SavedDialogueContext
+        context = getattr(saved, '_xp2_diplomacy', None)
+        if type(context) is not _SavedDialogueContext or context.saved is not saved:
+            raise RuntimeError('Diplomacy read mode requires its validated retained context')
+        context.validate(saved.backend)
     ref, ids = _reference(saved, player_id)
     b = saved.backend
     from .xp1_status_profiles import bind_owner
     bind_owner(b, b.core, b.runtime.read)
     saved.continuation.transport.require_empty_native_queue()
-    b.control(empty=True)
+    b.control(empty=True, allow_diplomacy=allow_diplomacy)
     return ref, ids
+
+
+def _read_saved_diplomacy(saved, player_id, sequence, *, actions_closed=False):
+    """Read a retained XP2 modal without opening ordinary action queries."""
+    from .xp2_diplomacy import read as read_diplomacy
+    from .network_timer import read as read_timer
+    from civ6_host.contracts import network_turn as contract
+    from .native.native_episode_identity import require_episode
+
+    context = getattr(saved, '_xp2_diplomacy', None)
+    if context is None or context.saved is not saved:
+        raise RuntimeError('XP2 diplomacy view lost its retained saved owner')
+    context.validate(saved.backend)
+    observation, catalogue = read_diplomacy(saved, sequence)
+    if (catalogue.get('player_id') != player_id
+            or catalogue.get('turn') != saved.continuation.observation.get('turn')
+            or catalogue.get('schema') != 'civ6rl.diplomacy_decisions948.v1'):
+        raise RuntimeError('Retained XP2 dialogue belongs to another actor or boundary')
+    ref, ids = _prepare(saved, player_id, allow_diplomacy=True)
+    b, p = saved.backend, saved.prefix
+    core_sha256 = b.load_abi.core_sha256
+    with saved._attempt():
+        session, activity = _read_state(saved, player_id, ref, ids)
+        rows = {row['player_id']: row for row in activity['rows']}
+        actual_observation = _observe_activity(saved, player_id, activity)
+        if (actual_observation != observation
+                or activity['turn'] != catalogue['turn']):
+            raise RuntimeError('Retained XP2 dialogue read crossed its native observation')
+        row = rows[player_id]
+        controls = dict(schema=contract.TURN_CONTROLS_SCHEMA, player_id=player_id,
+            turn=activity['turn'], active=row['active'],
+            active_complete=row['active_complete'], can_unready=row['can_unready'],
+            timer_elapsed=read_timer(b, core_sha256=core_sha256))
+        identity = require_episode(p)
+        from civ6_host.contracts.diplomacy_decisions import build
+        decisions=build(identity,sequence,observation,controls,catalogue,
+            public_display=context.public_display,
+            display_source_sha256=context.public_display_source_sha256,
+            actions_closed=actions_closed)
+        contract.validate_catalogue(decisions, identity, sequence, activity['turn'],
+            player_id=player_id, actions_closed=actions_closed,
+            observation=observation)
+        saved.continuation.transport.require_empty_native_queue()
+        b.control(empty=True, allow_diplomacy=True)
+        saved.continuation.check(active=False)
+    context.validate(b)
+    saved._check('commands', requested='unit_commands_candidate')
+    return session, observation, decisions
 
 
 def _read_state(saved, player_id, ref, ids):
@@ -164,6 +240,75 @@ def state(saved):
     return session
 
 
+def _turn_gates(saved, player_id):
+    from .xp1_turn_ui_profile import read as read_turn_ui
+    try:
+        return read_turn_ui(saved, player_id, saved.continuation.observation['turn'])
+    except BaseException:
+        saved._poison()
+        raise
+
+
+def _observe_activity(saved, player_id, activity):
+    from .native.native_player_observation import observe_player
+    p = saved.prefix
+    observation = observe_player(p.runtime, p.ui_child, player_id)
+    retained = saved.continuation.observation
+    if (observation['turn'] != activity['turn']
+            or (observation['width'], observation['height']) != (retained['width'], retained['height'])):
+        raise RuntimeError('XP1 session and player observation cross different boundaries')
+    return observation
+
+
+def _read_command_permissions(saved, player_id, turn, sequence):
+    """Read the native command gates separately from the real turn activity.
+
+    _prepare and _turn_gates bind the selected status/turn UI profiles before
+    this query. A false gate does not change player activity or close Congress.
+    """
+    from .native.native_saved_unit_orders import uint
+    for value, name, maximum in ((player_id, 'player', 63), (turn, 'turn', 0xffffffff),
+                                  (sequence, 'sequence', 0xffffffff)):
+        uint(value, name, maximum)
+    p = saved.prefix
+    source = (f'local pid,expectedTurn={player_id},{turn}\n'.encode() + b"""
+local function same()
+ assert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid and
+  Game.GetCurrentGameTurn()==expectedTurn,'command permission perspective changed')
+end
+same()
+local strategic=Game.IsAllowStrategicCommands(pid)
+local tactical=Game.IsAllowTacticalCommands(pid)
+assert(type(strategic)=='boolean' and type(tactical)=='boolean','native command permissions are not Boolean')
+same()
+return (strategic and '1' or '0')..','..(tactical and '1' or '0')
+""")
+    raw = p.runtime.evaluate_text(p.ui_child, source, b'@native_command_permissions', capacity=32)
+    if raw not in (b'0,0', b'0,1', b'1,0', b'1,1'):
+        raise ValueError('Malformed native command permissions')
+    return dict(player_id=player_id, turn=turn, sequence=sequence,
+                allow_strategic=raw[0:1] == b'1', allow_tactical=raw[2:3] == b'1')
+
+
+def read_turn_preflight(saved, player_id, kind):
+    """Revalidate an XP2 turn request without querying unrelated action families."""
+    ref, ids = _prepare(saved, player_id)
+    b = saved.backend
+    if (b.load_abi.core_sha256 != XP2_CORE_SHA256
+            or kind not in ('end_turn', 'force_end_turn', 'unready_turn')):
+        raise ValueError('Unqualified XP2 turn preflight')
+    gates = _turn_gates(saved, player_id)
+    with saved._attempt():
+        _, activity = _read_state(saved, player_id, ref, ids)
+        observation = _observe_activity(saved, player_id, activity)
+        available = gates['turn_availability'][kind] is True
+        saved.continuation.transport.require_empty_native_queue()
+        b.control(empty=True)
+        saved.continuation.check(active=False)
+    saved._check('commands', requested='unit_commands_candidate')
+    return observation, available
+
+
 def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnostic=False):
     """Return session, player observation, and an honest partial family catalogue.
 
@@ -171,8 +316,15 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
     Every call reads current human ownership, activity, timer and observation.
     An empty qualified founder family exists only after the official query ran.
     """
+    review_requested = getattr(saved, 'world_congress_review_diagnostic', False)
+    if (type(review_requested) is not bool
+            or review_requested and getattr(saved, 'world_congress_diagnostic', False) is not True):
+        raise ValueError('Congress review view requires its exact Boolean Congress group')
     if type(sequence) is not int or sequence < 0 or type(actions_closed) is not bool:
         raise ValueError('Invalid XP1 session revision or closure state')
+    if getattr(saved, '_xp2_diplomacy', None) is not None:
+        return _read_saved_diplomacy(saved, player_id, sequence,
+                                     actions_closed=actions_closed)
     ref, ids = _prepare(saved, player_id)
     continuation = saved.continuation
     b, p = saved.backend, saved.prefix
@@ -194,26 +346,19 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             or continuation.unit_source.get('callbacks') != CALLBACKS):
         raise ValueError('XP1 session lost its original unit-operation source receipt')
     from .network_timer import read as read_timer
-    from .native.native_player_observation import observe_player
     from .native.native_unit_actions import found_city_catalog_source, parse_founders
     from civ6_host.contracts import network_turn as contract
-    from .xp1_turn_ui_profile import read as read_turn_ui
-    try:
-        turn_gates=(None if actions_closed else read_turn_ui(saved,player_id,continuation.observation['turn']))
-    except BaseException:
-        saved._poison()
-        raise
+    turn_gates = None if actions_closed else _turn_gates(saved, player_id)
 
     with saved._attempt():
         session, activity = _read_state(saved, player_id, ref, ids)
         rows = {row['player_id']: row for row in activity['rows']}
         row = rows[player_id]
         timer_elapsed = read_timer(b, core_sha256=core_sha256)
-        observation = observe_player(p.runtime, p.ui_child, player_id)
-        if (observation['turn'] != activity['turn']
-                or (observation['width'], observation['height']) !=
-                    (continuation.observation['width'], continuation.observation['height'])):
-            raise RuntimeError('XP1 session and player observation cross different boundaries')
+        observation = _observe_activity(saved, player_id, activity)
+        permissions = (_read_command_permissions(saved, player_id, activity['turn'], sequence)
+                       if review_requested and not actions_closed else None)
+        strategic_allowed = permissions is None or permissions['allow_strategic']
         inventory=None
         if common_input_families:
             from .placement_inventory_profile import bind_owner as bind_inventory, source_reference
@@ -232,6 +377,13 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             turn=activity['turn'], active=row['active'],
             active_complete=row['active_complete'], can_unready=row['can_unready'],
             timer_elapsed=timer_elapsed)
+        if (core_sha256 == XP2_CORE_SHA256
+                and continuation.world_input_prompts.get(player_id) is not None):
+            if actions_closed:
+                raise ValueError('An unresolved war prompt cannot be presented as a closed ordinary catalogue')
+            from .xp2_world_war import read as read_war_modal
+            decisions = read_war_modal(saved, observation, controls, sequence)
+            return session, observation, decisions
         candidates = []
         availability={kind:None for kind in ('end_turn','force_end_turn','unready_turn')}
         turn_families={}
@@ -280,8 +432,10 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             for kind in ('research', 'civic', 'production')}
         if actions_closed:
             foundation = dict(status='unqualified', reason='session_closed')
-        elif contract.is_waiting(controls):
-            foundation = dict(status='unqualified', reason='native_foundation_acting_boundary_unavailable')
+        elif contract.is_waiting(controls) or not strategic_allowed:
+            foundation = dict(status='unqualified', reason=(
+                'native_foundation_acting_boundary_unavailable' if strategic_allowed else
+                contract.NATIVE_STRATEGIC_READER_UNAVAILABLE))
         else:
             source = found_city_catalog_source(player_id, activity['turn'],
                                                core_sha256=core_sha256)
@@ -293,6 +447,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             candidates.extend(founders)
             foundation = dict(status='queried_complete',
                 candidate_ids=[candidate['candidate_id'] for candidate in founders])
+        if not actions_closed and not contract.is_waiting(controls):
             from .xp1_choice_queries import read as read_choices
             choices, choice_families, choice_state = read_choices(saved, observation)
             candidates.extend(choices)
@@ -309,7 +464,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                         city_families[kind]=dict(status='queried_complete',candidate_ids=[r['candidate_id'] for r in rows])
                     else:
                         city_families[kind]=dict(status='unqualified',reason='city_management_not_requested')
-            if common_input_families:
+            if common_input_families and strategic_allowed:
                 from .xp1_production_queue import read as read_queues
                 from civ6_host.contracts.production_queue import UNQUALIFIED_APPEND
                 queue_result=read_queues(saved,observation)
@@ -334,7 +489,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                     candidates.extend(rows)
                     placement_families[kind]=dict(status='queried_partial',
                         candidate_ids=[row['candidate_id'] for row in rows],unqualified=list(gaps))
-            if common_input_families:
+            if common_input_families and strategic_allowed:
                 from .xp1_world_input import read as read_world
                 world=read_world(saved,observation)
                 world_state,queued_orders=world['world_input'],world['queued_orders']
@@ -355,7 +510,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 order_family=dict(status='queried_partial',
                     candidate_ids=[row['candidate_id'] for row in order_rows],
                     unqualified=list(UNQUALIFIED_UNIT_ORDERS))
-            if attack_families:
+            if attack_families and strategic_allowed:
                 from .xp1_unit_attacks import read as read_attacks
                 from civ6_host.contracts.capability_unit_attacks import UNQUALIFIED_UNIT_ATTACKS
                 attack_result=read_attacks(saved,observation)
@@ -408,7 +563,43 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             from .xp2_unit_upgrades import catalogue as read_upgrades
             from .xp2_strategic_resources import observe as read_strategic_resources
             from civ6_host.contracts import plot_purchases, unit_upgrades
-            decisions['schema'] = contract.CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA
+            decisions['schema'] = contract.CAPABILITY_XP2_ENVOYS_SCHEMA
+            from .xp2_policies import read as read_policies
+            from civ6_host.contracts import capability_policies
+            policy_catalogue = read_policies(saved, observation) if (
+                not actions_closed and not contract.is_waiting(controls) and strategic_allowed) else None
+            decisions['policies'] = policy_catalogue
+            policy_rows = [dict(candidate_id=contract.digest(action), action=action)
+                           for action in capability_policies.actions(policy_catalogue,
+                               allow_relocation=True, allow_unchanged=True)]
+            candidates.extend(policy_rows)
+            decisions['families']['policies'] = (
+                dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in policy_rows])
+                if policy_catalogue is not None else dict(status='unqualified', reason=(
+                    'session_closed' if actions_closed else 'native_policy_acting_boundary_unavailable')))
+            from .xp2_policy_unlock import read as read_unlock
+            from civ6_host.contracts import policy_unlock
+            unlock = read_unlock(saved, observation) if policy_catalogue is not None else None
+            decisions['policy_unlock'] = unlock
+            rows = [dict(candidate_id=contract.digest(action), action=action)
+                    for action in policy_unlock.actions(unlock)]
+            candidates.extend(rows)
+            decisions['families']['policy_unlock'] = (
+                dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+                if unlock is not None else dict(status='unqualified', reason=(
+                    'session_closed' if actions_closed else 'native_policy_acting_boundary_unavailable')))
+            from .xp2_government import read as read_government
+            from civ6_host.contracts import government as government_contract
+            government = read_government(saved, observation) if policy_catalogue is not None else None
+            decisions['government'] = government
+            government_rows = [dict(candidate_id=contract.digest(action),action=action)
+                               for action in government_contract.actions(government)]
+            candidates.extend(government_rows)
+            decisions['families']['government'] = (
+                dict(status='queried_partial',candidate_ids=[row['candidate_id'] for row in government_rows],
+                     unqualified=['anarchy_transition'])
+                if government is not None else dict(status='unqualified',reason=(
+                    'session_closed' if actions_closed else 'native_government_acting_boundary_unavailable')))
             decisions['strategic_resources'] = (
                 None if actions_closed else read_strategic_resources(saved, observation))
             continuation.explicit_ranged_shots = {}
@@ -427,7 +618,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 decisions['families']['promote_unit'] = dict(status='queried_complete',
                     candidate_ids=[row['candidate_id'] for row in promotion_rows])
             saved.explicit_unit_upgrades = saved.xp2_unit_upgrades = None
-            upgrades = read_upgrades(saved, observation) if acting else None
+            upgrades = read_upgrades(saved, observation) if acting and strategic_allowed else None
             decisions['unit_upgrades'] = upgrades
             if upgrades is None:
                 decisions['families']['upgrade_unit'] = dict(status='unqualified',
@@ -438,7 +629,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 candidates.extend(upgrade_rows)
                 decisions['families']['upgrade_unit'] = dict(status='queried_complete',
                     candidate_ids=[row['candidate_id'] for row in upgrade_rows])
-            plot_catalogue, city_catalogue = read_plot_purchases(saved, observation) if acting else (None, None)
+            plot_catalogue, city_catalogue = read_plot_purchases(saved, observation, allow_faith=True) if acting else (None, None)
             decisions['plot_purchases'] = plot_catalogue
             decisions['city_purchases'] = city_catalogue
             if plot_catalogue is None:
@@ -450,16 +641,17 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 candidates.extend(purchase_rows)
                 decisions['families']['purchase'] = dict(status='queried_partial',
                     candidate_ids=[row['candidate_id'] for row in purchase_rows],
-                    unqualified=list(plot_purchases.CITY_GAPS))
+                    unqualified=list(plot_purchases.CITY_FAITH_GAPS))
             decisions['production_current'] = (
                 read_current_production(p, observation, production_queues, xp2=True)
                 if production_queues is not None else None)
             for shooter, codec in (('city', native_saved_city_shot), ('district', native_saved_district_shot)):
                 kind = shooter + '_range_attack'
-                shots = codec.catalog(p, activity['turn'], player_id=player_id) if acting else None
+                shot_acting = acting and strategic_allowed
+                shots = codec.catalog(p, activity['turn'], player_id=player_id) if shot_acting else None
                 decisions[shooter + '_shots'] = shots
                 continuation.explicit_ranged_shots[kind] = shots
-                if not acting:
+                if not shot_acting:
                     decisions['families'][kind] = dict(status='unqualified',
                         reason='session_closed' if actions_closed else 'native_' + shooter + '_shot_acting_boundary_unavailable')
                     continue
@@ -490,6 +682,126 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 decisions['families'][kind] = dict(status='queried_partial',
                     candidate_ids=[row['candidate_id'] for row in work_rows if row['action']['kind'] == kind],
                     unqualified=list(gaps))
+        if core_sha256 == XP2_CORE_SHA256:
+            from .xp2_envoys import catalogue as read_envoys
+            from civ6_host.contracts.envoys import actions as envoy_actions
+            acting = not actions_closed and not contract.is_waiting(controls)
+            envoys = read_envoys(saved, observation) if acting and strategic_allowed else None
+            decisions['envoys'] = envoys
+            envoy_rows = [dict(candidate_id=contract.digest(action), action=action)
+                          for action in envoy_actions(envoys)]
+            candidates.extend(envoy_rows)
+            for kind in ('send_envoy', 'retain_envoys'):
+                decisions['families'][kind] = (dict(status='unqualified', reason=(
+                    'session_closed' if actions_closed else 'native_envoy_acting_boundary_unavailable'))
+                    if envoys is None else dict(status='queried_complete', candidate_ids=[
+                        row['candidate_id'] for row in envoy_rows if row['action']['kind'] == kind]))
+        if getattr(saved, 'governors_diagnostic', False):
+            if core_sha256 != XP2_CORE_SHA256:
+                raise ValueError('Governor query option requires the selected XP2 core')
+            from .xp2_governors import catalogue as read_governors
+            from civ6_host.contracts import governors as governor_contract
+            acting = not actions_closed and not contract.is_waiting(controls)
+            governor_catalogue = read_governors(saved, observation) if acting else None
+            decisions['schema'] = contract.CAPABILITY_XP2_GOVERNORS_SCHEMA
+            decisions['governors'] = governor_catalogue
+            governor_rows = [dict(candidate_id=contract.digest(action), action=action)
+                             for action in governor_contract.actions(governor_catalogue)]
+            candidates.extend(governor_rows)
+            for kind in governor_contract.ACTION_FIELDS:
+                decisions['families'][kind] = (dict(status='unqualified', reason=(
+                    'session_closed' if actions_closed else 'native_governor_acting_boundary_unavailable'))
+                    if governor_catalogue is None else dict(status='queried_complete', candidate_ids=[
+                        row['candidate_id'] for row in governor_rows if row['action']['kind'] == kind]))
+        if getattr(saved, 'diplomacy_overview_diagnostic', False):
+            if (core_sha256 != XP2_CORE_SHA256
+                    or decisions['schema'] != contract.CAPABILITY_XP2_GOVERNORS_SCHEMA):
+                raise ValueError('Initial diplomacy requires its complete XP2 v32 input group')
+            from .xp2_diplomacy_overview import catalogue as read_initial_diplomacy
+            from civ6_host.contracts.diplomacy_overview import candidates as initial_choices
+            acting = not actions_closed and not contract.is_waiting(controls)
+            overview = read_initial_diplomacy(saved, observation, sequence=sequence) if acting else None
+            decisions['schema'] = contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA
+            decisions['diplomacy_overview'] = overview
+            rows = [dict(candidate_id=contract.digest(action), action=action)
+                    for action in ([] if overview is None else initial_choices(overview))]
+            candidates.extend(rows)
+            decisions['families']['diplomacy_initiate'] = (
+                dict(status='unqualified', reason='session_closed' if actions_closed else
+                     'native_initial_diplomacy_acting_boundary_unavailable')
+                if overview is None else dict(status='queried_partial',
+                    candidate_ids=[row['candidate_id'] for row in rows],
+                    unqualified=list(contract.INITIAL_DIPLOMACY_GAPS)))
+        if getattr(saved, 'trade_diagnostic', False):
+            if decisions['schema'] != contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA:
+                raise ValueError('Trade requires the selected XP2 v33 query group')
+            from civ6_host.contracts import trade
+            from .xp2_trade import catalogue as read_trade
+
+            acting = not actions_closed and not contract.is_waiting(controls)
+            trade_view = (read_trade(saved, observation, **(
+                            {'include_origins': strategic_allowed} if permissions is not None else {})) if acting else
+                          dict(trade_routes=None, trade_origins=None))
+            decisions['schema'] = contract.CAPABILITY_XP2_TRADE_SCHEMA
+            decisions.update(trade_view)
+            for kind, field, choices in (
+                    ('make_trade_route', 'trade_routes', trade.route_actions),
+                    ('change_trade_origin', 'trade_origins', trade.origin_actions)):
+                value = trade_view[field]
+                rows = [dict(candidate_id=contract.digest(action), action=action)
+                        for action in ([] if value is None else choices(value))]
+                candidates.extend(rows)
+                decisions['families'][kind] = (
+                    dict(status='unqualified', reason='session_closed' if actions_closed else
+                         'native_trade_acting_boundary_unavailable') if value is None else
+                    dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+        if getattr(saved, 'espionage_diagnostic', False):
+            if core_sha256 != XP2_CORE_SHA256:
+                raise ValueError('Espionage requires the selected XP2 engine')
+            from .xp2_espionage import catalogue as read_espionage
+            acting = not actions_closed and not contract.is_waiting(controls)
+            espionage = read_espionage(saved, observation) if acting else None
+            # This is the same decision envelope and native session; no second
+            # scheduler or training-specific projection is involved.
+            decisions = contract.upgrade_espionage_catalogue(
+                decisions, espionage, observation=observation)
+            from .xp2_spy_completion import catalogue as read_spy_completion
+            completion = read_spy_completion(saved, observation) if acting else None
+            decisions = contract.upgrade_spy_completion_catalogue(
+                decisions, completion, observation=observation)
+        if getattr(saved, 'world_congress_diagnostic', False):
+            if core_sha256 != XP2_CORE_SHA256:
+                raise ValueError('Congress requires the selected XP2 engine')
+            from .xp2_world_congress import catalogue as read_congress, check_model_admission
+            check_model_admission(saved)
+            congress = (read_congress(saved, observation, sequence=sequence)
+                        if not actions_closed and not contract.is_waiting(controls) else None)
+            decisions = contract.upgrade_world_congress_catalogue(
+                decisions, congress, observation=observation)
+        if review_requested:
+            from .xp2_world_congress_review import catalogue as read_congress_review
+            review = read_congress_review(saved, observation, sequence=sequence,
+                congress=decisions['world_congress'])
+            decisions = contract.upgrade_review_catalogue(decisions,
+                review['world_congress_review'], observation=observation,
+                status=review['world_congress_review_status'])
+            if permissions is not None:
+                if _read_command_permissions(saved, player_id, activity['turn'], sequence) != permissions:
+                    raise ValueError('Native command permissions changed during catalogue collection')
+                if not strategic_allowed:
+                    for family in contract.STRATEGIC_READER_FAMILIES:
+                        if family in decisions['families']:
+                            decisions['families'][family] = dict(status='unqualified',
+                                reason=contract.NATIVE_STRATEGIC_READER_UNAVAILABLE)
+                decisions = contract.upgrade_command_permissions_catalogue(
+                    decisions, permissions, observation=observation, actions_closed=actions_closed)
+                from .xp2_world_congress_active_effects import catalogue as read_congress_active_effects
+                effects = read_congress_active_effects(saved, observation, sequence=sequence,
+                    congress=decisions['world_congress'])
+                decisions = contract.upgrade_active_effects_catalogue(decisions,
+                    effects['world_congress_active_effects'], observation=observation,
+                    status=effects['world_congress_active_effects_status'])
+        decisions.pop('decision_id', None)
         decisions['decision_id'] = contract.digest(decisions)
         contract.validate_capability_catalogue(decisions, identity, sequence, activity['turn'],
             player_id=player_id, actions_closed=actions_closed, observation=observation)

@@ -146,6 +146,7 @@ class CheckpointTurnReadbackTests(unittest.TestCase):
         else:
             f.m['observed_game_turn']=f.o['turn']=f.m['decisions']['turn']=turn
             f.m['network_boundary']['session']['turn']=turn
+            f.closure['initial_turn']=turn
             f.closure['network_checkpoint']=f.write_manifest()
             bundle=cp.resume_bundle(f.original,f.closure)
         owner=NS(inputs=bundle.inputs,captured_bundle=bundle,

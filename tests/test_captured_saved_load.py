@@ -167,4 +167,35 @@ class CapturedSavedLoad(unittest.TestCase):
             self.assertEqual(attach.call_count, 1)
 
 
+class CurrentSavedLoadImageTests(unittest.TestCase):
+    def test_current_content_keeps_its_identity_while_selecting_reference_xp2_abi(self):
+        from civ6_host.runtime.execution_images import known_path, select
+        from civ6_host.runtime.gameplay_active_profiles import CURRENT_XP2_CORE_SHA256
+        from civ6_host.runtime.native.native_official_bundle import PreparedBundle
+
+        profile_id = 'xp2-gamecore-current-092abfbb'
+        image = select(profile_id, core_path=known_path(profile_id))
+        actual_content = dict(engine=dict(
+            executable_sha256='d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe',
+            gamecore_sha256=CURRENT_XP2_CORE_SHA256))
+        current = PreparedBundle(reference=('work/official-capture/current/manifest.json', 'a' * 64),
+            inputs=None, initial_turn=1, engine_path=Path(image.path), fixture={}, dependencies={},
+            expected_readback={}, content_profile=actual_content, execution_image=image)
+        self.assertEqual(m._sha(current), m.XP2_CORE_SHA256)
+        self.assertEqual(current.content_profile['engine']['gamecore_sha256'], CURRENT_XP2_CORE_SHA256)
+
+        legacy = replace(current, content_profile=dict(engine=dict(
+            gamecore_sha256=m.XP2_CORE_SHA256)), execution_image=None)
+        self.assertEqual(m._sha(legacy), m.XP2_CORE_SHA256)
+
+        with self.assertRaises(ValueError):
+            m._sha(replace(current, execution_image=None))
+        altered = dict(image.__dict__)
+        altered['reference_core_sha256'] = '0' * 64
+        with self.assertRaises(ValueError):
+            m._sha(replace(current, execution_image=altered))
+        with self.assertRaises(ValueError):
+            m._sha(replace(current, content_profile=dict(engine=dict(gamecore_sha256='0' * 64))))
+
+
 if __name__ == '__main__':unittest.main()

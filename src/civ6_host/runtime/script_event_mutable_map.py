@@ -45,6 +45,18 @@ def pack_mutable_map(arguments, seed):
     return packed, maps, seed_buffer, seed_count, buffers
 
 
+def pack_mutable_map_strings(arguments, seed):
+    from .script_event_strings import pack_strings
+    validate_transport(seed)
+    packed, maps, strings, buffers = pack_strings(arguments)
+    seed_count = len(seed) // 16
+    if seed_count + sum(item.count for item in maps) > MAX_OPS:
+        raise ValueError('Aggregate mutable map transport budget exceeded')
+    seed_buffer = C.create_string_buffer(seed, len(seed))
+    buffers.append(seed_buffer)
+    return packed, maps, strings, seed_buffer, seed_count, buffers
+
+
 class MutableMapResultDispatcher:
     """Source-bound, thread-owned dispatcher; a host refusal quarantines it."""
 
@@ -137,14 +149,28 @@ class MutableMapResultDispatcher:
             self._empty_root()
             # A snapshot only: the caller's destination is never cloned or owned.
             seed = self.factory.snapshot(destination, names=True).transport
-            packed, maps, seed_buffer, seed_count, buffers = pack_mutable_map(arguments, seed)
+            from .script_event_strings import has_strings, StringTransport, require_string_transport
+            if has_strings(arguments):
+                require_string_transport(self.runtime)
+                packed, maps, strings, seed_buffer, seed_count, buffers = pack_mutable_map_strings(arguments, seed)
+                dispatch = self.native.LAB_GameEventsDispatchMutableMapStringsResult
+                dispatch.argtypes = [C.c_void_p, C.c_char_p, C.POINTER(HKSArgument), C.c_size_t,
+                    C.POINTER(MapTransport), C.c_size_t, C.POINTER(StringTransport), C.c_size_t,
+                    C.c_void_p, C.c_uint32, C.c_void_p, C.c_void_p, C.c_uint32,
+                    C.POINTER(C.c_uint8), C.POINTER(C.c_uint8),
+                    C.POINTER(C.c_uint32), C.POINTER(C.c_uint32)]
+                dispatch.restype = C.c_int
+                string_parameters = (strings, len(strings))
+            else:
+                packed, maps, seed_buffer, seed_count, buffers = pack_mutable_map(arguments, seed)
+                dispatch, string_parameters = self.native_dispatch, ()
             self.busy = True
             valid, truthiness = C.c_uint8(), C.c_uint8()
             refused, phase = C.c_uint32(), C.c_uint32()
             try:
-                status = self.native_dispatch(
+                status = dispatch(
                     self.root, name, packed if len(packed) else None, len(packed),
-                    maps if len(maps) else None, len(maps), seed_buffer, seed_count,
+                    maps if len(maps) else None, len(maps), *string_parameters, seed_buffer, seed_count,
                     destination, self.base, 2,
                     C.byref(valid), C.byref(truthiness), C.byref(refused), C.byref(phase))
             finally:

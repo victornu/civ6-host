@@ -87,6 +87,32 @@ class A0NotificationScopeServiceTests(unittest.TestCase):
                 with self.assertRaises(ValueError): c.enable_notification_scopes()
                 self.assertEqual(before, (d.host_notification_counter, d.host_metadata_counter, d.pending))
 
+    def test_current_xp2_research_change_preserves_the_live_notification_scope(self):
+        from civ6_host.runtime import a0_notification_scope_source as scope
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        from civ6_host.runtime.execution_images import known_path, select
+
+        profile_id = 'xp2-gamecore-current-092abfbb'
+        image = select(profile_id, core_path=known_path(profile_id))
+        h, d, a, c, r, _, _ = fixtures.A0FamilyServiceTests.fixture(self, XP2_CORE_SHA256)
+        d.core._civ6_host_execution_image = image
+        with patch.object(scope, 'verify_research_changed_live') as verify:
+            c.enable_notification_scopes()
+        verify.assert_called_once_with(image, d.core._handle, c.read)
+        self.assertNotIn(scope.RESEARCH_CHANGED, self.scope.records)
+        d.host_notification_counter = d.host_metadata_counter = 1
+        r.fields.return_value = {
+            0xa1e5a149: bytes.fromhex('030000004c54495000000000000000000000000000000000'),
+            0xa1fbc372: bytes.fromhex('02000000206c612004000000000000000000000000000000'),
+            0xd6fcf3e4: scalar(2, 0),
+        }
+        self.assertEqual(a.dispatch(h.pointer, scope.RESEARCH_CHANGED, 0x9000), 0)
+        record, = d.pending
+        self.assertEqual(struct.unpack_from('<III', record), (96, 186, 1))
+        self.assertEqual(struct.unpack_from('<III', record, 80), (1, 0, 4))
+        self.assertEqual(d.drain(), 1)
+        self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (1, 1))
+
     def test_scoped_records_match_zero_scope_bytes_and_preserve_all_counter_cases(self):
         for kind, (record_type, size, flag) in self.scope.records.items():
             h0,d0,a0,c0,r0,_,_ = self.fixture(enable=False)

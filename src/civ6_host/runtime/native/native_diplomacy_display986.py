@@ -30,9 +30,13 @@ def verify_source():
     official_source('DiplomacyStatementSupport.lua', SUPPORT_SHA)
     return proof
 
-def lua_projection(statement):
+def lua_projection(statement, *, execution_image=None):
     """Tail in the existing default-handler scope (parsed/mood/quote/from/to)."""
-    verify_source()
+    if execution_image is None:
+        verify_source()
+    else:
+        from ..xp2_diplomacy_display_source import source
+        source(execution_image=execution_image)
     from civ6_host.runtime.native.native_diplomacy_statement import NAMES
     fields = statement['fields']
     if set(fields) != set(NAMES):
@@ -107,18 +111,25 @@ def validate_public(value, data):
         seen.add(row['key'])
     return value
 
-def read(owner, statement, data, configuration, sequence):
-    from civ6_host.runtime.native.native_saved_actions import snapshot
+def read(owner, statement, data, configuration, sequence, *, saved_context=None):
+    from civ6_host.runtime.native.native_diplomacy_choices import _snapshot
     from civ6_host.runtime.native.native_diplomacy_choices import lua_source
     from civ6_host.runtime.native.native_locale_arguments import attach
     from civ6_host.runtime.native.native_episode_identity import require_episode
-    before = snapshot(owner, 'before')
+    image=None
+    source_sha=PROOF_SHA
+    if saved_context is not None:
+        from ..xp2_diplomacy_display_source import verify_live,SOURCE
+        image=getattr(owner.core,'_civ6_host_execution_image',None)
+        verify_live(owner.core._handle,owner.runtime.read,execution_image=image)
+        source_sha=SOURCE[1]
+    before = _snapshot(owner, 'before', saved_context)
     prefix = owner.prefix
     attach(prefix)
-    raw = prefix.runtime.evaluate_text(prefix.ui_child, lua_source(statement, data['session']['player_id'], configuration, public_display=True), b'@official_diplomacy_public_display', capacity=MAX_BYTES)
+    raw = prefix.runtime.evaluate_text(prefix.ui_child, lua_source(statement, data['session']['player_id'], configuration, public_display=True,execution_image=image), b'@official_diplomacy_public_display', capacity=MAX_BYTES)
     value = parse(raw, data, configuration)
-    if snapshot(owner, 'after') != before:
+    if _snapshot(owner, 'after', saved_context) != before:
         raise RuntimeError('Diplomatic display read changed scheduler')
     identity = require_episode(prefix)
-    owner.emit('official_diplomacy_public_display_observed', episode_id=identity.episode_id, game_generation=identity.game_generation, player_id=data['session']['player_id'], sequence=sequence, display=value, source_sha256=PROOF_SHA, actor_encoding_integrated=False, training_eligible=False)
+    owner.emit('official_diplomacy_public_display_observed', episode_id=identity.episode_id, game_generation=identity.game_generation, player_id=data['session']['player_id'], sequence=sequence, display=value, source_sha256=source_sha, actor_encoding_integrated=False, training_eligible=False)
     return value

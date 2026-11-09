@@ -10,13 +10,21 @@ def parameterize(name,raw):
         if raw.count(old)!=1:raise ValueError('Bulk export extraction boundary changed: '+old[:100])
         raw=raw.replace(old,new)
     if name=='civ6rl.native_localization_logical_export':
-        change('    build = _build()\n    installed = _json(ref)', '    installed = _json(ref)')
-        change("    registered = _json(installed.get('registration'))", """    registered = _json(installed.get('registration'))
+        if '    build = _build()\n    installed = _json(ref)' in raw:
+            change('    build = _build()\n    installed = _json(ref)', '    installed = _json(ref)')
+            change("    registered = _json(installed.get('registration'))", """    registered = _json(installed.get('registration'))
     build = bulk_export.selected_build(registered.get('build'))
     build_reference = registered['build'] if build is not None else reference(BUILD_PATH)
     if build is None:
         build = _build()""")
-        change("registered.get('build') == reference(BUILD_PATH)","registered.get('build') == build_reference")
+            change("registered.get('build') == reference(BUILD_PATH)","registered.get('build') == build_reference")
+        else:
+            # The current producer admits exact legacy/current query references
+            # itself. Keep that validation when the selected build is not a
+            # reviewed row-stream build; never substitute a different helper.
+            change("    build = _build(registered.get('build'))", """    build = bulk_export.selected_build(registered.get('build'))
+    if build is None:
+        build = _build(registered.get('build'))""")
         change("    manifest = _json(ref, parent=folder, limit=MAX_MANIFEST_BYTES)","""    manifest = _json(ref, parent=folder, limit=MAX_MANIFEST_BYTES)
     selected = bulk_export.tables_manifest(manifest,ref,folder,player,turn,with_evidence=with_evidence)
     if selected is not None:

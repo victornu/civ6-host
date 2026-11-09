@@ -132,7 +132,9 @@ def bind_owner(backend,core,read,*,core_sha256=XP1_CORE_SHA256):
         bind_faith(backend,core,read,core_sha256=core_sha256)
         from .xp1_goody_hut_profile import bind_owner as bind_goody
         bind_goody(backend,core,read,core_sha256=core_sha256)
-        return event_profile(core_sha256=core_sha256)
+        from .xp2_placement_event_source import event_profile as xp2_profile
+        return xp2_profile(core_sha256=core_sha256,
+            execution_image=getattr(core,'_civ6_host_execution_image',None))
     if core_sha256 != XP1_CORE_SHA256:
         raise ValueError('Unqualified placement source owner engine')
     verify_once(core,read,core_sha256)

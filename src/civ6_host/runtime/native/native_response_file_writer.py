@@ -21,6 +21,9 @@ MAX_RECORD_BYTES = 1048576
 MAX_RECORDS = 50000
 MAX_TOTAL_BYTES = 1024 * 1024 * 1024
 RECEIPT_SCHEMA = 'civ6rl.response_file_receipt.v1'
+LEGACY_BUILDER_SHA = 'ce9592de130f313d1c624e3144e63ed9e421a2a9bcc2a53f4ce7a068fe1a8c3e'
+LEGACY_BUILDER_BYTES = 2980
+LEGACY_BUILDER_ARCHIVE = ROOT / 'work/official-capture/current-image-adapter/before/tools/build_response_file_writer.py'
 
 def _require(ok, message):
     if not ok:
@@ -53,6 +56,50 @@ def reference(path):
     _require(_resolve_resource_path(path).resolve(strict=True) == path and path.is_relative_to(ROOT), 'Project source artifact required')
     data = _resolve_resource_path(path).read_bytes()
     return historical_reference(dict(path=str(path), bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
+
+def current_source_overlay(source_bytes, profile=None):
+    """Reconstruct the reviewed current-image writer snapshot without loading it."""
+    from civ6_host.runtime.native.native_resolved_content import EXE_SHA
+    from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
+    from civ6_host.runtime.native.native_localization_query import current_image_profile
+    profile = current_image_profile() if profile is None else profile
+    _require(profile.get('schema') == 'civ6rl.localization_query_execution_profile.v1' and profile.get('executable_sha256') == CURRENT_EXE_SHA and (profile.get('lookup_rva') == '0x4c9c30') and (profile.get('root_manager_rva') == '0x2d09f88') and (profile.get('lua_cs_rva') == '0x3553fa0'), 'Current writer EXE profile differs')
+    images = profile.get('images', {})
+    havok_name = 'HavokScript_FinalRelease.dll'
+    havok = images.get(havok_name)
+    _require(type(havok) is dict and havok.get('historical_sha256') and havok.get('current_sha256'), 'Current writer Havok identity is incomplete')
+    hashes = {EXE_SHA: CURRENT_EXE_SHA, havok['historical_sha256']: havok['current_sha256']}
+    exports = {row.get('export_name'): row for row in profile.get('havok_exports', ()) if type(row) is dict}
+    old_addresses = {5023184: profile['lookup_rva'], 47222664: profile['root_manager_rva'], 55914400: profile['lua_cs_rva']}
+    text = source_bytes.decode('utf-8')
+    api_rows = re.findall('API\\(\\s*\\w+\\s*,\\s*"([^"]+)"\\s*,\\s*(0x[0-9a-fA-F]+)\\s*\\)', text)
+    _require(len(api_rows) == 5 and len({name for name, _ in api_rows}) == 5, 'Response writer Havok API surface changed')
+    for export_name, old_text in api_rows:
+        matches = [row for row in exports.values() if row.get('export_name') == export_name and row.get('old_rva', '').lower() == old_text.lower() and (row.get('old_havok_sha256') == havok['historical_sha256']) and (row.get('current_havok_sha256') == havok['current_sha256'])]
+        _require(len(matches) == 1 and matches[0].get('current_rva'), 'Response writer Havok export lacks an exact current name/RVA join')
+        old = int(old_text, 16)
+        _require(old not in old_addresses, 'Duplicate response writer relocation')
+        old_addresses[old] = matches[0]['current_rva']
+    _require(len(old_addresses) == 8, 'Incomplete current writer relocation set')
+    replacements = []
+    for old, new in hashes.items():
+        count = text.count(old)
+        _require(count > 0, 'Current writer source does not consume a pinned image hash')
+        text = text.replace(old, new)
+        replacements.append(dict(kind='image_hash', old=old, new=new, count=count))
+    seen = set()
+
+    def relocate(match):
+        value = int(match.group(), 16)
+        if value not in old_addresses:
+            return match.group()
+        seen.add(value)
+        return old_addresses[value]
+    text = re.sub('\\b0x[0-9a-fA-F]+\\b', relocate, text)
+    _require(seen == set(old_addresses), 'Current writer source overlay did not consume the exact reviewed RVA set')
+    for old, new in old_addresses.items():
+        replacements.append(dict(kind='rva', old='0x' + format(old, 'x'), new=new, count=len(re.findall('\\b' + re.escape('0x' + format(old, 'x')) + '\\b', source_bytes.decode('utf-8'), re.I))))
+    return (text.encode('utf-8'), dict(profile=profile, replacements=replacements))
 
 def prepare_directory(folder, *, session_id=None, writer_nonce=None, max_records=MAX_RECORDS, max_total_bytes=MAX_TOTAL_BYTES):
     """Create only a fresh, empty local folder, plus an external preparation file."""
@@ -92,11 +139,45 @@ def verify_build(path):
     _require(report.get('schema') == 'civ6rl.response_file_writer_build.v1' and report.get('returncode') == 0 and (report.get('test_only') is False), 'Successful production writer build required')
     _require(report.get('native_ui_qualified') is False, 'Build cannot attest live UI qualification')
     _require(not any(('RFW_TESTING' in value for value in report['command'])), 'Test compiler define refused')
-    for item in report['sources'] + report['snapshots'] + [report['dll']]:
-        _require(type(item) is dict and reference(item['path']) == item, 'Build source/binary pin differs')
     expected = ROOT / 'native/response_file_writer.c'
-    _require(report['sources'][0] == reference(expected) and report['snapshots'][0]['sha256'] == report['sources'][0]['sha256'], 'Writer source differs')
-    _require(_resolve_resource_path(Path(report['dll']['path'])).name == 'civ6rl-response-file-writer.dll', 'Unexpected writer DLL')
+    from civ6_host.runtime.native.native_resolved_content import EXE_SHA
+    from civ6_host.runtime.native.native_resolved_content import CURRENT_EXE_SHA
+    sources, snapshots, dll = (report.get('sources'), report.get('snapshots'), report.get('dll'))
+    _require(type(sources) is list and len(sources) >= 3 and (type(snapshots) is list) and (len(snapshots) == 1) and (type(dll) is dict), 'Incomplete writer build references')
+    for item in snapshots + [dll]:
+        _require(type(item) is dict and reference(item['path']) == item, 'Build snapshot/binary pin differs')
+    archived_builder = None
+    archived_builder_index = None
+    for index, item in enumerate(sources):
+        _require(type(item) is dict, 'Invalid writer source pin')
+        if item.get('path') == str(_resolve_resource_path(ROOT / 'tools/build_response_file_writer.py').resolve()) and item.get('sha256') == LEGACY_BUILDER_SHA and (item.get('bytes') == LEGACY_BUILDER_BYTES):
+            archived = reference(LEGACY_BUILDER_ARCHIVE)
+            _require(archived['sha256'] == LEGACY_BUILDER_SHA and archived['bytes'] == LEGACY_BUILDER_BYTES and ({**item, 'path': archived['path']} == archived), 'Archived legacy response writer builder differs')
+            archived_builder, archived_builder_index = (archived, index)
+        else:
+            _require(reference(item['path']) == item, 'Build source pin differs')
+    _require(sources[0] == reference(expected) and _resolve_resource_path(Path(dll['path'])).name == 'civ6rl-response-file-writer.dll', 'Writer source or DLL differs')
+    profile = report.get('execution_profile')
+    if profile is None:
+        _require(set(report).isdisjoint({'source_overlay'}) and len(sources) == 3 and (sources[1].get('sha256') == LEGACY_BUILDER_SHA) and (sources[1].get('bytes') == LEGACY_BUILDER_BYTES) and (sources[2] == reference(ROOT / 'work/official-capture/localization-query/abi-audit.json')) and (snapshots[0]['sha256'] == sources[0]['sha256']) and (_resolve_resource_path(_resolve_resource_path(Path(snapshots[0]['path']))).read_bytes() == _resolve_resource_path(expected).read_bytes()), 'Legacy writer build/source archive differs')
+    else:
+        _require(profile.get('executable_sha256') == CURRENT_EXE_SHA, 'Writer execution profile executable differs')
+        from civ6_host.runtime.native.native_localization_query import current_image_profile
+        expected_profile = current_image_profile()
+        _require(profile == expected_profile, 'Current writer execution profile/evidence differs')
+        _require(len(sources) == 3 + len(profile['evidence']) and sources[1] == reference(ROOT / 'tools/build_response_file_writer.py') and (sources[2] == reference(ROOT / 'work/official-capture/localization-query/abi-audit.json')) and (sources[3:] == profile['evidence']), 'Current writer source/evidence pins differ')
+        snapshot_path = _plain_path(snapshots[0]['path'])
+        _require(snapshot_path.parent == path.parent and snapshot_path.name == expected.name, 'Current writer snapshot location differs')
+        source_overlay = report.get('source_overlay')
+        _require(type(source_overlay) is list and len(source_overlay) == 1, 'Current writer source-overlay proof missing')
+        reconstructed, proof = current_source_overlay(_resolve_resource_path(expected).read_bytes(), profile)
+        expected_overlay = [dict(source=reference(expected), snapshot=reference(snapshot_path), replacements=proof['replacements'])]
+        _require(_resolve_resource_path(snapshot_path).read_bytes() == reconstructed and source_overlay == expected_overlay, 'Current writer snapshot is not the exact reviewed one-pass overlay')
+    _require(report.get('command') and str(snapshots[0]['path']) in report['command'], 'Compiler command does not compile the pinned snapshot')
+    _require(report.get('execution_profile') is None or report['execution_profile']['executable_sha256'] == CURRENT_EXE_SHA, 'Unsupported writer execution profile')
+    if archived_builder is not None:
+        report['sources'] = list(sources)
+        report['sources'][archived_builder_index] = archived_builder
     return report
 
 def registration_command(build, process, prepared):

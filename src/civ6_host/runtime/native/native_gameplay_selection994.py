@@ -29,6 +29,8 @@ MAX_READER_SECONDS = 10.0
 MAX_CAPTURE_SECONDS = 30.0
 SELECTION_OFFSET = 656
 RECORD_BYTES = 40
+CURRENT_EXE_SHA256 = 'd1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe'
+CURRENT_SOURCE_SHA256 = 'b7a84db116b87f28890f89622553768c8024c2def153cf935df155ea09b7e0ca'
 
 class _Deadline:
     """Cooperative bound: a blocked OS call still needs an external watchdog."""
@@ -60,8 +62,30 @@ def _validate_read_limits(max_read_calls, max_journal_ranges):
         if type(value) is not int or not 0 < value <= maximum:
             raise ContentSnapshotError('Invalid gameplay selection read/range bound')
 
-def source_profile():
+def source_profile(executable_sha256=EXE_SHA):
     """Verify archived getter bodies and the newly captured field helper."""
+    if executable_sha256 == CURRENT_EXE_SHA256:
+        path = ROOT / 'work/official-content929/current-exe-source.json'
+        raw = _resolve_resource_path(path).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != CURRENT_SOURCE_SHA256:
+            raise ContentSnapshotError('Current gameplay selection source pin changed')
+        value = json.loads(raw)
+        selected = value['selection']
+        if value['image']['sha256'] != CURRENT_EXE_SHA256 or value['status']['content_reader_admission'] is not False or selected['status']['runtime_unqualified'] is not True or (selected['status']['content929_admission_implied'] is not False) or (selected['contract_checks']['official_runtime_capture_performed'] is not False):
+            raise ContentSnapshotError('Current selection source overclaims its scope')
+        for field, verified in selected['contract_checks'].items():
+            if field != 'official_runtime_capture_performed' and verified is not True:
+                raise ContentSnapshotError('Incomplete current selection contract')
+        for ref in selected['historical_sources']:
+            if hashlib.sha256(_resolve_resource_path(ROOT / ref['path']).read_bytes()).hexdigest() != ref['sha256']:
+                raise ContentSnapshotError('Historical selection source changed')
+        spans = selected['verification_spans']
+        bodies = {int(row['rva'], 16): bytes.fromhex(row['raw_hex']) for row in spans}
+        if len(bodies) != 3 or any((row['kind'] != 'code' for row in spans)) or tuple(sorted(map(len, bodies.values()))) != (8, 55, 95) or (bodies[int(selected['helper']['current_rva'], 16)] != bytes.fromhex('488d8190020000c3')) or (selected['indexed_getter']['record_stride_bytes'] != RECORD_BYTES) or (selected['indexed_getter']['path_pointer_offset'] != 8):
+            raise ContentSnapshotError('Invalid current selection getter bodies')
+        return {'content': None, 'image': value['image'], 'bodies': bodies, 'manager_global_rva': int(selected['manager_global_rva'], 16), 'current_correspondence_sha256': CURRENT_SOURCE_SHA256}
+    if executable_sha256 != EXE_SHA:
+        raise ContentSnapshotError('Unsupported gameplay selection executable')
     route_path = ROOT / 'work/phase1-learning994/gameplay-activation-route.json'
     aux_path = ROOT / 'evidence/native-aux-stack.json'
     values = []
@@ -86,7 +110,7 @@ def source_profile():
         bodies[expected_rva] = raw
     return {'content': content_source_profile(), 'bodies': bodies}
 
-def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES, timeout_seconds=MAX_READER_SECONDS, clock=time.monotonic):
+def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES, timeout_seconds=MAX_READER_SECONDS, clock=time.monotonic, executable_sha256=EXE_SHA, include_resolved_content=False):
     """Return the exact final list and stable read observations, not admission.
 
     Null/empty rows remain records because the original consumer skips them.
@@ -94,11 +118,11 @@ def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_
     fields are begin/end; no capacity or other record fields are interpreted.
     Re-reading is change detection and does not guarantee an atomic snapshot.
     """
-    if not callable(read_memory):
+    if not callable(read_memory) or type(include_resolved_content) is not bool:
         raise ContentSnapshotError('Invalid memory reader')
     _validate_read_limits(max_read_calls, max_journal_ranges)
     deadline = _Deadline(timeout_seconds, clock, MAX_READER_SECONDS)
-    profile = source_profile()
+    profile = source_profile(executable_sha256)
     deadline.check()
     consumed = calls = 0
 
@@ -116,8 +140,13 @@ def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_
         if type(raw) is not bytes or len(raw) != size:
             raise ContentSnapshotError('Incomplete gameplay selection memory read')
         return raw
-    before = read_resolved_content(bounded, image_base)
-    manager = int(before['manager_address'], 16)
+    current = executable_sha256 == CURRENT_EXE_SHA256
+    if current:
+        if type(image_base) is not int or image_base % 65536 or (not 65536 <= image_base <= MAX_USER_ADDRESS - 50331648):
+            raise ContentSnapshotError('Invalid current selection image base')
+        before = read_resolved_content(bounded, image_base, executable_sha256=executable_sha256) if include_resolved_content else None
+    else:
+        before = read_resolved_content(bounded, image_base)
     journal = []
 
     def remember(address, size):
@@ -129,6 +158,14 @@ def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_
     for rva, expected in profile['bodies'].items():
         if remember(image_base + rva, len(expected)) != expected:
             raise ContentSnapshotError('Gameplay getter code differs from pinned source')
+    if current:
+        manager = struct.unpack('<Q', remember(image_base + profile['manager_global_rva'], 8))[0]
+        if manager % 8 or not 65536 <= manager <= MAX_USER_ADDRESS - SELECTION_OFFSET - 16:
+            raise ContentSnapshotError('Absent/unaligned current selection manager')
+        if before is not None and int(before['manager_address'], 16) != manager:
+            raise ContentSnapshotError('Selection manager differs from resolved content')
+    else:
+        manager = int(before['manager_address'], 16)
     header = remember(manager + SELECTION_OFFSET, 16)
     begin, end = struct.unpack('<2Q', header)
     if (begin, end) == (0, 0):
@@ -161,11 +198,12 @@ def read_gameplay_selection(read_memory, image_base, *, max_read_calls=MAX_READ_
     for address, raw in reversed(journal):
         if bounded(address, len(raw)) != raw:
             raise ContentSnapshotError('Gameplay selection changed during capture')
-    after = read_resolved_content(bounded, image_base)
-    if before != after:
-        raise ContentSnapshotError('Resolved content changed around gameplay selection')
+    if before is not None:
+        after = read_resolved_content(bounded, image_base, executable_sha256=executable_sha256) if current else read_resolved_content(bounded, image_base)
+        if before != after:
+            raise ContentSnapshotError('Resolved content changed around gameplay selection')
     deadline.check()
-    return {'schema': 'civ6rl.gameplay_selection994.memory_snapshot.v1', 'route_source_sha256': ROUTE_SHA256, 'getter_source_sha256': AUX_SHA256, 'executable_sha256': EXE_SHA, 'image_base': hex(image_base), 'manager_address': hex(manager), 'resolved_content': before, 'vector_header_hex': header.hex(), 'record_count': count, 'records': records, 'selected_paths': [row['path'] for row in records if not row['consumer_skips']], 'memory_bytes_read': consumed, 'observed_ranges_unchanged': True, 'memory_read_calls': calls, 'journal_ranges': len(journal), 'bounds': {'max_read_calls': max_read_calls, 'max_journal_ranges': max_journal_ranges, 'cooperative_timeout_seconds': timeout_seconds}, 'atomic_snapshot_proven': False, 'execution_proven': False, 'source_file_bytes_bound': False, 'save_identity_bound': False, 'database_identity_bound': False, 'training_eligible': False, 'player_observation': False, 'read_only': True}
+    return {'schema': 'civ6rl.gameplay_selection994.memory_snapshot.v2' if current else 'civ6rl.gameplay_selection994.memory_snapshot.v1', 'route_source_sha256': ROUTE_SHA256, 'getter_source_sha256': AUX_SHA256, 'executable_sha256': executable_sha256, 'image_base': hex(image_base), 'manager_address': hex(manager), 'resolved_content': before, 'vector_header_hex': header.hex(), 'record_count': count, 'records': records, 'selected_paths': [row['path'] for row in records if not row['consumer_skips']], 'memory_bytes_read': consumed, 'observed_ranges_unchanged': True, 'memory_read_calls': calls, 'journal_ranges': len(journal), 'bounds': {'max_read_calls': max_read_calls, 'max_journal_ranges': max_journal_ranges, 'cooperative_timeout_seconds': timeout_seconds}, 'atomic_snapshot_proven': False, 'execution_proven': False, 'source_file_bytes_bound': False, 'save_identity_bound': False, 'database_identity_bound': False, 'training_eligible': False, 'player_observation': False, 'read_only': True, **({'current_correspondence_sha256': CURRENT_SOURCE_SHA256, 'resolved_content_captured': before is not None, 'manager_global_rva': hex(profile['manager_global_rva'])} if current else {})}
 
 def _file_digest(path, check_deadline=None):
     digest = hashlib.sha256()
@@ -181,18 +219,21 @@ def _file_digest(path, check_deadline=None):
             digest.update(block)
     return digest.hexdigest()
 
-def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES):
+def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES, executable_sha256=EXE_SHA, include_resolved_content=False):
     """Capture through 929 with a cooperative deadline and bounded reads.
 
     Identity/module APIs are checked immediately after return, and file hashing
     checks between 1 MiB chunks. A stalled OS call cannot be preempted here;
     the caller's process watchdog remains necessary for a hard time limit.
     """
+    if type(include_resolved_content) is not bool:
+        raise ContentSnapshotError('Invalid resolved-content capture option')
     _validate_read_limits(max_read_calls, max_journal_ranges)
     deadline = _Deadline(timeout_seconds, clock, MAX_CAPTURE_SECONDS)
-    expected = _resolve_resource_path(_resolve_resource_path(Path(source_profile()['content']['image']['path']))).resolve(strict=True)
+    profile = source_profile(executable_sha256)
+    expected = _resolve_resource_path(_resolve_resource_path(Path((profile['image'] if executable_sha256 == CURRENT_EXE_SHA256 else profile['content']['image'])['path']))).resolve(strict=True)
     deadline.check()
-    if _file_digest(expected, deadline.check) != EXE_SHA:
+    if _file_digest(expected, deadline.check) != executable_sha256:
         raise ContentSnapshotError('Installed EXE differs from pinned source')
     identity = process.identity()
     deadline.check()
@@ -206,7 +247,10 @@ def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.
         raise ContentSnapshotError('Capture requires one EXE and one GameCore module')
     core = cores[0]
     core_sha = _file_digest(core['path'], deadline.check)
-    state = read_gameplay_selection(process.read, mains[0]['base'], timeout_seconds=min(MAX_READER_SECONDS, deadline.check()), clock=clock, max_read_calls=max_read_calls, max_journal_ranges=max_journal_ranges)
+    options = {} if executable_sha256 == EXE_SHA else {'executable_sha256': executable_sha256}
+    if include_resolved_content:
+        options['include_resolved_content'] = include_resolved_content
+    state = read_gameplay_selection(process.read, mains[0]['base'], timeout_seconds=min(MAX_READER_SECONDS, deadline.check()), clock=clock, max_read_calls=max_read_calls, max_journal_ranges=max_journal_ranges, **options)
     if process.identity() != identity:
         raise ContentSnapshotError('Process identity changed during capture')
     deadline.check()
@@ -215,15 +259,15 @@ def capture_process(process, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.
     key = lambda m: (m['base'], m['name'], m['path'], m['bytes'])
     if sorted(modules, key=key) != sorted(after_modules, key=key):
         raise ContentSnapshotError('Process modules changed during capture')
-    if _file_digest(expected, deadline.check) != EXE_SHA or _file_digest(core['path'], deadline.check) != core_sha:
+    if _file_digest(expected, deadline.check) != executable_sha256 or _file_digest(core['path'], deadline.check) != core_sha:
         raise ContentSnapshotError('Executable file changed during capture')
     if process.identity() != identity:
         raise ContentSnapshotError('Process identity changed after final module/file checks')
     deadline.check()
-    return {'schema': 'civ6rl.official_gameplay_selection994.capture.v1', 'process': identity, 'exe_module': mains[0], 'gamecore_module': {**core, 'sha256': core_sha}, 'snapshot': state, 'consumer_core_matches_base_proof': core_sha == BASE_CORE_SHA256, 'read_only_process_rights': 1024 | 16, 'game_executable_launched': False, 'remote_code_executed': False, 'process_suspended': False, 'memory_written': False, 'execution_proven': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False, 'cooperative_timeout_seconds': timeout_seconds}
+    return {'schema': 'civ6rl.official_gameplay_selection994.capture.v2' if executable_sha256 == CURRENT_EXE_SHA256 else 'civ6rl.official_gameplay_selection994.capture.v1', 'process': identity, 'exe_module': mains[0], 'gamecore_module': {**core, 'sha256': core_sha}, 'snapshot': state, 'consumer_core_matches_base_proof': core_sha == BASE_CORE_SHA256, 'read_only_process_rights': 1024 | 16, 'game_executable_launched': False, 'remote_code_executed': False, 'process_suspended': False, 'memory_written': False, 'execution_proven': False, 'save_database_script_bundle_qualified': False, 'strategic_training_ready': False, 'cooperative_timeout_seconds': timeout_seconds}
 
-def capture(pid, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES):
+def capture(pid, *, timeout_seconds=MAX_CAPTURE_SECONDS, clock=time.monotonic, max_read_calls=MAX_READ_CALLS, max_journal_ranges=MAX_JOURNAL_RANGES, executable_sha256=EXE_SHA, include_resolved_content=False):
     """Inspect an explicit existing PID; never launch or attach a debugger."""
     from civ6_host.runtime.workers.capture_official_content929 import ReadOnlyProcess
     with ReadOnlyProcess(pid) as process:
-        return capture_process(process, timeout_seconds=timeout_seconds, clock=clock, max_read_calls=max_read_calls, max_journal_ranges=max_journal_ranges)
+        return capture_process(process, timeout_seconds=timeout_seconds, clock=clock, max_read_calls=max_read_calls, max_journal_ranges=max_journal_ranges, executable_sha256=executable_sha256, include_resolved_content=include_resolved_content)

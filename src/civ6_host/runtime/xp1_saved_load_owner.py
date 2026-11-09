@@ -232,6 +232,11 @@ class SavedLoadOwner:
             self.publication = SavedCachePublication(self.post)
             self.backend.saved_load_publication_attempt = self.publication
             self.publication_result = self.publication.run()
+            from . import xp2_bbg_inputs
+            if (self._engine_sha256 == XP2_CORE_SHA256
+                    and xp2_bbg_inputs.is_reference(getattr(self.inputs, 'official_bundle', None))):
+                from .xp2_bbg_view_ready import deliver
+                deliver(self.publication)
             self._finish('published')
         return self.publication_result
 
@@ -255,9 +260,24 @@ class SavedLoadOwner:
     def execute(self, action):
         self._check('commands', requested='unit_commands_candidate')
         from .xp1_continuation import validate_command
-        validate_command(action)
+        validate_command(action, observation=self.continuation.observation)
         with self._attempt():
             result = self.continuation.execute(action,session=self)
+            self._finish('commands')
+        return result
+
+    def advance_congress_empty(self, protocol_sequence):
+        """Private post-action/poll SetPhase transition, never an actor opcode."""
+        self._check('commands', requested='unit_commands_candidate')
+        if getattr(self, 'world_congress_diagnostic', False) is not True:
+            return None
+        from .xp2_world_congress import prepare_empty_phase
+        with self._attempt():
+            result = None
+            if prepare_empty_phase(self, sequence=protocol_sequence):
+                result = self.continuation._transition(
+                    dict(kind='automatic_congress_empty_phase', sequence=protocol_sequence),
+                    session=self, pump=False)
             self._finish('commands')
         return result
 

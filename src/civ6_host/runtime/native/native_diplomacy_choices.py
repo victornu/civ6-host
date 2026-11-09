@@ -29,7 +29,8 @@ def official_source(name, digest):
 def is_catalog(value):
     return type(value) is dict and value.get('schema') in (SCHEMA, CURRENT_SCHEMA)
 
-def lua_source(statement, player_id, configuration=None, *, public_display=False):
+def lua_source(statement, player_id, configuration=None, *, public_display=False,
+               execution_image=None):
     verify_source_evidence()
     official_source('DiplomacyActionView.lua', VIEW_SHA)
     head = b'local function identity()\n' + pending.source(statement, player_id) + b'\nend\nlocal identityText=identity()\n'
@@ -46,7 +47,7 @@ def lua_source(statement, player_id, configuration=None, *, public_display=False
         marker = 'return \'{"identity":'
         if body.count(marker) != 1:
             raise RuntimeError('Diplomacy projection insertion point changed')
-        body = body[:body.index(marker)] + lua_projection(statement)
+        body = body[:body.index(marker)] + lua_projection(statement, execution_image=execution_image)
     bindings = b'' if configuration is None else lua_bindings(configuration)
     return bindings + head + support + b'\n' + handler_source() + body.encode('ascii')
 
@@ -90,16 +91,34 @@ def validate_data(data, statement, pid):
 def actions(data, statement):
     return [dict(kind='diplomacy_response', session_id=data['session']['session_id'], statement_sequence=statement['event_sequence'], choice=row['key']) for row in data['selections'] if not row['disabled']]
 
-def read(owner, sequence, *, closed=False):
+def _continuation(owner, saved_context=None):
+    if saved_context is None:
+        return continuation.validate(owner)
+    return saved_context.validate(owner)
+
+
+def _snapshot(owner,phase,saved_context=None):
+    if saved_context is None:
+        from .native_saved_actions import snapshot
+        return snapshot(owner,phase)
+    from ..xp1_saved_load_owner import SavedLoadOwner
+    saved=saved_context.saved
+    if type(saved) is not SavedLoadOwner or saved.backend is not owner:
+        raise ValueError('Diplomacy snapshot requires its exact saved-session owner')
+    saved._check('commands',requested='unit_commands_candidate')
+    with saved._attempt():
+        return owner.jobs.query_snapshot(saved,phase)
+
+def read(owner, sequence, *, closed=False, saved_context=None):
     from civ6_host.runtime.native.native_saved_actions import snapshot
     from civ6_host.runtime.native.native_saved_actions import digest
     from civ6_host.runtime.native.native_saved_actions import GAPS
     from civ6_host.runtime.native.native_player_observation import observe_player
     from civ6_host.runtime.native.native_episode_identity import require_episode
     from civ6_host.runtime.native import native_saved_player_map as player_map
-    c = continuation.validate(owner)
+    c = _continuation(owner, saved_context)
     p = owner.prefix
-    before = snapshot(owner, 'before')
+    before = _snapshot(owner, 'before', saved_context)
     ledger = p.deferred_events.pending_diplomacy_statements
     if not ledger or ledger[0] != c.pending.statement:
         raise RuntimeError('Published statement no longer first')
@@ -110,7 +129,11 @@ def read(owner, sequence, *, closed=False):
     if obs['turn'] not in (c.turn, c.turn + 1):
         raise RuntimeError('Interrupted turn changed unexpectedly')
     from civ6_host.runtime.native.native_diplomacy_configuration import read as read_configuration
-    configuration = read_configuration(owner, statement)
+    if saved_context is None:
+        configuration = read_configuration(owner, statement)
+    else:
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        configuration = read_configuration(owner, statement, core_sha256=XP2_CORE_SHA256)
     if not getattr(owner, 'diplomacy_database_namespace_attached', False):
         if not p.runtime.database_bound:
             raise RuntimeError('Official gameplay database is not bound')
@@ -118,19 +141,28 @@ def read(owner, sequence, *, closed=False):
         owner.diplomacy_database_namespace_attached = True
         owner.emit('native_diplomacy_database_namespace_attached', borrowed_gameplay_connection=True, new_database_connection=False, strategic_training_ready=False)
     data = parse(p.runtime.evaluate_text(p.ui_child, lua_source(statement, pid, configuration), b'@official_diplomacy_choices', capacity=131072), statement, pid)
-    from civ6_host.runtime.native.native_diplomacy_display986 import read as read_display
-    from civ6_host.runtime.native.native_diplomacy_display986 import PROOF_SHA as DISPLAY_SHA
-    from civ6_host.runtime.native.native_saved_yield_display982 import observe as observe_yield_display
-    public_display = read_display(owner, statement, data, configuration, sequence)
-    yield_display = observe_yield_display(p, obs)
     offers = [] if closed else actions(data, statement)
     identity = require_episode(p)
-    result = dict(schema=CURRENT_SCHEMA, episode_id=identity.episode_id, game_generation=identity.game_generation, sequence=sequence, player_id=pid, turn=obs['turn'], origin_turn=c.turn, player_map=map_view, statement=statement, data=data, source_sha256=PROOF_SHA256, ui_support_sha256=SUPPORT_SHA, public_display=public_display, public_display_source_sha256=DISPLAY_SHA, yield_display=yield_display, candidates=[dict(candidate_id=digest(a), action=a) for a in offers], unsupported=list(GAPS), complete_action_space=False)
+    result = dict(schema=SCHEMA if saved_context is not None else CURRENT_SCHEMA,
+        episode_id=identity.episode_id, game_generation=identity.game_generation,
+        sequence=sequence, player_id=pid, turn=obs['turn'], origin_turn=c.turn,
+        player_map=map_view, statement=statement, data=data, source_sha256=PROOF_SHA256,
+        ui_support_sha256=SUPPORT_SHA,
+        candidates=[dict(candidate_id=digest(a), action=a) for a in offers],
+        unsupported=list(GAPS), complete_action_space=False)
+    if saved_context is None:
+        # These rendered display readers are pinned to the Base projection. The
+        # XP2 saved path exposes the native menu and omits unqualified displays.
+        from civ6_host.runtime.native.native_diplomacy_display986 import read as read_display
+        from civ6_host.runtime.native.native_diplomacy_display986 import PROOF_SHA as DISPLAY_SHA
+        from civ6_host.runtime.native.native_saved_yield_display982 import observe as observe_yield_display
+        result.update(public_display=read_display(owner, statement, data, configuration, sequence),
+            public_display_source_sha256=DISPLAY_SHA, yield_display=observe_yield_display(p, obs))
     if c.origin == 'world_input':
         result['continuation_origin'] = 'world_input'
     result['decision_id'] = digest(result)
-    continuation.validate(owner)
-    if snapshot(owner, 'after') != before:
+    _continuation(owner, saved_context)
+    if _snapshot(owner, 'after', saved_context) != before:
         raise RuntimeError('Diplomacy read changed scheduler')
     owner.explicit_observation = copy.deepcopy(obs)
     owner.explicit_diplomacy = copy.deepcopy(result)
@@ -207,18 +239,18 @@ def _deliver_request(transport, expected, proof):
     if transport.pending:
         raise RuntimeError('Native diplomatic followups exceeded bounded delivery')
 
-def apply(owner, action):
+def apply(owner, action, *, saved_context=None):
     from civ6_host.runtime.native.native_saved_actions import snapshot
-    c = continuation.validate(owner)
+    c = _continuation(owner, saved_context)
     old = owner.explicit_diplomacy
     origin = c.origin
-    obs, current = read(owner, old['sequence'])
+    obs, current = read(owner, old['sequence'], saved_context=saved_context)
     if current != old or action not in [r['action'] for r in current['candidates']]:
         raise RuntimeError('Stale diplomacy selection')
     sid = action['session_id']
     pid = current['player_id']
     p = owner.prefix
-    before = snapshot(owner, 'before')
+    before = _snapshot(owner, 'before', saved_context)
     if p.actions.pending:
         raise RuntimeError('Diplomacy response overlapping a round-completion echo is not qualified')
     code = pending.source(current['statement'], pid)
@@ -230,6 +262,10 @@ def apply(owner, action):
     else:
         raise ValueError('Unknown explicit diplomatic response')
     owner.emit('before_official_explicit_action', action=action, player_id=pid, turn=obs['turn'], jobs_before=before, automatic_choices_applied=False, strategic_training_ready=False)
+    response_started = False
+    if saved_context is not None:
+        saved_context.begin_response(owner)
+        response_started = True
     owner.busy = True
     try:
         raw = p.runtime.evaluate_text(p.ui_child, source, b'@explicit_native_diplomacy_response', capacity=1024)
@@ -245,13 +281,18 @@ def apply(owner, action):
     except BaseException:
         owner.poisoned = True
         owner.stage = 'poisoned'
+        if saved_context is not None:
+            saved_context.poison(owner)
         raise
     finally:
         owner.busy = False
+        if response_started and not owner.poisoned:
+            saved_context.end_response(owner)
     owner.emit('official_explicit_diplomacy_response_applied', action=action, pending_statement_removed=True, native_success=True, native_command_delivered=True, transport_source_sha256=TRANSPORT_SHA, automatic_choices_applied=False, strategic_training_ready=False)
-    after = continuation.resume(owner)
+    after = (continuation.resume(owner) if saved_context is None
+             else saved_context.resume(owner))
     if after is None:
         from civ6_host.runtime.native.native_player_observation import observe_player
         after = observe_player(p.runtime, p.ui_child, pid)
-    owner.emit('official_explicit_action_observed', action=action, player_id=pid, turn=obs['turn'], observation=after, jobs_before=before, jobs_after=snapshot(owner, 'after'), automatic_choices_applied=False, round_completed=origin == 'end_turn' and getattr(owner, 'turn_continuation', None) is None, strategic_training_ready=False)
+    owner.emit('official_explicit_action_observed', action=action, player_id=pid, turn=obs['turn'], observation=after, jobs_before=before, jobs_after=_snapshot(owner, 'after', saved_context), automatic_choices_applied=False, round_completed=origin == 'end_turn' and getattr(owner, 'turn_continuation', None) is None, strategic_training_ready=False)
     return after

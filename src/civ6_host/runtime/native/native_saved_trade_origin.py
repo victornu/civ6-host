@@ -6,11 +6,13 @@ import hashlib, json
 from civ6_host.runtime.native.native_source_cache import load_pinned_json
 from civ6_host.runtime.native.native_player_observation import observe_player
 from civ6_host.runtime.native.native_saved_unit_orders import uint
+from civ6_host.contracts.trade import (ORIGIN_FIELDS as FIELDS,
+    compare_origins as compare_own, origin_actions as actions,
+    validate_origin_action as validate_action, validate_origins as validate_catalog)
 from civ6_host.runtime.native import native_saved_trade as trade
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_saved_trade_origin.py')))).resolve().parents[1]
 PROOF = ROOT / 'work/trade-origin968/source.json'
 PROOF_SHA = '16441e00438e3a95a369ba365743f8acf961750ae36cbf653ac8cce18ccff84f'
-FIELDS = {'kind', 'unit_id', 'origin_city', 'source_x', 'source_y', 'destination_city', 'x', 'y', 'plot_id'}
 LIMIT = 524288
 
 def verify_source():
@@ -29,64 +31,6 @@ def source(pid, turn):
     verify_source()
     return f'local pid,turn={pid},{turn}\n'.encode() + LUA.encode()
 
-def validate_action(a, width, height):
-    if type(a) is not dict or set(a) != FIELDS or a['kind'] != 'change_trade_origin':
-        raise ValueError('Malformed origin action')
-    for k in ('unit_id', 'origin_city', 'destination_city'):
-        uint(a[k], k)
-    for k in ('x', 'source_x'):
-        uint(a[k], k, width - 1)
-    for k in ('y', 'source_y'):
-        uint(a[k], k, height - 1)
-    uint(a['plot_id'], 'plot', width * height - 1)
-    if a['plot_id'] != a['y'] * width + a['x'] or a['destination_city'] == a['origin_city'] or (a['x'], a['y']) == (a['source_x'], a['source_y']):
-        raise ValueError('Invalid origin destination')
-    return a
-
-def validate_catalog(v, pid, turn):
-    if type(v) is not dict or set(v) != {'player_id', 'turn', 'width', 'height', 'units'}:
-        raise ValueError('Malformed origin catalogue')
-    if type(v['player_id']) is not int or type(v['turn']) is not int or v['player_id'] != pid or (v['turn'] != turn):
-        raise ValueError('Foreign origin catalogue')
-    w = uint(v['width'], 'width', 16384)
-    h = uint(v['height'], 'height', 16384)
-    if not w or not h or w * h > 16384 or (type(v['units']) is not list) or (len(v['units']) > 4096):
-        raise ValueError('Unbounded origin catalogue')
-    ids = []
-    total = 0
-    for u in v['units']:
-        if type(u) is not dict or set(u) != {'unit_id', 'origin_city', 'x', 'y', 'available', 'targets', 'map_targets'}:
-            raise ValueError('Malformed origin unit')
-        ids.append(uint(u['unit_id'], 'unit'))
-        uint(u['origin_city'], 'city')
-        uint(u['x'], 'x', w - 1)
-        uint(u['y'], 'y', h - 1)
-        if type(u['available']) is not bool or type(u['targets']) is not list or type(u['map_targets']) is not list:
-            raise ValueError('Malformed origin targets')
-        if len(u['map_targets']) > w * h or any((type(p) is not int or not 0 <= p < w * h for p in u['map_targets'])) or u['map_targets'] != sorted(set(u['map_targets'])):
-            raise ValueError('Invalid origin highlights')
-        if not u['available'] and (u['targets'] or u['map_targets']):
-            raise ValueError('Unavailable origin exposes choices')
-        cities = []
-        for d in u['targets']:
-            if type(d) is not dict or set(d) != {'city_id', 'x', 'y', 'plot_id', 'name'} or type(d['name']) is not str or (len(d['name'].encode('utf8')) > 32768):
-                raise ValueError('Malformed origin city')
-            validate_action(_action(u, d), w, h)
-            cities.append(d['city_id'])
-            total += 1
-        if cities != sorted(set(cities)):
-            raise ValueError('Duplicate origin city')
-    if ids != sorted(set(ids)) or total > 4096:
-        raise ValueError('Duplicate/unbounded origin units')
-    return v
-
-def _action(u, d):
-    return dict(kind='change_trade_origin', unit_id=u['unit_id'], origin_city=u['origin_city'], source_x=u['x'], source_y=u['y'], destination_city=d['city_id'], x=d['x'], y=d['y'], plot_id=d['plot_id'])
-
-def actions(v):
-    validate_catalog(v, v['player_id'], v['turn'])
-    return [_action(u, d) for u in v['units'] for d in u['targets']]
-
 def parse(raw, pid, turn):
     if type(raw) is not bytes or len(raw) > LIMIT:
         raise ValueError('Unbounded origin wire')
@@ -102,18 +46,6 @@ def parse(raw, pid, turn):
 
 def catalog(prefix, turn, *, player_id=0):
     return parse(prefix.runtime.evaluate_text(prefix.ui_child, source(player_id, turn) + b'local value=snapshot();return encode(value)', b'@explicit_trade_origin', capacity=LIMIT + 1), player_id, turn)
-
-def compare_own(v, obs):
-    validate_catalog(v, obs['player_id'], obs['turn'])
-    units = {u['id']: (u['x'], u['y']) for u in obs['units']}
-    cities = {c['id']: (c['x'], c['y']) for c in obs['cities']}
-    if (v['width'], v['height']) != (obs['width'], obs['height']):
-        raise ValueError('Origin grid differs')
-    for u in v['units']:
-        if units.get(u['unit_id']) != (u['x'], u['y']) or cities.get(u['origin_city']) != (u['x'], u['y']):
-            raise ValueError('Origin unit/city absent from own observation')
-        if any((cities.get(d['city_id']) != (d['x'], d['y']) for d in u['targets'])):
-            raise ValueError('Origin destination is not an observed own city')
 
 def request_source(a, v):
     if a not in actions(v):

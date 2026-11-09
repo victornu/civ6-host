@@ -34,7 +34,7 @@ def configuration_geometry(configuration, initial_turn, state):
                 major_player_ids=majors, taken_player_ids=taken)
 
 
-def select(core_sha256):
+def select(core_sha256, *, official_bundle=None):
     from .capture_candidates import select_private_candidate
     if core_sha256 == XP1_CORE_SHA256:
         family, width, height, ids = 'xp1-lan', 74, 46, tuple(range(6))
@@ -42,21 +42,47 @@ def select(core_sha256):
         family, width, height, ids = 'xp2-lan', 44, 26, (0, 1)
     else:
         raise ValueError('Unknown captured session engine')
-    return CapturedSessionProfile(select_private_candidate(candidate_profile=family),
-                                  width, height, ids, (0,))
+    candidate = select_private_candidate(candidate_profile=family, official_bundle=official_bundle)
+    return CapturedSessionProfile(candidate, width, height, ids, (0,))
 
 
 def for_backend(backend):
-    selected = select(backend.load_abi.core_sha256)
     bundle = backend.captured_bundle
+    selected = select(backend.load_abi.core_sha256, official_bundle=bundle.reference)
     if (bundle.reference != selected.candidate.reference
             or bundle.inputs.profile is not selected.candidate.profile):
         raise ValueError('Captured session engine and input identity differ')
     return selected
 
 
-def for_family(family):
+def for_family(family, *, official_bundle=None):
     from .capture_candidates import select_private_candidate
-    candidate=select_private_candidate(candidate_profile=family)
+    candidate=select_private_candidate(candidate_profile=family, official_bundle=official_bundle)
     if candidate is None:raise ValueError('An explicit captured session family is required')
-    return select(candidate.core_sha256)
+    return select(candidate.core_sha256, official_bundle=official_bundle)
+
+
+def require_bbg_capture(reference, *, execution_image=None):
+    """Select a BBG family scope, never substitute for full input admission.
+
+    Historical sources keep their recorded origin. Registered current captures
+    must repeat the exact current-image selection and captured process pair;
+    the prepared reader still validates their saves, data and scripts before Load.
+    """
+    from . import xp2_bbg_inputs as bbg, xp2_bundle_inputs as xp2
+    from .native.native_official_bundle import normalize_reference
+    normalized = normalize_reference(dict(zip(('path','sha256'),reference))
+                                     if type(reference) is tuple and len(reference) == 2 else reference)
+    if normalized == bbg.REFERENCE:
+        return normalized
+    registered = bbg.registered_reference()
+    if registered is None or normalized != registered:
+        raise ValueError('BBG family requires its exact historical or registered capture')
+    capture = bbg._complete_capture(normalized)
+    process = capture['preflight']['process']
+    if capture.get('process_after') != process:
+        raise ValueError('BBG family capture process changed across its official save')
+    actual = xp2.validate_process(process, execution_image=execution_image)
+    if actual != xp2.CURRENT_XP2_CORE_SHA256:
+        raise ValueError('Registered BBG family requires the explicitly selected current image')
+    return normalized

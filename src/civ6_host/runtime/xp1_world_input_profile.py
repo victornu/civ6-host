@@ -52,10 +52,12 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
             raise ValueError('Official world-input Lua changed')
     return proof
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_world_input_source import source_dependencies as selected
-        return selected()
+        return selected(core_sha256,execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 world-input ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown world-input engine')
     from .resource_resolution import resolve_path
     from .paths import resource_root
@@ -136,6 +138,9 @@ def adapt_request_source(raw,core_sha256):
     """
     if core_sha256==BASE_CORE_SHA256:return raw
     verify_source(core_sha256)
+    if core_sha256==XP2_CORE_SHA256:
+        from .xp2_world_input_source import adapt_request_source as adapt_xp2
+        return adapt_xp2(raw)
     changes=((b'local nativeUnitManager=UnitManager',b'local unqualified=false\nlocal nativeUnitManager=UnitManager'),
       (b' return nativeRequest(requestUnit,operation,parameters)',
        b" if operationName~='MOVE_TO' then unqualified=true;return end\n return nativeRequest(requestUnit,operation,parameters)"),

@@ -90,7 +90,7 @@ def source():
     return p
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
     from .xp2_preload_source import source_pins as reader_pins
     p=source();refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),*p['references'].values(),*p['extractors'],*p['source_modules']]
     pins=reader_pins()
@@ -98,8 +98,15 @@ def source_dependencies():
         path=str(_path(r['path']))
         if path in pins and pins[path]!=r['sha256']:raise ValueError('Conflicting absent source pin')
         pins[path]=r['sha256']
-    # Source images are authenticated by the parent after process termination.
-    pins.update({str(r['path']):r['sha256'] for r in p['images'].values()})
+    # Static image identities remain in the receipt; only the selected Core is
+    # a runtime file dependency for the host.
+    provenance_images=list(p['images'].values())
+    if execution_image is None:
+        pins.update({str(r['path']):r['sha256'] for r in provenance_images})
+    else:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image,
+                                             provenance_images=provenance_images)
     verify_pinned_files(pins)
     verify_extracted_sources(p['source_modules'])
     return pins

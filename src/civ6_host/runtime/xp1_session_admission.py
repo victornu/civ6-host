@@ -7,7 +7,10 @@ import hashlib
 from pathlib import Path
 
 
-def source_dependencies():
+def source_dependencies(*,execution_image=None):
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
     from . import session_configuration, xp1_saved_load, captured_session_profile
     return {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (Path(__file__).resolve(),

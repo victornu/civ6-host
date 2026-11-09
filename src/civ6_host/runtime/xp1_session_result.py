@@ -5,10 +5,20 @@ write-before-notification transition. No facts are synthesized. Game termination
 is the existing first-observed-winner episode policy, never an engine-halt claim.
 """
 from .configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256
-from .xp1_status_profiles import SOURCE, bind_owner, source_dependencies,source_reference
+from .xp1_status_profiles import (SOURCE, bind_owner,
+    source_dependencies as _status_source_dependencies, source_reference)
 
 BASE_CORE_SHA256 = 'd7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'
 RESULT_PROFILE = 'xp1-status-observation-v1'
+
+
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
+    """Pass the selected source/runtime identity through the result collector."""
+    pins=_status_source_dependencies(core_sha256,execution_image=execution_image)
+    if execution_image is not None:
+        from .runtime_source_dependencies import materialize_runtime_source_pins
+        pins=materialize_runtime_source_pins(pins,execution_image=execution_image)
+    return pins
 
 
 def verify_reader_source(core_sha256):
@@ -49,7 +59,7 @@ def bind_policy_provenance(value, core_sha256):
     return value
 
 
-def read(saved, player_id=None):
+def read(saved, player_id=None, *, allow_diplomacy=False):
     """Read the current local UI result from one exact live SavedLoadOwner."""
     from .xp1_saved_load_owner import SavedLoadOwner
     from .native.native_episode_identity import require_episode
@@ -59,9 +69,19 @@ def read(saved, player_id=None):
         raise TypeError('Result read requires the exact saved-Load owner')
     saved._check('commands',requested='unit_commands_candidate')
     b,p,c = saved.backend,saved.prefix,saved.continuation
+    if type(allow_diplomacy) is not bool:
+        raise ValueError('Exact result dialogue read mode required')
+    context=None
+    if allow_diplomacy:
+        from .xp2_diplomacy import _SavedDialogueContext
+        context=getattr(saved,'_xp2_diplomacy',None)
+        if type(context) is not _SavedDialogueContext or context.saved is not saved:
+            raise ValueError('Dialogue result read requires its exact retained saved context')
+        context.validate(b)
+    control_options={'allow_diplomacy':True} if allow_diplomacy else {}
     core_sha256=b.load_abi.core_sha256
     verify_reader_source(core_sha256)
-    c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True)
+    c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True,**control_options)
     identity = require_episode(p)
     current = c.observation
     local,turn = current['player_id'],current['turn']
@@ -85,7 +105,7 @@ def read(saved, player_id=None):
         parsed = facts.parse_facts(payload,player_id,turn,core_sha256=core_sha256)
         if first != {key:parsed[key] for key in ('winner_present','winning_team','victory_type')}:
             raise ValueError('Consecutive native XP1 winner reads disagree')
-        c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True)
+        c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True,**control_options)
         if policy is None:
             policy = FirstOfficialVictory(identity.episode_id,core_sha256=core_sha256)
             p._first_official_victory_policy = policy
@@ -93,4 +113,5 @@ def read(saved, player_id=None):
         result['game_generation'] = identity.game_generation
         p.emit('native_victory_episode_policy_observed',result=result,
                engine_state_modified=False,eligible_for_training=False)
+    if context is not None:context.validate(b)
     return result

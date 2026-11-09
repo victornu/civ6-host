@@ -121,7 +121,7 @@ def select_specs(core_sha256,retained):
 
 
 @lru_cache(maxsize=2)
-def event_profile(*,core_sha256=XP1_CORE_SHA256):
+def _event_profile(*,core_sha256=XP1_CORE_SHA256):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_district_damage_event_source import event_profile as selected
         return selected()
@@ -136,10 +136,20 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256):
                            MappingProxyType(SIZES),SOURCE[1])
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires XP2 district ABI')
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+    return _event_profile(core_sha256=core_sha256)
+
+
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_district_damage_event_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 district ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unqualified district source engine')
     from pathlib import Path
     from .paths import resource_root
@@ -189,10 +199,13 @@ class VerifiedSource:
     proof_sha256:str
 
 
-def bind_owner(owner,core,read):
+def bind_owner(owner,core,read,*,execution_image=None):
     if owner.load_abi.core_sha256==XP2_CORE_SHA256:
         from .xp2_district_damage_event_source import bind_owner as selected
-        return selected(owner,core,read)
+        if execution_image is None:
+            execution_image=getattr(core,'_civ6_host_execution_image',None)
+        return selected(owner,core,read,execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 district ABI')
     owner.check_thread()
     if owner.core is not core or owner.load_abi.core_sha256!=XP1_CORE_SHA256:
         raise ValueError('XP1 district source owner mismatch')

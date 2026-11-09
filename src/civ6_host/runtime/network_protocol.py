@@ -7,6 +7,7 @@ same-turn catalogue stale.
 from __future__ import annotations
 
 import copy
+import re
 from uuid import UUID
 
 from civ6_host.client import _ENVELOPE, _digest, _public_contracts
@@ -81,17 +82,24 @@ class NetworkProtocol(ActionProtocol):
     closure_schema = CLOSURE_SCHEMA
 
     def __init__(self, identity, nonce, round_limit=8, *, initial_turn=1,
-                 core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'):
+                 core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3',
+                 war_source_sha256=None):
         if type(identity) is not DiagnosticEpisodeIdentity:
             raise ValueError('Native episode identity required')
         if type(initial_turn) is not int or not 0 <= initial_turn <= 100000:
             raise ValueError('Invalid captured initial turn')
+        if (war_source_sha256 is not None
+                and (type(war_source_sha256) is not str
+                     or re.fullmatch('[0-9a-f]{64}', war_source_sha256) is None)):
+            raise ValueError('war_source_sha256 must be a lowercase SHA-256 digest or None')
         super().__init__(identity, nonce, round_limit=round_limit)
         from .xp1_session_result import result_provenance
         self._result_provenance = result_provenance(core_sha256)
         self.core_sha256 = core_sha256
         self.initial_turn = initial_turn
+        self.war_source_sha256 = war_source_sha256
         self.catalogues = {}
+        self.observations = {}
         self.session = None
         self.last_outcome = None
 
@@ -142,9 +150,41 @@ class NetworkProtocol(ActionProtocol):
                 or catalogue['game_generation'] != self.identity.game_generation
                 or catalogue['turn'] != self.session['turn']):
             raise ValueError('Actor catalogue is stale for the current native turn')
+        if network_turn_contract.is_world_war_decisions(catalogue):
+            network_turn_contract.validate_catalogue(
+                catalogue, self.identity, catalogue['sequence'], catalogue['turn'],
+                player_id=player_id, actions_closed=self.ended,
+                observation=self.observations.get(player_id),
+                expected_war_source_sha256=self.war_source_sha256)
+            selection = request.get('selection')
+            if (type(selection) is not dict
+                    or set(selection) != {'decision_id', 'candidate_id'}
+                    or selection['decision_id'] != catalogue['decision_id']):
+                raise ValueError('Malformed or stale world-war modal selection')
+            matches = [row['action'] for row in catalogue['candidates']
+                       if row['candidate_id'] == selection['candidate_id']]
+            if len(matches) != 1:
+                raise ValueError('World-war response is absent from the current modal')
+            return copy.deepcopy(matches[0])
+        if network_turn_contract.is_diplomacy_decisions(catalogue):
+            network_turn_contract.validate_catalogue(
+                catalogue, self.identity, catalogue['sequence'], catalogue['turn'],
+                player_id=player_id, actions_closed=self.ended,
+                observation=self.observations.get(player_id))
+            selection = request.get('selection')
+            if (type(selection) is not dict
+                    or set(selection) != {'decision_id', 'candidate_id'}
+                    or selection['decision_id'] != catalogue['decision_id']):
+                raise ValueError('Malformed or stale diplomacy modal selection')
+            matches = [row['action'] for row in catalogue['candidates']
+                       if row['candidate_id'] == selection['candidate_id']]
+            if len(matches) != 1:
+                raise ValueError('Diplomacy response is absent from the current modal')
+            return copy.deepcopy(matches[0])
         legacy = network_turn_contract.validate_catalogue(
             catalogue, self.identity, catalogue['sequence'], catalogue['turn'],
-            player_id=player_id, actions_closed=self.ended)
+            player_id=player_id, actions_closed=self.ended,
+            observation=self.observations.get(player_id))
         if network_turn_contract.is_capability_catalogue(catalogue):
             return network_turn_contract.select_capability(catalogue, request.get('selection'))
         if legacy is None:
@@ -196,6 +236,7 @@ class NetworkProtocol(ActionProtocol):
                 raise ValueError('LAN turn moved backwards')
         if self.session is None or session['turn'] != self.session['turn']:
             self.catalogues = {}
+            self.observations = {}
         self.session = session
         self.sequence = response['sequence']
         self.rounds = session['turn'] - self.initial_turn
@@ -205,8 +246,10 @@ class NetworkProtocol(ActionProtocol):
         observation, decisions = response['observation'], response['decisions']
         if self.ended:
             self.catalogues = {}
+            self.observations = {}
         elif observation is not None and decisions is not None:
             self.catalogues[observation['player_id']] = copy.deepcopy(decisions)
+            self.observations[observation['player_id']] = copy.deepcopy(observation)
             self.decisions = copy.deepcopy(decisions)
 
     def commit(self, request, *, native_terminated=False, turn_completed=None):
@@ -327,7 +370,8 @@ def validate_network_response(response, protocol, operation, *, request=None):
             raise ValueError('Initial view is not the configured local human')
         legacy_decisions = network_turn_contract.validate_catalogue(
             decisions, protocol.identity, response['sequence'], turn,
-            player_id=player_id, actions_closed=ended, observation=observation)
+            player_id=player_id, actions_closed=ended, observation=observation,
+            expected_war_source_sha256=protocol.war_source_sha256)
         if decisions['turn_controls']['active'] != (player_id in session['active_human_player_ids']):
             raise ValueError('Actor activity differs from native session state')
         if network_turn_contract.is_capability_catalogue(decisions):
@@ -335,6 +379,15 @@ def validate_network_response(response, protocol, operation, *, request=None):
             # own-unit observation. This schema declares no revealed map or
             # legacy information groups; none are substituted with empty data.
             pass
+        elif network_turn_contract.is_world_war_decisions(decisions):
+            # The contract validator authenticates this distinct temporary
+            # modal; it is neither a legacy action catalogue nor a map view.
+            pass
+        elif network_turn_contract.is_diplomacy_decisions(decisions):
+            # Public dialogue has its own redacted contract. In particular,
+            # never reconstruct the private statement/data catalogue here.
+            player_map.validate(decisions['player_map'], player_id, turn,
+                                visible=observation)
         elif legacy_decisions is None:
             player_map.validate(decisions['player_map'], player_id, turn,
                                 visible=observation)

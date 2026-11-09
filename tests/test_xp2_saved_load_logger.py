@@ -1,7 +1,11 @@
 """XP2-selected shared logger state and atomic ownership checks; no DLL runs."""
 import ctypes as C
 import json
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from civ6_host.runtime import xp1_saved_load_logger as m
 from civ6_host.runtime.configuration_profiles import _copy
@@ -29,6 +33,67 @@ def backend():
 
 
 class XP2Logger(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Win32 file handles are required')
+    def test_private_native_log_beyond_max_path_preserves_content(self):
+        from civ6_host.runtime.native.native_logging import PrivateLogFiles
+        from civ6_host.runtime.paths import resource_root
+
+        def fail(reason, **details):
+            self.fail(f'{reason} {details}')
+
+        with TemporaryDirectory(dir=resource_root()/'work') as directory:
+            base = Path(directory)
+            parent = base / ('x' * (220 - len(str(base))))
+            parent.mkdir()
+            root = parent/'native-logs'
+            filename = 'Game_HeroesManager_PlayerStats.csv'
+            entry = dict(filename=filename, flags=0)
+            channel = 1
+            host = SimpleNamespace(log_channels={channel: entry},
+                                   _fatal=fail, emit=lambda *args, **kwargs: None)
+            sink = PrivateLogFiles(root, host)
+            path = root/filename
+            self.assertGreaterEqual(len(str(path)), 260)
+            try:
+                self.assertTrue(sink.open(channel, entry))
+                sink.write(channel, b'row')
+                self.assertEqual(sink.paths[channel], path)
+                self.assertFalse(sink.open(channel, entry))
+            finally:
+                sink.close()
+            self.assertEqual(path.read_bytes(), b'row\n')
+            with self.assertRaisesRegex(AssertionError, 'already exists'):
+                sink.open(channel, entry)
+
+    @unittest.skipUnless(os.name == 'nt', 'Win32 file handles are required')
+    def test_private_native_event_beyond_max_path_preserves_content(self):
+        from civ6_host.runtime.native.native_events import NativeEventRecorder
+        from civ6_host.runtime.paths import resource_root
+
+        def fail(reason, **details):
+            self.fail(f'{reason} {details}')
+
+        with TemporaryDirectory(dir=resource_root()/'work') as directory:
+            base = Path(directory)
+            parent = base / ('x' * (237 - len(str(base))))
+            parent.mkdir()
+            root = parent/'native-events'
+            filename = 'net_message_debug.log'
+            path = root/filename
+            self.assertGreaterEqual(len(str(path)), 260)
+            host = SimpleNamespace(_fatal=fail, emit=lambda *args, **kwargs: None)
+            recorder = NativeEventRecorder(root, host)
+            name = C.create_unicode_buffer(filename)
+            payload = b'event data'
+            data = C.create_string_buffer(payload)
+            try:
+                recorder.receive(C.addressof(name), C.addressof(data), len(payload))
+            finally:
+                recorder.close()
+            self.assertEqual(path.read_bytes(), payload)
+            with self.assertRaisesRegex(AssertionError, 'already exists'):
+                recorder._open(filename)
+
     def test_selected_group_preserves_channel_flags_levels_and_sink(self):
         b, calls, _ = backend()
         h = b.host

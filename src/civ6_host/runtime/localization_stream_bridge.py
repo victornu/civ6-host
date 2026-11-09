@@ -18,6 +18,10 @@ STREAM_BUILDS={
     '4fb65eb9cb1fb4fcc445927276a4c0d9c0e1cd1991ef0b30cfa16b0559e4ff8b':
         '3bff1ceb00c38e8619b7330ce2cf3c4ca5d68510e3d9b58e83b0f40876cc3c8d',
     DLL_SHA256:BUILD_SHA256,
+    # Current EXE/Havok binding overlay; native qualification is recorded
+    # separately. Recognition permits the bounded explicit capture probe.
+    'a93a6d1655bf36f9e839b3c990fabc43126a855f662cc8a8877caafb75250445':
+        'd9ea818a9911274d2939d13abe02083229c0bf249c70763d2467e859c2b40a85',
 }
 
 

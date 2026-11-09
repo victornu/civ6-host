@@ -221,6 +221,7 @@ class XP1NetworkSessionTests(unittest.TestCase):
         source = dict(zip(('path', 'sha256'), REFERENCE))
         with Fixture() as f, patch.object(network_checkpoint, 'normalize', return_value=reference), \
                 patch.object(network_checkpoint, '_read', return_value={
+                    'schema': network_checkpoint.SCHEMA,
                     'core_sha256': '0' * 64, 'source_official_bundle': source}) as read, \
                 patch.object(network_checkpoint, '_validate_lineage',
                              side_effect=ValueError('Checkpoint ancestor changed')) as walk, \
@@ -459,6 +460,7 @@ class XP1LoadedCloseReportingTests(unittest.TestCase):
                     report.update(exit_code=89, error='native refusal', stop_reason='command_failed')
                 session = object.__new__(NativeNetworkSession)
                 session.input_profile, session.finished, session.run, session.pins = profile, False, run, pins
+                session.official_bundle = REFERENCE
                 def finish_base(s):
                     s.report = deepcopy(report); s.finished = True
                 with patch.object(NativeActionSession, '_finish', finish_base), patch(

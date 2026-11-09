@@ -64,6 +64,26 @@ class WorldInputSourceTests(unittest.TestCase):
             with self.subTest(engine=bad), self.assertRaises(ValueError):
                 selected.verify_source(bad)
 
+    def test_swap_supplement_pins_only_the_inherited_can_start_request_branch(self):
+        swap = selected.verify_swap_source()
+        route = self.proof['ui_route']['shared_functions']
+        self.assertEqual(swap['official_functions']['MoveUnitToPlot']['extracted_sha256'],
+                         route['MoveUnitToPlot']['extracted_sha256'])
+        self.assertEqual(swap['official_functions']['RequestMoveOperation']['extracted_sha256'],
+                         route['RequestMoveOperation']['extracted_sha256'])
+        self.assertEqual(swap['route']['operation_symbol'], 'UnitOperationTypes.SWAP_UNITS')
+        self.assertIn('CanStartOperation', swap['route']['legality_owner'])
+        self.assertFalse(swap['scope']['war_confirmation_admitted'])
+        self.assertFalse(swap['scope']['other_request_operations_admitted'])
+        self.assertFalse(swap['scope']['full_movement_or_combat_qualified'])
+        original = selected._source
+        altered = dict(swap)
+        altered['route'] = dict(swap['route'], request_call='UnitManager.RequestOperation(kUnit, 999, tParameters)')
+        with patch.object(selected, '_source', side_effect=lambda ref:
+                          altered if ref == selected.SWAP_SOURCE else original(ref)):
+            with self.assertRaisesRegex(ValueError, 'supplement differs'):
+                selected.verify_swap_source()
+
     def test_full_live_fragments_bounded_and_independent_installed_pe(self):
         _, _, read, reads = self.fixture()
         self.assertEqual(selected.verify_live(self.base, read), 92)
@@ -154,6 +174,7 @@ class WorldInputSourceTests(unittest.TestCase):
     def test_complete_dependency_join_keeps_historical_and_selected_sources(self):
         pins = selected.source_dependencies()
         self.assertIn(selected.SOURCE[1], pins.values())
+        self.assertIn(selected.SWAP_SOURCE[1], pins.values())
         self.assertIn(shared.SOURCE[1], pins.values())
         self.assertTrue(any('xp2-initial-choices' in p for p in pins))
         self.assertTrue(any('xp2-action-transport' in p for p in pins))

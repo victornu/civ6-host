@@ -717,12 +717,18 @@ def _load_rows() -> dict[int, dict[str, str]]:
 
 def resolve_empty_receiver_row(record_type):
     row = _ROWS.get(record_type)
+    if row is None and type(record_type) is int and record_type == 208:
+        from civ6_host.runtime.a0_policy_unlock import receiver_row
+        return receiver_row()
     if row is None and type(record_type) is int and (record_type in (241, 242, 243)):
         from civ6_host.runtime.city_scalar_event_profiles import receiver_row
         return receiver_row(record_type)
     if row is None and type(record_type) is int and (record_type in (260, 261)):
         from civ6_host.runtime.game_history_event_profile import receiver_rows
         return receiver_rows()[record_type]
+    if row is None and type(record_type) is int and record_type == 0x106:
+        from civ6_host.runtime.xp2_history_event_profile import property_receiver_row
+        return property_receiver_row()
     if row is None and type(record_type) is int and record_type in (0x107, 0x108):
         from civ6_host.runtime.xp2_history_event_profile import age_receiver_rows
         return age_receiver_rows()[record_type]

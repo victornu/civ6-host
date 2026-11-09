@@ -60,10 +60,11 @@ def source_sha(core_sha256,base_sha):
     return base_sha if core_sha256==BASE_CORE_SHA256 else SOURCE[1]
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_improvement_event_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 improvement/route ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unqualified improvement/route source engine')
     from .paths import resource_root
     from .resource_resolution import resolve_path
@@ -73,7 +74,7 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
 
 
 @lru_cache(maxsize=2)
-def event_profile(*,core_sha256=XP1_CORE_SHA256):
+def _event_profile(*,core_sha256=XP1_CORE_SHA256):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_improvement_event_source import event_profile as selected
         return selected()
@@ -86,6 +87,15 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256):
             raise ValueError('Improvement/route receiver shape changed')
     return A0FamilyProfile(MappingProxyType({k:frozenset((r,)) for k,r in KINDS.items()}),
                            MappingProxyType(SIZES),SOURCE[1])
+
+
+def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires XP2 improvement/route ABI')
+    if execution_image is not None:
+        from .execution_images import identity
+        identity(execution_image)
+    return _event_profile(core_sha256=core_sha256)
 
 
 def verify_live(base,read,*,core_sha256=XP1_CORE_SHA256):
@@ -111,10 +121,13 @@ class VerifiedSource:
     instructions:int
 
 
-def bind_owner(owner,core,read):
+def bind_owner(owner,core,read,*,execution_image=None):
     if owner.load_abi.core_sha256==XP2_CORE_SHA256:
         from .xp2_improvement_event_source import bind_owner as selected
-        return selected(owner,core,read)
+        if execution_image is None:
+            execution_image=getattr(core,'_civ6_host_execution_image',None)
+        return selected(owner,core,read,execution_image=execution_image)
+    if execution_image is not None:raise ValueError('Selected execution image requires XP2 improvement/route ABI')
     from .turn_unit_event_profile import bind_owner as bind_queries
     from .foundation_facade_profiles import verify_xp1_once
     from .paths import resource_root

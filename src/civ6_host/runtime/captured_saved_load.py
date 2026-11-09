@@ -28,7 +28,8 @@ def select_load_closure(closure):
     from .capture_candidates import select_private_candidate
     from .xp1_saved_load_owner import _requested
     _requested(closure)
-    contract=select_private_candidate(candidate_profile=closure.get('input_profile'))
+    contract=select_private_candidate(candidate_profile=closure.get('input_profile'),
+                                      official_bundle=closure.get('official_bundle'))
     if contract is None:
         raise ValueError('Captured Load needs an explicit expansion family')
     if contract.family == 'xp2-lan' and closure.get('resume_checkpoint') is not None:
@@ -42,7 +43,13 @@ def select_load_closure(closure):
 
 def configure_requested(backend,closure):
     """Use the same pre-Load service composition for both expansions."""
+    review_requested = closure.get('world_congress_review_diagnostic', False)
+    if (type(review_requested) is not bool
+            or review_requested and closure.get('world_congress_diagnostic') is not True):
+        raise ValueError('Congress review Load requires its exact Boolean Congress request')
     contract=select_load_closure(closure)
+    if review_requested and contract.family != 'xp2-lan':
+        raise ValueError('Congress review Load requires XP2')
     if backend.load_abi.core_sha256!=contract.core_sha256:
         raise ValueError('Captured Load request differs from its selected engine')
     if contract.family=='xp2-lan' and hasattr(backend,'_xp2_postload_requested'):
@@ -59,6 +66,7 @@ def configure_requested(backend,closure):
     configure_actions(backend,closure)
     if contract.family=='xp2-lan':
         backend._xp2_postload_requested=closure.get('post160_candidate',False)
+        backend._xp2_world_congress_review_requested = review_requested
 
 
 def _sha(bundle):
@@ -66,14 +74,28 @@ def _sha(bundle):
     if type(bundle) is not PreparedBundle:
         raise ValueError('Captured Load requires its actual prepared input owner')
     value = bundle.content_profile['engine']['gamecore_sha256']
-    if value not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
-        raise ValueError('Unknown captured Load engine')
-    return value
+    if value == XP1_CORE_SHA256:
+        return value
+    if value == XP2_CORE_SHA256:
+        return value
+    from .gameplay_active_profiles import CURRENT_XP2_CORE_SHA256
+    if value == CURRENT_XP2_CORE_SHA256:
+        from .xp2_bundle_inputs import verify_current_execution_image
+        selected = verify_current_execution_image(
+            bundle.execution_image, core_path=str(bundle.engine_path))
+        if (selected.image_sha256 != value
+                or selected.reference_core_sha256 != XP2_CORE_SHA256):
+            raise ValueError('Current XP2 content image has no exact XP2 ABI profile')
+        return XP2_CORE_SHA256
+    raise ValueError('Unknown captured Load engine')
 
 
 def validate_candidate_inputs(inputs, bundle):
     if _sha(bundle) == XP1_CORE_SHA256:
         return xp1.validate_candidate_inputs(inputs, bundle)
+    from . import xp2_bbg_inputs
+    if xp2_bbg_inputs.is_reference(bundle.reference):
+        return xp2_bbg_inputs.validate_candidate_inputs(inputs, bundle)
     from .xp2_bundle_inputs import validate_candidate_inputs as validate
     return validate(inputs, bundle)
 
@@ -145,19 +167,21 @@ def attach_services(backend, services):
     if _sha(backend.captured_bundle) == XP1_CORE_SHA256:
         return xp1.attach_services(backend, services)
     from .saved_load_services import SavedLoadServices
-    from .xp2_bundle_inputs import SELECTED_PATHS, SCRIPT_SHA256
+    from .xp1_saved_load_composition import xp2_script_binding
     validate_candidate_inputs(backend.inputs, backend.captured_bundle)
+    registry, hashes, _ = xp2_script_binding(backend.captured_bundle)
+    expected = {wire: hashes[path] for wire, path in zip(registry.wire_paths, registry.paths)}
     if (type(services) is not SavedLoadServices or services.backend is not backend
             or services.core_sha256 != XP2_CORE_SHA256
             or services.saved_config_sha != hashlib.sha256(backend.inputs.configuration).hexdigest()
             or services.saved_map_values != backend.inputs.map_values
-            or services.contexts.wire_paths != SELECTED_PATHS
-            or set(services.contexts.wire_sources) != set(SELECTED_PATHS)
-            or len(services.contexts.sources) != 1):
+            or services.contexts.wire_paths != tuple(registry.wire_paths)
+            or set(services.contexts.wire_sources) != set(expected)
+            or len(services.contexts.sources) != len(hashes)):
         raise ValueError('XP2 prefix requires its exact captured script/configuration owners')
-    path = services.contexts.wire_sources[SELECTED_PATHS[0]]
-    if hashlib.sha256(services.contexts.sources[path]).hexdigest() != SCRIPT_SHA256:
-        raise ValueError('XP2 selected gameplay script changed')
+    for wire, path in services.contexts.wire_sources.items():
+        if hashlib.sha256(services.contexts.sources[path]).hexdigest() != expected[wire]:
+            raise ValueError('XP2 selected gameplay script changed')
     services.attach(backend)
 
 

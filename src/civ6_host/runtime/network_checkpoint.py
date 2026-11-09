@@ -15,6 +15,8 @@ from functools import partial
 from pathlib import Path
 
 SCHEMA = 'civ6-host.network-checkpoint.v1'
+SCHEMA_V2 = 'civ6-host.network-checkpoint.v2'
+REFERENCE_CHECKPOINT_COMPATIBILITY = 'xp2-reference-abi-to-selected-runtime.v1'
 MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 MAX_DEPTH = 64
 
@@ -81,7 +83,7 @@ def _read(reference_pair):
     from .native.native_source_cache import load_pinned_json
     from .native.native_session_resume import plain
     value = plain(load_pinned_json(_path(reference_pair[0]), reference_pair[1]))
-    if (value.get('schema') != SCHEMA
+    if (value.get('schema') not in (SCHEMA, SCHEMA_V2)
             or value.get('core_sha256') != _profile_engine(value.get('input_profile'))
             or value.get('native_save_status') != 0 or value.get('stream_closed') is not True
             or value.get('jobs_quiescent_unchanged') is not True
@@ -89,6 +91,7 @@ def _read(reference_pair):
             or type(value.get('lineage_depth')) is not int
             or not 0 <= value['lineage_depth'] <= MAX_DEPTH):
         raise ValueError('Unsupported LAN checkpoint provenance')
+    _checkpoint_execution_image(value)
     if (type(value.get('observed_game_turn')) is not int or not 1 <= value['observed_game_turn'] <= 100000
             or value.get('player_id') != 0 or value['observation']['player_id'] != 0
             or value['decisions']['player_id'] != 0
@@ -113,7 +116,69 @@ def _read(reference_pair):
     return value
 
 
-def manifest(ref, *, official_bundle=None, reviewed_producers=None):
+def _checkpoint_execution_image(value):
+    """Validate v2's explicit actual/reference pair; v1 remains historical ABI-only."""
+    if value.get('schema') == SCHEMA:
+        if any(key in value for key in ('execution_image', 'actual_image_sha256',
+                                        'reference_core_sha256', 'checkpoint_compatibility')):
+            raise ValueError('Historical v1 checkpoint cannot be relabelled as an execution image')
+        return None
+    if value.get('schema') != SCHEMA_V2:
+        raise ValueError('Unsupported checkpoint schema')
+    from .execution_images import from_identity
+    profile = from_identity(value.get('execution_image'))
+    if (value.get('actual_image_sha256') != profile.image_sha256
+            or value.get('reference_core_sha256') != profile.reference_core_sha256
+            or value.get('core_sha256') != profile.reference_core_sha256
+            or _capture_mode(value.get('input_profile')) != 'xp2-lan'
+            or value.get('checkpoint_compatibility') not in
+                (None, REFERENCE_CHECKPOINT_COMPATIBILITY)):
+        raise ValueError('V2 checkpoint actual/reference identities disagree')
+    return profile
+
+
+def _require_checkpoint_runtime(value, execution_image, compatibility=None):
+    """Join checkpoint creation identity to an explicitly selected resume runtime."""
+    recorded = _checkpoint_execution_image(value)
+    if value.get('schema') == SCHEMA:
+        if execution_image is None:
+            if compatibility is not None:
+                raise ValueError('Reference checkpoint compatibility requires a selected execution image')
+            return
+        from .execution_images import identity
+        if (compatibility != REFERENCE_CHECKPOINT_COMPATIBILITY
+                or _capture_mode(value.get('input_profile')) != 'xp2-lan'
+                or value.get('core_sha256') != execution_image.reference_core_sha256):
+            raise ValueError('V1 checkpoint requires explicit XP2 reference-to-runtime compatibility')
+        identity(execution_image)
+        return
+    if compatibility is not None:
+        raise ValueError('V2 checkpoint already names its runtime; compatibility override is invalid')
+    if execution_image is None:
+        raise ValueError('V2 checkpoint requires its explicitly selected execution image')
+    from .execution_images import identity
+    if identity(recorded) != identity(execution_image):
+        raise ValueError('V2 checkpoint execution image differs from selected runtime')
+
+
+def _validate_checkpoint_edge(child, parent):
+    child_image = _checkpoint_execution_image(child)
+    parent_image = _checkpoint_execution_image(parent)
+    if child_image is None and parent_image is not None:
+        raise ValueError('Checkpoint ancestry cannot move from v1 into a v2 parent')
+    if child_image is not None and parent_image is not None:
+        from .execution_images import identity
+        if (identity(child_image) != identity(parent_image)
+                or child.get('checkpoint_compatibility') is not None):
+            raise ValueError('V2 checkpoint ancestry changed execution identity')
+    if child_image is not None and parent_image is None:
+        if (child.get('checkpoint_compatibility') != REFERENCE_CHECKPOINT_COMPATIBILITY
+                or _capture_mode(parent.get('input_profile')) != 'xp2-lan'
+                or parent.get('core_sha256') != child_image.reference_core_sha256):
+            raise ValueError('V2-to-v1 ancestry lacks its explicit reference compatibility')
+
+
+def manifest(ref, *, official_bundle=None, reviewed_producers=None, execution_image=None):
     """Validate component ancestry and producing runs.
 
     An explicit reviewed_producers map is for read-only retained-evidence review
@@ -122,10 +187,12 @@ def manifest(ref, *, official_bundle=None, reviewed_producers=None):
     receipts; success fields in a caller-supplied dictionary are insufficient.
     """
     return _validate_lineage(ref, official_bundle=official_bundle,
-                             reviewed_producers=reviewed_producers)
+                             reviewed_producers=reviewed_producers,
+                             execution_image=execution_image)
 
 
-def verify_resume_head(ref, *, official_bundle, core_sha256):
+def verify_resume_head(ref, *, official_bundle, core_sha256, execution_image=None,
+                       checkpoint_compatibility=None):
     """Check the requested head at construction; closure admission walks its ancestry."""
     from .native.native_official_bundle import normalize_reference
 
@@ -133,15 +200,17 @@ def verify_resume_head(ref, *, official_bundle, core_sha256):
     if (head['core_sha256'] != core_sha256
             or normalize_reference(head['source_official_bundle']) != official_bundle):
         raise ValueError('LAN checkpoint head belongs to another engine or official capture')
+    _require_checkpoint_runtime(head, execution_image, checkpoint_compatibility)
 
 
 def _validate_lineage(ref, *, official_bundle, reviewed_producers=None, collected_pins=None,
-                      head_payload=None):
+                      head_payload=None, execution_image=None):
     # One background verifier per walk. It reads only the current ancestor's
     # private database bytes while the calling thread authenticates its close.
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix='checkpoint-database') as verifier:
         return _walk_lineage(ref, official_bundle=official_bundle, reviewed_producers=reviewed_producers,
-                             collected_pins=collected_pins, head_payload=head_payload, verifier=verifier)
+                             collected_pins=collected_pins, head_payload=head_payload, verifier=verifier,
+                             execution_image=execution_image)
 
 
 def _verify_database_bytes(rows):
@@ -155,7 +224,57 @@ def _verify_database_bytes(rows):
             raise ValueError('LAN checkpoint database changed after Save')
 
 
-def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, head_payload, verifier):
+def _read_original_xp2_capture(prepared, origin):
+    """Verify retained BBG input bytes without admitting an installed engine.
+
+    Historical manifest inspection needs the original save/configuration/game
+    streams and database identities. It does not load a GameCore. A live XP2
+    session supplies an execution image and uses the normal input handoff path.
+    """
+    from types import SimpleNamespace
+    from . import xp2_bbg_inputs as bbg
+    from .native import native_official_bundle as official
+    from .native.official_application_configuration import extract_application_configuration
+    from .native.official_save import inspect_save
+    from .resource_resolution import resolve_path
+
+    if (origin != bbg.REFERENCE or type(prepared) is not dict
+            or prepared != bbg.prepared_reference()):
+        raise ValueError('Historical XP2 origin requires its exact recovered input handoff')
+    dependencies = {}
+    record, _process = bbg._capture(dependencies)
+    raw_save = official._file(record['save'], dependencies, maximum=16 * 1024**2)
+    configuration = official._file(record['configuration'], dependencies, maximum=1024**2)
+    game = official._file(record['gamecore_stream'], dependencies, maximum=16 * 1024**2)
+    expected_configuration, proof = extract_application_configuration(raw_save)
+    _, sections = inspect_save(raw_save)
+    game_sections = [section.payload for section in sections
+                     if section.kind == 'gamecore_stream_candidate']
+    if (configuration != expected_configuration or game_sections != [game]
+            or proof['save_sha256'] != bbg.SAVE_SHA256
+            or proof['content_declaration']['declared_ruleset'] != bbg.xp2.RULESET):
+        raise ValueError('Recovered BBG original save streams differ')
+    bbg.verify_saved_content(proof['content_declaration'])
+    _, maps = official.parse_configuration(configuration, 'LAN')
+    inputs = SimpleNamespace(configuration=configuration, game=game, map_values=maps)
+
+    databases = {}
+    for role, pin in bbg.DATABASE_PINS.items():
+        row = record['database_copies'][role]
+        if row['sha256'] != pin['sha256'] or row['bytes'] != pin['size_bytes']:
+            raise ValueError('Historical BBG database identity differs: ' + role)
+        if official._file(row, dependencies, prefix_bytes=16) != b'SQLite format 3\0':
+            raise ValueError('Historical BBG database header differs: ' + role)
+        databases[role] = dict(path=row['path'], **pin)
+    bootstrap = record['localization_bootstrap']
+    icu_path = resolve_path(Path(bootstrap['icu_data']['path']))
+    official._file(dict(**bootstrap['icu_data'], bytes=icu_path.stat().st_size),
+                    dependencies, prefix_bytes=0)
+    return SimpleNamespace(reference=origin, inputs=inputs, fixture={'databases': databases})
+
+
+def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, head_payload, verifier,
+                  execution_image=None):
     if reviewed_producers is not None and type(reviewed_producers) is not dict:
         raise ValueError('Reviewed checkpoint producers require an explicit map')
     reviewed_producers={} if reviewed_producers is None else reviewed_producers
@@ -166,6 +285,7 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
         raise ValueError('Expected canonical LAN checkpoint reference')
     from .native.native_official_bundle import normalize_reference
     from .resource_resolution import recorded_path, resolve_path
+    from . import xp2_bbg_inputs as bbg
     origin = normalize_reference(official_bundle) if type(official_bundle) is dict else official_bundle
     first = None
     seen = set()
@@ -184,6 +304,8 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
             origin = current_origin
         if current_origin != origin:
             raise ValueError('LAN checkpoint belongs to another official bundle')
+        if bbg.is_reference(origin) and m.get('origin_official_save_sha256') != bbg.origin_save_sha256(origin):
+            raise ValueError('BBG checkpoint differs from its original official save')
         is_head = first is None
         if is_head:
             first = m
@@ -193,6 +315,7 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
                     or previous['core_sha256'] != m['core_sha256']
                     or previous['input_components_sha256'] != {k:v['sha256'] for k,v in m['components'].items()}):
                 raise ValueError('LAN checkpoint ancestry components differ')
+            _validate_checkpoint_edge(previous, m)
         if set(m['components']) != {'gamecore','application_configuration'}:
             raise ValueError('Incomplete LAN checkpoint component pair')
         parent = _path(ref[0]).parent
@@ -291,7 +414,8 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
         if xp2:
             databases = verifier.submit(_verify_database_bytes, tuple(fixture['databases'].values()))
             close_evidence = xp1_loaded_close_evidence(supervisor_path.parent,supervisor,pins,
-                                                      core_sha256=_profile_engine(m['input_profile']))
+                                                      core_sha256=_profile_engine(m['input_profile']),
+                                                      official_bundle=origin)
             if recorded_closure != closure_path and supervisor.get('native_lifetime') != close_evidence:
                 raise ValueError('Relocated LAN checkpoint close differs from the original supervisor receipt')
             databases.result()
@@ -315,13 +439,19 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
                 if original.reference != origin:
                     raise ValueError('XP1 checkpoint origin differs from its prepared capture')
             elif _capture_mode(m['input_profile']) == 'xp2-lan':
-                from .xp2_bundle_inputs import consume_input_handoff
+                from .capture_candidates import consume_input_handoff
                 prepared = closure['prepared_capture']
                 if recorded_closure != closure_path:
                     if type(prepared) is not dict or type(prepared.get('path')) is not str:
                         raise ValueError('Relocated LAN checkpoint lacks its prepared capture path')
                     prepared = {**prepared, 'path': str(resolve_path(Path(prepared['path'])))}
-                original=consume_input_handoff(prepared)
+                if execution_image is None and origin == bbg.REFERENCE:
+                    original = _read_original_xp2_capture(prepared, origin)
+                else:
+                    options = ({'execution_image': execution_image}
+                               if execution_image is not None else {})
+                    original=consume_input_handoff('xp2-lan', prepared,
+                        official_bundle=origin, **options)
                 if original.reference != origin:
                     raise ValueError('XP2 checkpoint origin differs from its prepared capture')
                 expected = original.fixture['databases']
@@ -383,15 +513,22 @@ def _validate_closure_fields(closure):
             or type(closure.get('checkpoint_on_close',False)) is not bool
             or type(closure.get('initial_turn')) is not int or not 1 <= closure['initial_turn'] <= 100000):
         raise ValueError('Unsupported LAN checkpoint closure')
+    compatibility = closure.get('checkpoint_compatibility')
+    if compatibility is not None and (
+            compatibility != REFERENCE_CHECKPOINT_COMPATIBILITY
+            or closure.get('input_profile') != 'xp2-lan'
+            or closure.get('network_checkpoint') is None):
+        raise ValueError('Unsupported checkpoint compatibility selection')
     normalize_reference(closure['official_bundle'])
 
 
-def validate_closure(closure, *, head_payload=None):
+def validate_closure(closure, *, head_payload=None, execution_image=None):
     _validate_closure_fields(closure)
     m = None
     if closure.get('network_checkpoint') is not None:
         m = _validate_lineage(normalize(closure['network_checkpoint']),
-                              official_bundle=closure['official_bundle'], head_payload=head_payload)
+                              official_bundle=closure['official_bundle'], head_payload=head_payload,
+                              execution_image=execution_image)
         if closure['initial_turn'] != m['observed_game_turn']:
             raise ValueError('LAN checkpoint closure turn differs')
     if closure['input_profile'] == 'xp2-lan':
@@ -401,42 +538,92 @@ def validate_closure(closure, *, head_payload=None):
     return m
 
 
-def save_provenance(inputs, closure):
+def save_provenance(inputs, closure, *, execution_image=None):
     from .native.native_official_bundle import normalize_reference
     origin = normalize_reference(closure['official_bundle'])
     if inputs.official_bundle != origin:
         raise ValueError('LAN Save origin differs from loaded official bundle')
+    compatibility = closure.get('checkpoint_compatibility')
     parent = inputs.checkpoint
     depth = 0
     if parent is not None:
-        prior = manifest(parent, official_bundle=origin)
+        prior = manifest(parent, official_bundle=origin, execution_image=execution_image)
         depth = prior['lineage_depth'] + 1
         if closure.get('network_checkpoint') != dict(path=parent[0],sha256=parent[1]):
             raise ValueError('LAN Save parent differs from restored checkpoint')
     elif closure.get('network_checkpoint') is not None:
         raise ValueError('Original LAN Save has a false checkpoint parent')
+    if execution_image is None:
+        if compatibility is not None or (parent is not None and
+                _checkpoint_execution_image(prior) is not None):
+            raise ValueError('Checkpoint execution identity cannot be discarded on Save')
+    else:
+        from .execution_images import identity
+        execution_identity = identity(execution_image)
+        reference_sha = _profile_engine(inputs.profile.name)
+        if (_capture_mode(inputs.profile.name) != 'xp2-lan'
+                or execution_image.reference_core_sha256 != reference_sha):
+            raise ValueError('Selected execution image differs from checkpoint ABI source')
+        if parent is None:
+            if compatibility is not None:
+                raise ValueError('Root checkpoint cannot declare a resume compatibility')
+        else:
+            prior_image = _checkpoint_execution_image(prior)
+            if prior_image is None:
+                if (compatibility != REFERENCE_CHECKPOINT_COMPATIBILITY
+                        or _capture_mode(prior.get('input_profile')) != 'xp2-lan'
+                        or prior.get('core_sha256') != reference_sha):
+                    raise ValueError('V1 checkpoint parent needs explicit reference compatibility')
+            elif (identity(prior_image) != execution_identity or compatibility is not None):
+                raise ValueError('V2 checkpoint parent has a different execution identity')
     if depth > MAX_DEPTH:
         raise ValueError('LAN checkpoint lineage exceeds bound')
-    return dict(schema=SCHEMA, source_official_bundle=dict(path=origin[0],sha256=origin[1]),
-                lineage_depth=depth, parent_checkpoint=None if parent is None else dict(path=parent[0],sha256=parent[1]))
+    result = dict(schema=SCHEMA if execution_image is None else SCHEMA_V2,
+                  source_official_bundle=dict(path=origin[0],sha256=origin[1]),
+                  lineage_depth=depth,
+                  parent_checkpoint=None if parent is None else dict(path=parent[0],sha256=parent[1]))
+    if execution_image is not None:
+        result.update(execution_image=execution_identity,
+            actual_image_sha256=execution_image.image_sha256,
+            reference_core_sha256=execution_image.reference_core_sha256,
+            checkpoint_compatibility=compatibility)
+    return result
 
 
 def finalize_manifest(backend, value):
     from .native.native_official_bundle import _manifest
-    origin = _manifest(backend.inputs.official_bundle)[1]
-    value['origin_official_save_sha256'] = origin['save']['source']['sha256']
+    from . import xp2_bbg_inputs as bbg
+    reference = backend.inputs.official_bundle
+    execution_image = getattr(backend, 'execution_image', None)
+    if execution_image is None:
+        if value.get('schema') == SCHEMA_V2:
+            raise ValueError('V2 checkpoint lost its selected execution image before publication')
+    else:
+        from .execution_images import identity
+        if (value.get('schema') != SCHEMA_V2
+                or value.get('execution_image') != identity(execution_image)
+                or value.get('actual_image_sha256') != execution_image.image_sha256
+                or value.get('reference_core_sha256') != execution_image.reference_core_sha256
+                or value.get('core_sha256') != execution_image.reference_core_sha256):
+            raise ValueError('Checkpoint publication identities differ from the retained runtime')
+    if reference == bbg.REFERENCE:
+        value['origin_official_save_sha256'] = bbg.SAVE_SHA256
+    else:
+        origin = _manifest(reference)[1]
+        value['origin_official_save_sha256'] = origin['save']['source']['sha256']
     value['network_boundary'] = copy.deepcopy(backend.network_boundary)
     state_owner = getattr(backend, 'host_state_owner', backend.owner)
     value['host_world_selection'] = getattr(state_owner,'world_input_selections',{}).get(0)
     return value
 
 
-def validate_inputs(inputs):
+def validate_inputs(inputs, *, execution_image=None):
     """Validate the pair and return its manifest for this synchronous caller.
 
     This is not a cache: each call still checks the complete ancestry and files.
     """
-    m = manifest(inputs.checkpoint, official_bundle=inputs.official_bundle)
+    m = manifest(inputs.checkpoint, official_bundle=inputs.official_bundle,
+                 execution_image=execution_image)
     _validate_component_pair(inputs, m)
     return m
 
@@ -468,9 +655,13 @@ def resume_bundle(bundle, closure):
         if (closure.get('input_profile') != mode
                 or normalize_reference(closure['official_bundle']) != bundle.reference):
             raise ValueError('LAN resume closure differs from its prepared engine or capture')
-        m = validate_closure(closure, head_payload=payload)
+        m = validate_closure(closure, head_payload=payload,
+                             execution_image=getattr(bundle, 'execution_image', None))
     else:
-        m = _validate_lineage(ref, official_bundle=bundle.reference, head_payload=payload)
+        m = _validate_lineage(ref, official_bundle=bundle.reference, head_payload=payload,
+                              execution_image=getattr(bundle, 'execution_image', None))
+    _require_checkpoint_runtime(m, getattr(bundle, 'execution_image', None),
+                                closure.get('checkpoint_compatibility'))
     from .native.official_configuration import compare_provider_roundtrip
     configuration = payload['components']['application_configuration']
     game = payload['components']['gamecore']
@@ -501,19 +692,23 @@ def resume_bundle(bundle, closure):
         gold=o['economy']['gold'],city_count=len(o['cities']),
         units=sorted([{k:u[k] for k in ['id','type','x','y','damage','moves']} for u in o['units']],key=lambda u:u['id']))
     resumed = replace(bundle,inputs=inputs,initial_turn=o['turn'],expected_readback=own)
+    if resumed.execution_image is not bundle.execution_image:
+        raise ValueError('Resume copy changed its explicitly selected execution image')
     if mode in ('xp1-lan', 'xp2-lan'):
         from .xp1_session_checkpoint import admit_resumed_bundle
-        admit_resumed_bundle(bundle, resumed, m)
+        admit_resumed_bundle(bundle, resumed, m,
+                             compatibility=closure.get('checkpoint_compatibility'))
     return resumed
 
 
-def configure_closure(closure, ref, *, validate_fields=False):
+def configure_closure(closure, ref, *, validate_fields=False, execution_image=None):
     if ref is None:
         if validate_fields:
-            validate_closure(closure)
+            validate_closure(closure, execution_image=execution_image)
         return
     pins = {}
-    m = _validate_lineage(ref, official_bundle=closure['official_bundle'], collected_pins=pins)
+    m = _validate_lineage(ref, official_bundle=closure['official_bundle'], collected_pins=pins,
+                          execution_image=execution_image)
     fields = dict(network_checkpoint=dict(path=ref[0], sha256=ref[1]),
                   initial_turn=m['observed_game_turn'])
     if validate_fields:
@@ -523,7 +718,9 @@ def configure_closure(closure, ref, *, validate_fields=False):
 
 
 def prepare_owner(owner, initial):
-    m = manifest(owner.inputs.checkpoint,official_bundle=owner.inputs.official_bundle)
+    image=getattr(getattr(owner,'core',None),'_civ6_host_execution_image',None)
+    m = manifest(owner.inputs.checkpoint,official_bundle=owner.inputs.official_bundle,
+                 **({'execution_image':image} if image is not None else {}))
     if initial != m['observation']:
         raise ValueError('Restored LAN public observation differs from checkpoint')
     from .native.native_session_resume import restore_placement_choice
@@ -561,12 +758,120 @@ def prepare_owner(owner, initial):
 
 
 def compare_decisions(owner, observation, decisions):
-    m = manifest(owner.inputs.checkpoint,official_bundle=owner.inputs.official_bundle)
+    image=getattr(getattr(owner,'core',None),'_civ6_host_execution_image',None)
+    m = manifest(owner.inputs.checkpoint,official_bundle=owner.inputs.official_bundle,
+                 **({'execution_image':image} if image is not None else {}))
     return _compare_decisions(owner, m, observation, decisions)
 
 
+def _semantic_decisions(value, observation):
+    """Compare v37-v40 observation identities across native Save/Load.
+
+    Only the enclosing observation sequence, the Congress catalogue sequence,
+    its candidate templates and their derived family IDs, and the observation
+    sequences of review, command permissions and active effects are rebound.
+    Native event_sequence (notably
+    spy completion), phase, UI state, parameters, counts and results stay exact.
+    The existing historical canonicalizer handles earlier protocol revisions.
+    """
+    from .native.native_session_resume import semantic_decisions as historical
+    from civ6_host.contracts import network_turn, world_congress
+    supported = {network_turn.CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA}
+    review_schema = getattr(network_turn, 'CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA', None)
+    permissions_schema = getattr(network_turn, 'CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA', None)
+    effects_schema = getattr(network_turn, 'CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA', None)
+    if effects_schema is not None:
+        supported.add(effects_schema)
+    if permissions_schema is not None:
+        supported.add(permissions_schema)
+    if review_schema is not None:
+        supported.add(review_schema)
+    if value.get('schema') not in supported:
+        return historical(value)
+    from types import SimpleNamespace
+    identity = SimpleNamespace(episode_id=value['episode_id'], game_generation=value['game_generation'])
+    network_turn.validate_capability_catalogue(value, identity, value['sequence'], observation['turn'],
+        player_id=observation['player_id'], observation=observation)
+    projected = copy.deepcopy(value)
+    projected['sequence'] = 0
+    if projected['world_congress'] is not None:
+        projected['world_congress']['sequence'] = 0
+    if projected.get('world_congress_review') is not None:
+        projected['world_congress_review']['sequence'] = 0
+    if projected.get('native_command_permissions') is not None:
+        projected['native_command_permissions']['sequence'] = 0
+    if projected.get('world_congress_active_effects') is not None:
+        projected['world_congress_active_effects']['sequence'] = 0
+    rebound = {}
+    for row in projected['candidates']:
+        if row['action']['kind'] not in world_congress.CANDIDATE_FIELDS:
+            continue
+        previous = row['candidate_id']
+        row['action']['sequence'] = 0
+        row['candidate_id'] = network_turn.digest(row['action'])
+        rebound[previous] = row['candidate_id']
+    for kind in world_congress.CANDIDATE_FIELDS:
+        family = projected['families'][kind]
+        if 'candidate_ids' in family:
+            family['candidate_ids'] = [rebound[key] for key in family['candidate_ids']]
+    projected.pop('decision_id')
+    projected['decision_id'] = network_turn.digest(projected)
+    network_turn.validate_capability_catalogue(projected, identity, 0, observation['turn'],
+        player_id=observation['player_id'], observation=observation)
+    return historical(projected)
+
+
+def _comparison_differences(expected, actual, *, limit=16):
+    """Bounded private diagnostic: paths, types and short scalar differences."""
+    if type(limit) is not int or not 1 <= limit <= 64:
+        raise ValueError('Invalid checkpoint difference budget')
+    missing = object()
+    rows = []
+    visited = 0
+    truncated = False
+
+    def describe(value):
+        if value is missing:
+            return dict(type='missing')
+        result = dict(type=type(value).__name__)
+        if value is None or type(value) in (bool, int, float):
+            result['value'] = value
+        elif type(value) is str:
+            result['value'] = value[:128]
+            result['truncated'] = len(value) > 128
+        elif type(value) in (list, dict):
+            result['length'] = len(value)
+        return result
+
+    def visit(left, right, path, depth):
+        nonlocal visited, truncated
+        if len(rows) >= limit or visited >= 50000 or depth > 32:
+            truncated = True
+            return
+        visited += 1
+        if type(left) is type(right) and left == right:
+            return
+        if type(left) is dict and type(right) is dict:
+            for key in sorted(set(left) | set(right)):
+                if len(rows) >= limit or visited >= 50000:
+                    truncated = True
+                    break
+                token = str(key).replace('~', '~0').replace('/', '~1')
+                visit(left.get(key, missing), right.get(key, missing), path + '/' + token, depth+1)
+        elif type(left) is list and type(right) is list and len(left) == len(right):
+            for index, (a, b) in enumerate(zip(left, right)):
+                if len(rows) >= limit or visited >= 50000:
+                    truncated = True
+                    break
+                visit(a, b, path + '/' + str(index), depth+1)
+        else:
+            rows.append(dict(path=path[:512], expected=describe(left), actual=describe(right)))
+    visit(expected, actual, '', 0)
+    return dict(differences=rows, truncated=truncated, maximum_differences=limit,
+                full_objects_emitted=False)
+
+
 def _compare_decisions(owner, m, observation, decisions):
-    from .native.native_session_resume import semantic_decisions
     from civ6_host.contracts import network_turn
     evidence=getattr(owner,'production_administrative_by_player',{}).get(observation['player_id'])
     combat=getattr(owner,'combat_administrative_by_player',{}).get(observation['player_id'])
@@ -590,10 +895,33 @@ def _compare_decisions(owner, m, observation, decisions):
         else:
             verify_source(core_sha256);verify_readiness_source(core_sha256)
         readiness_source=(READINESS_SOURCE[1] if core_sha256==XP1_CORE_SHA256 else source_reference(core_sha256)[1])
-    comparable, transition = network_turn.checkpoint_catalogue(decisions,m['decisions'],observation,production_evidence=evidence,
+    # Enabling already-supported city queries changes observations, not the
+    # saved game. The explicit existing launch opt-ins and bound native source
+    # authorize comparison of only the previously known fields.
+    query_flags=getattr(owner,'_expansion_city_controls_requested',(False,False))
+    if any(query_flags):
+        from .expansion_city_controls_profile import bind_owner
+        bind_owner(owner)
+    queried,query_transition=network_turn.checkpoint_city_query_projection(
+        decisions,m['decisions'],observation,requested=query_flags)
+    comparable, transition = network_turn.checkpoint_catalogue(queried,m['decisions'],observation,production_evidence=evidence,
         combat_evidence=combat,combat_source_sha256=precision,
         combat_readiness_source_sha256=readiness_source,core_sha256=core_sha256)
-    if observation != m['observation'] or semantic_decisions(comparable) != semantic_decisions(m['decisions']):
+    if query_transition is not None:
+        if transition is not None:
+            raise ValueError('City-query admission cannot mask another catalogue transition')
+        transition=query_transition
+    expected_semantics = _semantic_decisions(m['decisions'], m['observation'])
+    restored_semantics = _semantic_decisions(comparable, observation)
+    if observation != m['observation'] or restored_semantics != expected_semantics:
+        owner.emit('official_lan_checkpoint_comparison_mismatch',
+            observation_equal=observation == m['observation'],
+            decision_difference=_comparison_differences(expected_semantics, restored_semantics),
+            observation_difference=_comparison_differences(m['observation'], observation),
+            saved_semantic_sha256=network_turn.digest(expected_semantics),
+            restored_semantic_sha256=network_turn.digest(restored_semantics),
+            comparison_identity_projection='congress_observation_sequence.v1',
+            strict_comparison_retained=True, full_objects_emitted=False)
         raise ValueError('Restored LAN public decision catalogue differs')
     owner.emit('official_lan_checkpoint_reloaded',checkpoint=owner.inputs.checkpoint,
         turn=observation['turn'],public_observation_equal=True,public_decisions_equal=transition is None,

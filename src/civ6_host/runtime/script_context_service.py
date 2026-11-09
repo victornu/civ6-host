@@ -80,7 +80,8 @@ class ScriptContextService:
     # +10 is separately owned by the reused notification adapter.
     SLOTS = (0x00, 0x08, 0x18, 0x20, 0x28, 0x30, 0xD0, 0xD8)
 
-    def __init__(self, host, runtime, registry, *, expected_hashes, bootstrap, read):
+    def __init__(self, host, runtime, registry, *, expected_hashes, bootstrap, read,
+                 execution_image=None):
         runtime.registry._check()
         if getattr(host, '_script_context_service', None) is not None:
             raise RuntimeError('Gameplay script callbacks already have an owner')
@@ -96,14 +97,16 @@ class ScriptContextService:
         self.closed = self.quarantined = False
         self.depth = self.lock_depth = 0
         self.receiver = C.addressof(host.aux_object)
-        self.lifetime = RetainedScriptContexts(runtime, project_root=self._root())
+        self.lifetime = RetainedScriptContexts(runtime, project_root=self._root(),
+                                               execution_image=execution_image)
         table = C.addressof(host.aux_vtable)
         bindings = getattr(host, '_slot_bindings', {})
         self.previous = {s:(host.aux_vtable[s//8], bindings.get((table,s))) for s in self.SLOTS}
         before = len(host.functions)
         # Any partial installation is an isolated-worker failure, not rollback.
         host._script_context_service = self
-        self.notification = NativeContextNotification(runtime, host, project_root=self._root())
+        self.notification = NativeContextNotification(runtime, host, project_root=self._root(),
+                                                      execution_image=execution_image)
         signatures = (
             (0x00,C.c_void_p,[C.c_void_p,C.c_char_p,C.c_uint8],self.acquire),
             (0x08,None,[C.c_void_p,C.c_void_p],self.release),

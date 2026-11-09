@@ -1,4 +1,5 @@
 import ctypes as C
+from contextlib import contextmanager, nullcontext
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -81,6 +82,75 @@ class NetworkTurnTests(unittest.TestCase):
             'slots': {f'{call_twice.__qualname__}@0x0': {'calls': 1, 'seconds': 50 / 1_000_000_000},
                       f'{return_value.__qualname__}@0x8': {'calls': 1, 'seconds': 40 / 1_000_000_000}},
         })
+
+    def test_xp2_source_proof_covers_fifo_and_publication_but_reader_does_not(self):
+        from civ6_host.runtime import xp2_cache_source
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+
+        phases = []
+        reader_active = False
+
+        @contextmanager
+        def reader_scope(*unused):
+            nonlocal reader_active
+            reader_active = True
+            try:
+                yield
+            finally:
+                reader_active = False
+
+        proof = xp2_cache_source.source()
+
+        def step(name, repeats, expected_reader):
+            self.assertIs(reader_active, expected_reader)
+            for _ in range(repeats):
+                self.assertIs(xp2_cache_source.source(), proof)
+            phases.append(name)
+
+        prefix = SimpleNamespace(
+            actions=Mock(pending=[], update_game_once=lambda: step('update', 3, True)),
+            event_arguments=SimpleNamespace(reader=SimpleNamespace(base=123, read=Mock())),
+            deferred_events=Mock(pending=[], drain_empty_receivers=lambda: step('fifo', 50, False)),
+            view_publisher=Mock(publish=lambda: step('publish', 3, False)))
+        owner = SimpleNamespace(prefix=prefix, emit=Mock())
+        boundary = SimpleNamespace(core_sha256=XP2_CORE_SHA256, verify_update=Mock(),
+                                   retain=Mock(return_value=False), control=Mock())
+        with patch.object(xp2_cache_source, '_verified_source', return_value=proof) as verify, \
+             patch('civ6_host.runtime.xp2_preload_source.event_reader_scope', reader_scope), \
+             patch('civ6_host.runtime.network_turns._completion'):
+            advance(owner, boundary=boundary)
+            self.assertEqual(verify.call_count, 2)
+            self.assertIs(xp2_cache_source.source(), proof)
+            self.assertEqual(verify.call_count, 3)  # No proof survives the interval.
+        self.assertEqual(phases, ['update', 'fifo', 'publish'])
+        boundary.control.assert_called_once_with(owner)
+        self.assertEqual(owner.emit.call_args.args, ('native_lan_update_timing',))
+
+    def test_xp2_changed_publication_source_refuses_interval_before_success(self):
+        from civ6_host.runtime import xp2_cache_source
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+
+        prefix = SimpleNamespace(actions=Mock(pending=[]),
+            event_arguments=SimpleNamespace(reader=SimpleNamespace(base=123, read=Mock())),
+            deferred_events=Mock(pending=[]), view_publisher=Mock())
+        owner = SimpleNamespace(prefix=prefix, emit=Mock())
+        boundary = SimpleNamespace(core_sha256=XP2_CORE_SHA256, verify_update=Mock(),
+                                   retain=Mock(return_value=False), control=Mock())
+        proof = xp2_cache_source.source()
+        with patch.object(xp2_cache_source, '_verified_source',
+                          side_effect=[proof, ValueError('changed source in publication')]), \
+             patch('civ6_host.runtime.xp2_preload_source.event_reader_scope',
+                   return_value=nullcontext()), \
+             patch('civ6_host.runtime.network_turns._completion') as complete:
+            with self.assertRaisesRegex(ValueError, 'changed source in publication'):
+                advance(owner, boundary=boundary)
+        prefix.actions.update_game_once.assert_called_once_with()
+        prefix.deferred_events.drain_empty_receivers.assert_called_once_with()
+        prefix.view_publisher.publish.assert_called_once_with()
+        complete.assert_called_once_with(owner, core_sha256=XP2_CORE_SHA256)
+        boundary.control.assert_not_called()
+        owner.emit.assert_not_called()
+        self.assertIsNone(xp2_cache_source._UPDATE_SOURCE.get())
 
     def test_poll_with_retained_dialogue_does_not_advance_or_choose(self):
         prefix = SimpleNamespace(actions=Mock(pending=[]), deferred_events=Mock(pending=[]),

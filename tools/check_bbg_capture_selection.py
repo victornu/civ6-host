@@ -8,9 +8,7 @@ import time
 
 
 _XP2 = '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
-_BBG_ID = 'cb84075d-5007-4207-b662-c35a5f7be260'
 _BBG_WORKSHOP = '2865001760'
-_BBG_TITLE = 'Better Balanced Game 7.5.1'
 _BBG_CORE_SCRIPT = 'scripts/bbg_script.lua'
 _BBG_WORKSHOP_ROOT = ('steamapps', 'workshop', 'content', '289070', _BBG_WORKSHOP)
 # AddGameplayScripts from the pinned 7.5.1 manifest. The game's live selection
@@ -46,25 +44,6 @@ def _read_capture_file(path, pin, limit):
     return raw
 
 
-def _declared_bbg(mods):
-    for row in mods or ():
-        if row['mod_id'].lower() != _BBG_ID:
-            continue
-        fields = row['optional']
-        title = fields.get('MOD_TITLE_KEY')
-        # Saves store a serialized title object. MOD_VERSION can be "1" even
-        # when the Workshop package has a separate, versioned title.
-        try:
-            titles = json.loads(title) if title else None
-        except json.JSONDecodeError:
-            titles = None
-        title_matches = title == _BBG_TITLE or (type(titles) is dict and set(titles) == {_BBG_TITLE})
-        return dict(mod_id=row['mod_id'], workshop_id=fields.get('MOD_SUBSCRIPTION_ID'),
-                    saved_version_field=row['version'], exact_title_matches=title_matches,
-                    identity_matches=fields.get('MOD_SUBSCRIPTION_ID') == _BBG_WORKSHOP)
-    return None
-
-
 def _verify_selection(root, document, process):
     from civ6_host.runtime.native.native_gameplay_empty import SCHEMA, stable_capture_identity
     from civ6_host.runtime.workers.capture_phase1_bundle994 import (
@@ -76,7 +55,10 @@ def _verify_selection(root, document, process):
         name = f'runtime-selections-{side}.json'
         artifact = json.loads(_read_capture_file(root / name, document['artifacts'][name], 16 * 1024**2))
         content = artifact['content929']
-        _join_native_report(content, process, 'civ6rl.official_resolved_content929.capture.v1')
+        from civ6_host.runtime.workers.capture_phase1_bundle994 import CURRENT_EXE_SHA
+        _join_native_report(content, process,
+            'civ6rl.official_resolved_content929.capture.v2' if process.get('exe_sha256') == CURRENT_EXE_SHA
+            else 'civ6rl.official_resolved_content929.capture.v1')
         semantic = _content_semantics(content['snapshot'], process)
         selected = _selection_semantics(artifact['gameplay_selection994'], process, semantic)
         active = artifact['gameplay_active_list']
@@ -174,8 +156,33 @@ def _bbg_script_selection(records):
     return matched, unmatched
 
 
-def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localization_sources=None):
+def _saved_lan_map(path, digest):
+    from civ6_host.runtime.native.native_official_bundle import parse_configuration
+    from civ6_host.runtime.native.official_application_configuration import extract_application_configuration
+    from civ6_host.runtime.native.official_save import MAX_SAVE_BYTES
+
+    configuration, receipt = extract_application_configuration(_read_pinned(path, digest, MAX_SAVE_BYTES))
+    if receipt['content_declaration']['declared_ruleset'] != 'RULESET_EXPANSION_2':
+        raise ValueError('Map comparison requires a Gathering Storm save')
+    _, map_values = parse_configuration(configuration, 'LAN')
+    return dict(save_sha256=receipt['save_sha256'], configuration_sha256=receipt['sha256'],
+                gamecore_sha256=receipt['gamecore_payload_sha256'], map_seed=dict(map_values)['RANDOM_SEED'])
+
+
+def compare_saved_maps(candidate, candidate_sha256, reference, reference_sha256):
+    """Exclude reused map seeds and GameCore streams before an official capture."""
+    first = _saved_lan_map(candidate, candidate_sha256)
+    second = _saved_lan_map(reference, reference_sha256)
+    return dict(candidate=first, reference=second,
+                map_seed_distinct=first['map_seed'] != second['map_seed'],
+                gamecore_stream_distinct=first['gamecore_sha256'] != second['gamecore_sha256'],
+                independent_official_generation_verified=False)
+
+
+def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localization_sources=None,
+            different_map_from=None, execution_image=None):
     from civ6_host.runtime.session_configuration import inspect_official_save
+    from civ6_host.runtime.xp2_bbg_inputs import declared_bbg
 
     manifest = manifest.resolve(strict=True)
     root = manifest.parent
@@ -186,9 +193,11 @@ def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localizatio
             or document['status'] != 'correlated_capture_unqualified'
             or document['preflight']['process'] != process
             or runtime['same_pid_exe_core'] is not True
-            or runtime['same_manager_context_and_ordered_lists'] is not True
-            or process['gamecore_module']['sha256'] != _XP2):
+            or runtime['same_manager_context_and_ordered_lists'] is not True):
         raise ValueError('Expected the stable official XP2 capture and selection')
+    from civ6_host.runtime.xp2_bundle_inputs import validate_process
+    core_sha = validate_process(process, **({'execution_image': execution_image}
+                                           if execution_image is not None else {}))
 
     save = document['save']
     origin, extraction = save['source'], save['extraction907']
@@ -222,7 +231,13 @@ def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localizatio
     saved = inspect_official_save(dict(path=str(save_path), sha256=save_sha256))
     if saved['declared_content']['ruleset'] != 'RULESET_EXPANSION_2':
         raise ValueError('Captured XP2 save declares another ruleset')
-    declared = _declared_bbg(saved['declared_mod_metadata'])
+    map_comparison = None
+    if different_map_from is not None:
+        reference, reference_sha256 = different_map_from
+        map_comparison = compare_saved_maps(save_path, save_sha256, reference, reference_sha256)
+        if not map_comparison['map_seed_distinct'] or not map_comparison['gamecore_stream_distinct']:
+            raise ValueError('Candidate reuses the reference map seed or GameCore stream')
+    declared = declared_bbg(saved['declared_mod_metadata'])
     active_count = _verify_selection(root, document, process)
     databases = _verify_databases(root, document, ack)
 
@@ -266,9 +281,9 @@ def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localizatio
                      and declared['exact_title_matches'])
     databases['localization'] = _verify_localization(
         root, document, sha256, retained_localization_sources)
-    return dict(schema='civ6-host.bbg-official-capture-selection.v4',
+    result = dict(schema='civ6-host.bbg-official-capture-selection.v4',
                 capture_sha256=sha256, save_sha256=save_sha256,
-                configuration_sha256=saved['configuration_sha256'], core_sha256=_XP2,
+                configuration_sha256=saved['configuration_sha256'], core_sha256=core_sha,
                 final_database_copy_sha256=databases, verified_script_copies=len(checked),
                 selected_gameplay_sources=ordered, active_gameplay_context_count=active_count,
                 workshop_id=_BBG_WORKSHOP, saved_bbg=declared,
@@ -278,25 +293,50 @@ def inspect(manifest, sha256, *, expected_save_sha256=None, retained_localizatio
                 exact_bbg_gameplay_candidate=exact_bbg, localization_revalidated=True,
                 includes_and_ui_scripts_verified=False,
                 bbg_ui_context_verified=False, bbg_profile_qualified=False)
+    if map_comparison is not None:
+        result['map_seed_comparison'] = map_comparison
+    if execution_image is not None:
+        from civ6_host.runtime.execution_images import identity
+        result['execution_image'] = identity(execution_image)
+    return result
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('manifest', type=Path)
+    parser.add_argument('capture', type=Path, help='Official capture manifest or, with --save-only, the save')
     parser.add_argument('--sha256', required=True)
     parser.add_argument('--expected-save-sha256', help='Require this exact captured save')
+    parser.add_argument('--different-map-from', type=Path, help='Compare with this exact LAN reference save')
+    parser.add_argument('--different-map-from-sha256', help='SHA-256 of the LAN reference save')
+    parser.add_argument('--save-only', action='store_true', help='Check the two saves before capturing databases')
     parser.add_argument('--localization-sources', type=Path,
                         help='Retained producer manifest for the captured Localization export')
     parser.add_argument('--localization-sources-sha256', help='Exact retained producer manifest digest')
+    parser.add_argument('--execution-image', help='Explicit installed execution-image profile')
     args = parser.parse_args()
+    if (args.different_map_from is None) != (args.different_map_from_sha256 is None):
+        parser.error('Supply the reference save and its digest together')
+    different_map_from = ((args.different_map_from, args.different_map_from_sha256)
+                          if args.different_map_from is not None else None)
     if (args.localization_sources is None) != (args.localization_sources_sha256 is None):
         parser.error('Supply the retained producer manifest and its digest together')
+    if args.save_only:
+        if different_map_from is None or args.localization_sources is not None or args.expected_save_sha256 is not None:
+            parser.error('--save-only requires a reference save and accepts no manifest options')
+        comparison = compare_saved_maps(args.capture, args.sha256, *different_map_from)
+        print(json.dumps(comparison, indent=2))
+        raise SystemExit(0 if comparison['map_seed_distinct'] and comparison['gamecore_stream_distinct'] else 2)
     retained = None
     if args.localization_sources is not None:
         path = args.localization_sources.absolute()
         raw = _read_pinned(path, args.localization_sources_sha256, 1024**2)
         retained = dict(path=str(path), sha256=args.localization_sources_sha256, bytes=len(raw))
-    result = inspect(args.manifest, args.sha256, expected_save_sha256=args.expected_save_sha256,
-                     retained_localization_sources=retained)
+    image = None
+    if args.execution_image is not None:
+        from civ6_host.runtime.execution_images import select, known_path
+        image = select(args.execution_image, core_path=known_path(args.execution_image))
+    result = inspect(args.capture, args.sha256, expected_save_sha256=args.expected_save_sha256,
+                     retained_localization_sources=retained, different_map_from=different_map_from,
+                     execution_image=image)
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result['exact_bbg_gameplay_candidate'] else 1)

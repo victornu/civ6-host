@@ -45,11 +45,12 @@ def verify_source(*, core_sha256=XP1_CORE_SHA256):
     return proof
 
 
-def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_turn_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown host thread gate source engine')
+    if execution_image is not None:raise ValueError('XP1 thread gate does not accept an XP2 execution image')
     from .paths import resource_root
     from .provenance import installed_host_source_reference
     from .resource_resolution import resolve_path
@@ -123,7 +124,9 @@ there is no separate allocation, thread or native controller to destroy here.
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_turn_source import SOURCE as reference, require_prepared_owner
         require_prepared_owner(backend)
-    source_dependencies(core_sha256=core_sha256)
+    execution_image = getattr(backend.core, '_civ6_host_execution_image', None)
+    source_dependencies(core_sha256=core_sha256,
+                        **({'execution_image': execution_image} if core_sha256 == XP2_CORE_SHA256 else {}))
     spans = verify_live(backend.core._handle, backend.runtime.read, host.pointer,core_sha256=core_sha256)
     for slot in (0x58, 0x60):
         binding = host._slot_bindings.get((C.addressof(host.vtable),slot))

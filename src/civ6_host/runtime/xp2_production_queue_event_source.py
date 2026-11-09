@@ -222,16 +222,18 @@ def verify_live(base, read):
                 verified_fragments=count, native_execution=False)
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     """Join queue source, action helpers, configuration, A0, and cache pins."""
     proof = source()
     refs = [dict(path=SOURCE[0], sha256=SOURCE[1]),
             *(dict(path=path, sha256=digest) for path, digest in PARENT_PINS.values())]
+    execution_options = ({'execution_image': execution_image}
+                         if execution_image is not None else {})
     providers = (
         lambda: __import__("civ6_host.runtime.a0_family_source", fromlist=["source_pins"]).source_pins(),
-        lambda: __import__("civ6_host.runtime.xp2_world_unit_event_source", fromlist=["source_dependencies"]).source_dependencies(),
+        lambda: __import__("civ6_host.runtime.xp2_world_unit_event_source", fromlist=["source_dependencies"]).source_dependencies(**execution_options),
         lambda: __import__("civ6_host.runtime.xp2_configuration_profile", fromlist=["source_dependencies"]).source_dependencies(),
-        lambda: __import__("civ6_host.runtime.xp2_absent_event_source", fromlist=["source_dependencies"]).source_dependencies(),
+        lambda: __import__("civ6_host.runtime.xp2_absent_event_source", fromlist=["source_dependencies"]).source_dependencies(**execution_options),
         lambda: __import__("civ6_host.runtime.xp2_cache_source", fromlist=["source_dependencies"]).source_dependencies(),
     )
     refs.extend(dict(path=str(path), sha256=digest, absolute=True)

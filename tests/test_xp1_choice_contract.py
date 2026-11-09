@@ -134,5 +134,28 @@ class ChoiceContracts(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'matching native delivery'):
                 _execute_xp1(saved,action,0,4,'fixture/closure.json')
 
+    def test_xp2_turn_worker_checks_native_offer_and_observation_without_full_catalogue(self):
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        action = {'kind': 'force_end_turn'}
+        saved = NS(backend=NS(load_abi=NS(core_sha256=XP2_CORE_SHA256)),
+                   continuation=NS(observation=self.obs), emit=Mock(), execute=Mock())
+        effect = dict(status='completed', reason=None, requested_action=action)
+        saved.execute.return_value = dict(action=action, effect=effect)
+        with patch('civ6_host.runtime.xp1_session_view.read') as full, patch(
+                'civ6_host.runtime.xp1_session_view.read_turn_preflight') as preflight, patch(
+                'civ6_host.runtime.xp1_session_inputs._write_once', return_value={}):
+            preflight.return_value = (self.obs, False)
+            self.assertEqual(_execute_xp1(saved, action, 0, 3, 'fixture/closure.json')['reason'],
+                             'native_action_no_longer_available')
+            preflight.return_value = (dict(self.obs, turn=self.obs['turn'] + 1), True)
+            with self.assertRaisesRegex(RuntimeError, 'before-state changed'):
+                _execute_xp1(saved, action, 0, 3, 'fixture/closure.json')
+            saved.execute.assert_not_called()
+            preflight.return_value = (self.obs, True)
+            self.assertEqual(_execute_xp1(saved, action, 0, 3, 'fixture/closure.json'), effect)
+            preflight.assert_called_with(saved, 0, 'force_end_turn')
+            saved.execute.assert_called_once_with(action)
+            full.assert_not_called()
+
 
 if __name__ == '__main__': unittest.main()

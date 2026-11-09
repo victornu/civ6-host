@@ -162,10 +162,12 @@ def require_quiescent(snapshot, *, core_sha256):
     return validate(snapshot)
 
 
-def source_dependencies(*, core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256 == XP2_CORE_SHA256:
         from .xp2_checkpoint_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 checkpoint ABI')
     if core_sha256 != XP1_CORE_SHA256:
         raise ValueError('Unknown checkpoint dependency engine')
     from .paths import resource_root

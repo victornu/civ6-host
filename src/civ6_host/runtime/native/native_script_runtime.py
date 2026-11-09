@@ -18,9 +18,12 @@ from civ6_host.runtime.native.native_script_namespaces import ScriptNamespaces
 
 class NativeScriptRuntime:
 
-    def __init__(self, library, host, emit):
+    def __init__(self, library, host, emit, *, shared_dependency_profile=None):
         self.library, self.host, self.emit = (library, host, emit)
-        self.lua, self.heap = (bind_kernel(library), bind_heap(host))
+        self.shared_dependency_profile = shared_dependency_profile
+        options = ({'shared_dependency_profile': shared_dependency_profile}
+                   if shared_dependency_profile is not None else {})
+        self.lua, self.heap = (bind_kernel(library, **options), bind_heap(host))
         self.root = self.registry = None
         self.notification_service = None
         self.context_owner = None
@@ -162,6 +165,10 @@ class NativeScriptRuntime:
         if not isinstance(name, bytes) or not name or b'\x00' in name or (len(name) > 255):
             raise ValueError('GameEvents name outside admitted bounds')
         arguments = tuple(arguments)
+        from civ6_host.runtime.script_event_strings import has_strings, dispatch_strings
+        if has_strings(arguments):
+            valid, output = dispatch_strings(self, name, arguments, method='Call', output_initial=0)
+            return bool(output) if valid else False
         from civ6_host.runtime.native.native_script_arguments import HKSArgument
         from civ6_host.runtime.native.native_script_arguments import pack_arguments
         data = pack_arguments(arguments)
@@ -210,6 +217,9 @@ class NativeScriptRuntime:
         if not isinstance(name, bytes) or not name or b'\x00' in name or (len(name) > 255):
             raise ValueError('GameEvents name outside admitted bounds')
         arguments = tuple(arguments)
+        from civ6_host.runtime.script_event_strings import has_strings, dispatch_strings
+        if has_strings(arguments):
+            return dispatch_strings(self, name, arguments, method=method, output_initial=output_initial)
         from civ6_host.runtime.native.native_script_arguments import HKSArgument
         from civ6_host.runtime.native.native_script_arguments import pack_arguments
         from civ6_host.runtime.script_event_maps import has_maps

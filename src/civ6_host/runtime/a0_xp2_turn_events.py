@@ -39,7 +39,10 @@ def enable(owner, backend):
             or owner.arguments.reader.core_sha256 != XP2_CORE_SHA256
             or owner.normalizer_transform_present is not False):
         raise ValueError('Climate callbacks require the exact idle prepared XP2 owner')
-    profile = source.event_profile(core_sha256=XP2_CORE_SHA256)
+    profile = source.event_profile(
+        core_sha256=XP2_CORE_SHA256,
+        execution_image=getattr(backend.core, '_civ6_host_execution_image', None),
+    )
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('Climate callback overlaps an installed A0 family')
     for kind, size in profile.record_sizes.items():

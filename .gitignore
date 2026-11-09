@@ -1,6 +1,7 @@
 # Allowlist the intended source tree; native/capture/training artifacts stay local.
 *
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/AGENTS.md
 !/LICENSE*

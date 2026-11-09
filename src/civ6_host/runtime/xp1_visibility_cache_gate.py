@@ -13,13 +13,18 @@ GATE_SOURCE = ('evidence/native-player-view-cache-gate.json',
     '2632e4cd0892fe60c6b9e8149edad8c12b9ad00564101d21a98a9a764d2ec6b6')
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .loaded_cache_profiles import source, SOURCE as XP1_CACHE_SOURCE
     from .cache_facade_profiles import source_pins
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown internal-cache engine')
+    if execution_image is not None:
+        if core_sha256!=XP2_CORE_SHA256:
+            raise ValueError('Selected execution image requires XP2 internal-cache ABI')
+        from .execution_images import identity
+        identity(execution_image)
     gate = _source(GATE_SOURCE)
     if gate['schema'] != 'civ6rl.native_player_view_cache_gate.static.v1':
         raise ValueError('Official callback gate source changed')

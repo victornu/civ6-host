@@ -1,5 +1,214 @@
 # Extracted client: current scope
 
+## Congress v37–v39: scoped ballot cycle qualified
+
+The selected current XP2 session can opt into `world_congress_diagnostic=True`
+alongside the existing `espionage_diagnostic=True` query chain. This adds
+`information('world_congress', player_id=pid)` and four explicit choices:
+`congress_open`, `congress_confirm_ballot`, `congress_confirm_proposals`, and
+`congress_close`. Reading information never opens a review or acknowledges it.
+
+Ballot parameters contain `resolutions` (each with `resolution_hash`, `option`
+1 or 2, the offered `target_index`, and positive `votes`) and `discussions`
+(each with `discussion_index` and nonzero signed `votes`). Supply every editable
+item. Proposal parameters contain the complete selected `proposal_indices` list.
+All values must come from the current catalogue. `congress_ballot_draft(pid,
+parameters)` validates an unsent local form; submit it through the existing
+`act(pid, decision_id, candidate_id, parameters=parameters)` call.
+
+The API validates the complete form before the first native request. Its packets
+are ordered without another model decision between them; they are not an atomic
+transaction. Partial delivery is retained and prevents further decisions.
+`favor` is the form budget, captured on opening the proposals review;
+`current_favor` is the player's current native amount. The v37 Congress predicate
+removes the source-disabled government, policy and governor choices during a
+session while preserving their observations. It does not change historical v36.
+
+The existing `examples/local_session.py` also accepts LAN `information` commands
+with `group`/`player_id` and `congress_ballot_draft` with `player_id`/`parameters`.
+It never selects votes itself. Ordinary native catalogues through T61, the
+Congress phase transition and the active three-resolution form are recorded on
+the selected GS + BBG profile. The client now receives the result of a complete
+ordered native batch: three resolution votes, submit and end-turn. The existing
+transport consumes the exact native completion echo before the next update,
+then publishes once. The initial command remains `pending`. Subsequent native
+updates emit Finished and reach turn 62. Public Review now preserves the raw
+signed result fields, including the observed foreign option -1; it never
+normalizes that value into a submitted vote. Exact own-vote/cycle matching,
+quiescent journal retirement, Save and normal Destroy succeed. A fresh process
+reloads identical public observations and catalogues with rebound session identity,
+then saves and closes normally. This qualifies the recorded three-resolution B/1
+ballot, not all targets, vote counts or mechanical resolution effects. Requests
+without an accepted-result readback remain `pending`. Save refuses an open review
+or an unresolved confirmation journal. Other results, preferences, emergency details,
+participant roster, active effects and timeout/reopening retain explicit gaps.
+
+The additional explicit `world_congress_review_diagnostic=True` option selects
+v38; it requires the Congress option above. The cached public group
+`information('world_congress_review', player_id=pid)` reports the last results
+only when the official results UI admits them. During live voting this channel
+does not read foreign ballots. `decisions.world_congress_review_status` separates
+`available`, `waiting_or_closed` and `review_ui_unavailable`; unavailability is
+not an invented empty history. The historical v37 interface stays unchanged.
+
+The optional cycle observer joins actual native Stage/Finished events, submitted
+forms and subsequent public results. It does not invent individual packet ACKs.
+Save may retire a delivered confirmation only at an ordinary, quiescent boundary
+with the required matching result, or the source-qualified zero-choice automatic
+phase. Default-only votes require the same exact result without claiming whether
+submission or native default filling produced it. Hidden player targets are
+matched through a separate own-vote administrative sidecar; hidden identity does
+not enter the public catalogue. Unknown midphase loads, ambiguous discussion
+identities and unresolved proposal submissions retain explicit refusal paths.
+For ordinary proposals and closing, an administrative reader compares the exact
+own-proposal tuple delta and native LOOKED marker before and after the complete
+batch. A marker already equal to this turn is reported as already satisfied,
+not a new write. Only exact observed state and complete delivery can retire this
+ordinary journal; neither a historical Review nor a Finished event is invented.
+Detailed target identities stay administrative. Native proposal effects remain
+unqualified. The completed ballot and its post-result Save/reload are recorded
+in the private lab evidence `evidence/host-xp2-congress-ballot-cycle-native.json`.
+
+The current Review opt-in also publishes v39 `native_command_permissions`.
+Native strategic/tactical permissions remain distinct from player activity and
+turn completion. When a reader requires strategic permission, its group is
+explicitly unavailable while that permission is false; no empty catalogue or
+inactive player is invented. Independent observations and Congress remain
+readable. The public trade group uses `civ6-host.trade-inputs.v2` to retain routes
+when its separate origin reader is unavailable. These reader limits are API
+coverage gaps, not a claim that every related human screen is unavailable.
+
+Private evidence: `evidence/host-xp2-congress-client-preparation.json` in the lab.
+
+The v40 extension adds `information('world_congress_active_effects', player_id=pid)`
+to the same Review opt-in. It exposes the ordinary Current Effects panel:
+active resolution descriptions, visible targets and official durations, plus
+proposal cards with their displayed crisis goals and rewards. It remains
+separate from historical vote results and does not acknowledge consultation.
+The same scoped native configuration reader is reused; unmet target IDs stay
+masked. No graphics, emergency navigation or new action is added. A native T62
+read through the client returns three active resolutions, a meeting counter of
+19 displayed as 20 remaining turns, and an actually empty proposal list. The
+v39 observation and saved catalogue fields remain identical; v40 adds only the
+two documented fields. Save and normal Destroy succeed. Nonempty proposal cards
+remain source/software qualified only. Private lab evidence:
+`evidence/host-xp2-congress-active-effects-native.json`.
+
+The repaired Steam installation has an explicit trial selection on
+`NativeNetworkSession`: `execution_image_profile="xp2-gamecore-current-092abfbb"`.
+It verifies the actual Core and three shared libraries and selects the derived
+BBG host with the current Havok export addresses. Omitting this option preserves
+the historical selection; a changed DLL is never inferred as compatible.
+
+To resume a v1 checkpoint created under the reference image, also select
+`checkpoint_compatibility="xp2-reference-abi-to-selected-runtime.v1"`.
+Its creation identity remains unchanged. A newly written v2 checkpoint records
+the actual image, ABI reference and exact execution selection separately. A v2
+resume must match that selection. These administrative choices do not alter
+actor observations or choose any gameplay action. Static admission authorizes
+the bounded native trial only; its gameplay and lifecycle still require native
+qualification on this build.
+
+The opt-in `war_source_sha256` must be supplied independently to both the
+native session and `SessionClient`. A pending official WorldInput prompt is
+published as `civ6-host.network-world-war-decisions.v1`, with the two explicit
+`world_war_response` choices (`accept=False` or `True`). Forced end-turn cannot
+bypass it. On the selected current Core, the GS + BBG 7.5.1 witness cancels and
+then declares war against Hattusa, reads the native war-state change, saves and
+closes. This qualifies that city-state interval; major-player dialogue remains
+separately pending native qualification. Missing receiver profiles refuse before
+RequestSession. No diplomatic answer is chosen automatically. Private evidence:
+`evidence/host-xp2-war-confirmation-native.json` in the local lab.
+
+The prepared major-player response API uses a separate public modal,
+`civ6-host.network-diplomacy-decisions.v1`, rather than exporting the private
+legacy statement catalogue. `dialogue` carries session/statement identifiers
+needed by the command interface and public participant IDs. `choices` preserves
+native menu order and disabled state; `candidates` contains its executable
+responses. `public_display` contains rendered speaker/text/menu information,
+bound to an independent renderer source profile. A missing display is explicit
+and unqualified. Raw AI reasons, raw moods and opaque statement payloads are
+excluded. Administrative/native receipts remain separate. Consumers select their
+own features; these identifiers and text are not a model architecture decision.
+
+Public modal replies, including inactive-player responses, are validated by the
+common client without importing the native backend or requiring local game
+resources. This is a client dependency check, not a Mac throughput measurement.
+The reader and response route have grouped source/software validation; their
+native major-war effects must still be demonstrated on the selected content.
+
+The prepared surprise-war route also verifies the selected native factory
+registry entry, constructor bytes and virtual targets before RequestSession.
+Unknown names, a foreign factory or corrupt registry are refused. Its current
+source/software checks read the installed PE with substituted registry memory;
+they do not qualify a live major-player exchange. The 21 registration keys found
+for the shared native war class are not 21 delivered API actions. The existing
+local qualifier's `--world-war-target-major` requires a verified saved major
+roster and a public target before starting any native worker.
+
+The existing `world_select_unit` / `world_plot_click` route now admits the
+source-qualified XP2 `SWAP_UNITS` branch. In the retained BBG 7.5.1 session,
+an owned Warrior selected at (14,11) clicks the other owned Warrior at (15,11).
+The official helper chooses `SWAP_UNITS`; exactly one native archive is delivered
+and both unit positions exchange. Native remaining movement becomes 1 and 0,
+respectively. The same session saves and destroys normally. No additional
+strategic action filtering, synthetic movement or guessed opcode is introduced.
+The resulting turn-25 checkpoint is saved but has not been reopened. This does
+not admit XP1 swaps, arbitrary swap eligibility, other WorldInput branches or
+XP2 war confirmations. The legacy partial-family gap labels remain conservative
+pending the larger WorldInput contract extension. Private evidence:
+`evidence/host-bbg751-unit-swap-native.json`.
+
+The opt-in `governors_diagnostic=True` XP2 session publishes a v32
+`decisions.governors` catalogue: obtained/spent titles, consideration state,
+eligible/appointed governors, public status, promotion rows and assignment
+targets. The common candidate API exposes `appoint_governor`,
+`promote_governor`, `assign_governor` and `consider_governor_titles`.
+Requests carry the selected database index plus its checked type hash; city
+destinations retain both owner and city ID. The engine decides legality and
+effects. Hidden promotion labels do not by themselves remove a clickable action.
+
+All four gestures executed at turn 47 in the exact retained Gathering Storm +
+BBG 7.5.1 profile, followed by native Save/Destroy. A subsequent fresh native
+session reloads that saved catalogue identically and advances three forced
+turns. Governor index 0 (`GOVERNOR_THE_DEFENDER`) remains assigned to the same
+own city with the same owned promotions; `turns_on_site` progresses from 0 to 3
+and the engine reports `established=true` at turn 50. The session saves and
+destroys normally. The new turn-50 pair is not reopened. Other governors,
+foreign assignments, neutralization and broader lifecycle interactions remain
+unqualified. Private evidence: `evidence/host-bbg751-governor-establishment-native.json`.
+Sessions without this explicit option preserve the v31 interface.
+
+The current-image v34 route with `governors_diagnostic=True` and
+`trade_diagnostic=True` also supports Amani's BBG 7.5.1 city-state bonus in a
+one-human LAN witness. The common client appoints and assigns her at T47 and
+opens a route to her city-state at T48. At T52 the official script activates
+the bonus and the origin city's public food and production increase. A new
+process reloads the T52 checkpoint with the same public observation and active
+route. Reassigning her to an owned city removes the bonus while the route
+stays active. Both sessions save and close normally. Private lab evidence is in
+`evidence/host-xp2-bbg-amani-native.json` and
+`evidence/host-xp2-bbg-amani-reassignment-native.json`.
+
+The XP2 v31 extension adds `decisions.envoys`: the player's token
+reserve, consideration/blocker state, and known living city-state targets with
+their native receive/send predicates and received counts. `send_envoy` submits
+one selected target through the explicit XP2 player-operation ABI; `retain_envoys`
+acknowledges the native consideration state without spending a token. A null
+catalogue means unavailable during waiting/closure, not a known empty query.
+The common client retains candidate identities and native ordering. Non-blocking
+panel review and the full city-state/diplomacy interface remain separate scope.
+On the retained Gathering Storm + BBG 7.5.1 lineage, the common client has
+executed both actions: retention preserves the reserve and clears the native
+consideration blocker; sending spends one token and increases the selected
+city-state's count. The native engine produced the tokens while advancing from
+turn 45 to 47 after an offered civic selection; no token injection was used.
+Five scripted decision frames also pass the frozen recurrent actor with all
+candidates intact. Save and normal destruction succeeded. The subsequent v32
+governor session reopened this envoy state with its reserve, received count and
+consideration state unchanged. Neither a complete diplomacy API nor a strategic
+training scope is established by this qualification.
+
 `civ6-host-client` is a Python standard-library client and public-contract package.
 It has no PyTorch or lab import. The separately installed `civ6-host-runtime`
 provides `LocalHotseatBackend` on Windows; see [backend setup](backend.md).
@@ -228,6 +437,167 @@ iron with capacity 25 and extraction of two per turn, then saved the v24
 catalogue. The installed client replayed that public response. Private
 evidence: `evidence/host-xp2-public-strategic-resources-native.json`.
 
+Gathering Storm v25 adds `policies` to the common `SessionClient` catalogue.
+At a qualified acting boundary it reports the player's native free-change
+window, current slot indices and available cards for each slot. An available
+changed assignment is one factorized `policies` candidate. The API does not
+enumerate combinations or select cards for the caller. Submit one unsigned
+policy hash per slot, in the published slot order:
+
+```python
+menu = view['decisions']
+candidate = next(row for row in menu['candidates']
+                 if row['action']['kind'] == 'policies')
+# Choose the hashes from candidate['action']['slots']; fill every slot once.
+view = client.act(view['observation']['player_id'], menu['decision_id'],
+                  candidate['candidate_id'],
+                  parameters={'assignments': chosen_unsigned_hashes})
+```
+
+The runtime requeries native availability, submits `RequestPolicyChanges`,
+delivers its native message and checks every resulting `GetSlotPolicy` index
+before reporting completion. The v25 catalogue retains v24 fields and declares
+the two remaining gaps: `paid_policy_unlock` and `active_policy_relocation`.
+Inactive or closed decision boundaries publish no policy query. A card's mod
+identifier is preserved, including names that do not begin with `POLICY_`.
+
+The local BBG 7.5.1 witness assigns Discipline and God King at turn 21, reads
+indices 0 and 2, saves and restores the same public state and semantic menu in
+a fresh process, and closes both lifetimes normally. A new session resets its
+sequence to zero. This covers that free two-slot assignment, not every policy,
+government, paid unlock or mod interaction. Private evidence:
+`evidence/host-bbg751-native-policy-assignment.json`.
+
+The v26 catalogue also publishes `policy_unlock` at a qualified
+acting boundary. Its fields are `player_id`, `turn`, `cost`, `currency`,
+`reason` and `can_unlock`. The selected currency is `YIELD_GOLD` or
+`YIELD_FAITH`; full native wallet precision stays in administrative evidence.
+When the official UI gate and native `CanStartPlayerOperation` both allow it,
+the distinct candidate is `{'kind': 'policy_unlock', 'cost': ..., 'currency': ...}`.
+It takes no extra client parameters. The implementation submits the exact
+registered operation with an owned empty native parameter map, then requires
+both a zero unlock cost and the matching native currency debit before completion.
+
+The BBG 7.5.1 control resumes the prior free assignment at turn 21, selects
+Craftsmanship, then State Workforce after Craftsmanship completes. At turn 23,
+the native operation debits 55 gold and opens free replacement. The caller then
+selects Survey and Urban Planning. The source-qualified CivicsUnlocked event
+is retained and consumed in the existing FIFO. A separate process reloads the
+saved result with the same public state and choices; both lifetimes close
+normally. The six actions also pass through the existing recurrent actor and
+collector using the exact native receipts. Private evidence:
+`evidence/host-bbg751-native-policy-unlock.json`.
+
+This qualifies that gold-funded action in one single-human LAN lineage.
+Faith-funded execution, active-card relocation, general government changes,
+official multi-turn comparison and multi-human scheduling remain separate
+qualifications. The historical zero-cost controls and explicit callback refusal
+remain preserved. This delivery establishes no new PPO campaign or playing gain.
+
+The v27 catalogue adds `government` at an acting XP2 boundary. Its fields are
+`player_id`, `turn`, `current_index`, `can_change`, `changed`, `civic_completed`,
+`considered`, `consideration_blocker` and `choices`. Every government row retains
+its `index`, unsigned `hash`, `unlocked`, `can_change` and `anarchy_turns` values,
+including locked and predicted-anarchy choices. Waiting/closed views return null.
+
+The `government` family is explicitly `queried_partial`, with
+`unqualified: ['anarchy_transition']`. Direct non-anarchy changes use the official
+global and per-target UI gates and expose `{'kind':'government','index':...,'hash':...}`.
+The separate `{'kind':'retain_government','index':...}` acknowledges the existing
+government only when its consideration blocker is present. Neither action takes
+additional parameters. A request is not reported complete until native readback
+confirms adoption or consideration; the latter must remove that specific blocker.
+
+In the retained BBG 7.5.1 LAN world, the native continuation reaches turn44,
+adopts Classical Republic, refreshes four policy slots and assigns four cards.
+The separate consideration action then keeps government3 and clears its blocker.
+Both saved results reload with equal public observations and choices. All five
+bounded native lifetimes close normally. The 31 scripted native decisions also
+pass the unchanged actor dimensions and the existing learner interval validator;
+this is not a new curriculum episode or PPO campaign. Other government effects,
+anarchy, active-card relocation, official comparisons and multi-human scheduling
+remain separate qualifications. Private evidence:
+`evidence/host-bbg751-native-government.json`.
+
+The v28 catalogue extends the same changed-assignment `policies` action to active-card
+relocation. `policies` is `queried_complete` at a queried acting boundary;
+v25/v26/v27 retain their earlier relocation gap and selection rules. Parameters
+stay `assignments`, one unsigned policy hash per slot. Cards currently active in
+another slot use the pinned official screen's row-type rule and actual native
+slot types; inactive cards still require native `CanSlotPolicy`. The existing
+request clears all slots before additions, and native slot readback verifies
+the result. The catalogue offers confirmation only if a complete, changed,
+unique assignment exists, including alternating swaps and cycles.
+
+The bounded BBG 7.5.1 witness swaps two already active economic cards at turn45:
+slot indices change from `[2,3,0,1]` to `[3,2,0,1]`. Native Save and an independent
+process reload preserve the same observation and choices. Both lifetimes close
+normally under 512 MiB. Twelve replies replay through `SessionClient`; the two
+ready decision frames pass the unchanged v15 actor encoder, frozen scoring and the retained interval
+validator. This is scripted native execution and model I/O qualification, not
+a new learning campaign or autonomous actor-selected relocation. Other slot
+types, policy interactions, official comparisons and independent worlds remain
+separate qualifications. Private evidence:
+`evidence/host-bbg751-native-policy-relocation.json`.
+
+The UI round-trip that removes and restores a card before confirming the same
+final assignment remains excluded by the historical changed-only v28 contract.
+The v29 contract admits that complete unique assignment without changing the
+`assignments` parameter. Older versions retain their previous semantics.
+
+The bounded BBG 7.5.1 witness confirms the same four cards at turn45. Native
+`PolicyChangeMade` changes from false to true while slot indices stay
+`[2,3,0,1]`; matching slots alone would not prove confirmation. Native Save and
+a fresh process reload preserve the observation and choices. Both native
+lifetimes close normally under 512 MiB. Twelve client replies replay successfully;
+two ready decision frames pass frozen actor scoring, and two native intervals
+pass the existing rollout validator. This adds no PPO update or autonomous
+actor-selection witness. The two reference checkpoints preserve learned state
+through explicit source-only transitions. Private delivery evidence:
+`evidence/host-bbg751-native-policy-reconfirmation.json`. It closes the scoped
+gap recorded in `evidence/host-policy-unchanged-confirmation-gap.json`;
+other policy interactions and general gameplay coverage remain separate.
+
+The v30 catalogue adds city unit/building purchases with `YIELD_FAITH`. An item
+may have separate gold and faith quotes and candidate IDs; the published native
+legality and affordability flags select candidates. Unaffordable quotes remain
+catalogue data. Tile purchases still require gold. Earlier catalogue versions
+retain their gold-only city-purchase contract. Checkpoint comparison removes
+only the new faith offers from a validated comparison copy when matching an
+earlier schema; the live catalogue keeps them.
+
+The XP2 adapter reuses the pinned official purchase command, cost and wallet
+APIs, re-quotes the selected currency and dispatches the exact action through
+the shared provider. This group verifies source correspondence, contract,
+dispatch fixtures and model inputs. It does not include a positive native XP2
+faith-purchase witness. The purchase family stays `queried_partial` and lists
+`faith_purchase_native_effect` explicitly alongside the other remaining routes.
+No complete purchase coverage or strategic-training admission follows.
+Private evidence: `evidence/host-xp2-faith-purchases-api.json`.
+
+The subsequent native v30 readback resumes the registered BBG 7.5.1 turn45
+checkpoint with its original query-control options, matches its observation
+and historical decision fields, saves and closes normally. Fourteen city
+purchase quotes are present, all gold; no faith offer exists at that boundary.
+The actual view passes the frozen actor with all 91 candidate IDs preserved.
+No gameplay action or turn was executed, and the newly saved v30 checkpoint
+has not been reopened. This qualifies that native query/lifecycle scope, not
+a positive faith purchase or production simulation throughput. City-query
+activation remains a separate explicit admission. Private evidence:
+`evidence/host-bbg751-v30-native-query.json`.
+
+The XP2 update's immutable cache-source proof is now shared through its
+synchronous FIFO drain and cache publication. Full dependency verification
+remains at entry and exit; each record still checks live context ownership,
+locks, callback slots, record layout and sequence. The event-reader scope and
+guarded-callback timing remain limited to the actual GameCore update. This
+changes neither the API schema nor the available actions or observations.
+The retained v27 comparison matches eleven public replies across four actions
+and six native updates, from turn23 to the active player at turn24, then saves
+and closes normally. This is an instrumented single-world regression and timing
+comparison, not a sustained production benchmark or a new training admission.
+Private evidence: `evidence/host-bbg751-update-publication-throughput.json`.
+
 The current captured XP1 group executed FORTIFY then the offered CANCEL to leave
 fortification. It selected the same unit, clicked (45,26), observed native queued
 destination 1969, and cleared it with another CANCEL. Deselection, native close
@@ -342,6 +712,29 @@ through favored, disfavored and neutral, locked and unlocked one worked plot,
 and closed normally. The witness starts from the original capture. Native
 specialist clicks, v12 Save and reset, and Rise and Fall execution remain
 pending. Historical v11 checkpoints retain their original catalogue contract.
+
+The exact BBG 7.5.1 Gathering Storm bundle also accepts these city query options
+in the v30 catalogue and public display-v2 view. Enabling a previously unqueried
+family on resume adds only its observed fields and candidates. Checkpoint
+comparison uses a detached projection of previously known fields; existing
+focus/citizen data, every other decision and the live catalogue remain intact.
+The transition is explicitly recorded with its query opt-ins. Query options do
+not authorize changing saved gameplay state.
+
+BBG city availability uses its own captured multiplayer/tutorial/control witness
+and the inherited official handlers. The numerical API queries owned native
+cities and MANAGE targets; selecting a graphical city panel is presentation
+navigation. Each command still requires a current offered candidate and native
+revalidation. A turn-45 BBG witness executed production focus and locked one
+worked plot, then saved and closed normally; its 125 candidates were retained
+by the recurrent actor consumer. Saved-state re-opening is tracked separately.
+The resulting checkpoint was then reopened in a second native process: the
+production-favored flag and the worked-plot lock were preserved, and all
+previously published decision fields matched. Both processes saved and closed
+normally. Private proof: `evidence/host-bbg751-city-controls-native.json`.
+The retained stock XP2 specialist witness does not imply that this BBG group
+assigned a specialist. Complete gameplay and multi-human scheduling remain
+separate qualifications.
 
 The Gathering Storm LAN backend uses v14 for city and district ranged attacks. The
 `city_shots` catalogue contains the owned shooters and native target plots
@@ -1038,6 +1431,23 @@ With the XP2 display projection enabled, a terminal reply returns the public
 result with null observation and decisions. The native formatter serves live
 views only, so terminal replies do not expose the raw board precision.
 
+The source runtime now supports an explicit launch-time `public_display_source`
+alongside `public_display_diagnostic=True`. The omitted source retains the stock
+v7 contract. `runtime.player_display_toppanel.BBG_SOURCE_SHA256` selects the
+separate fr_FR candidate for the exact recovered BBG 7.5.1 bundle. It does not
+select a formatter on an action request or accept an arbitrary source file.
+Unknown sources, a mismatched bundle/bootstrap, changed dependencies, foreign
+owners and cross-response formatter receipts are refused. The v7 file and its
+historical refusal remain unchanged.
+
+This optional path formats four already-read values through the official
+Localization library and projects the six CityPanel yields. It adds no yield,
+purchase or turn rule. `SessionClient.view()` returns its explicit display-v2
+envelope; `information('display')` returns the same cached public values. The
+private raw response remains the authority for native commands and checkpoint
+comparison. The BBG candidate's native qualification is tracked separately;
+selecting it is not a statement of complete public-information parity.
+
 The historical `view()`/transport and saved checkpoints remain unchanged. Their
 full nested dictionaries still contain some diagnostic getter values and must
 not be treated as an entirely player-only model input. The typed query qualifies
@@ -1057,4 +1467,163 @@ It verifies retained file hashes, replays the recorded requests and replies
 through `SessionClient`, checks both channels and keeps unavailable boundaries
 explicit. This is retained-native client replay, not evidence of a new native
 call or a new gameplay interaction.
+
+### XP2 initial diplomacy
+
+The opt-in `civ6-host.network-capability-decisions.v33` adds
+`decisions.diplomacy_overview` and `diplomacy_initiate` candidates. It preserves
+the preceding v32 governor fields. The current scope is the explicit
+`xp2-gamecore-current-092abfbb` execution image and exact recovered GS + BBG 7.5.1
+bundle; launch requires `governors_diagnostic=True`,
+`diplomacy_overview_diagnostic=True` and the selected war receiver source pin.
+Other profiles are refused rather than silently selecting another engine.
+
+After the normal reset/observation call, the public query uses the accepted
+boundary without another RPC:
+
+```python
+overview = client.information('diplomacy')['data']
+offered = [row for row in view['decisions']['candidates']
+           if row['action']['kind'] == 'diplomacy_initiate']
+# The caller explicitly selects one offered row, if any.
+if offered:
+    selected = offered[0]
+    view = client.act(overview['player_id'], view['decisions']['decision_id'],
+                      selected['candidate_id'])
+```
+
+An action contains
+`kind`, `target_player_id` and `choice`. Availability comes from the native
+living-major roster, `IsMajor`, `HasMet`, and the selected official GREETING
+extraction/filtering. Native row order and disabled state are preserved.
+Unsupported deal/alliance rows remain in the overview with `supported=False`;
+only enabled, supported rows become executable candidates. The capability
+reports `complete_action_space=False`. Unknown or unavailable choices fail
+explicitly. No target is inferred from hidden positions or its numeric ID.
+
+The command requeries availability, checks the selected native factory and calls
+the official initial-statement dispatcher. A native `RequestSession=False`
+returns a refusal without inventing an archive. A pending dialogue exposes the
+separate explicit-response contract; the host does not select its response.
+The selected official golden-war literal is preserved even though it differs
+from the Core's registration. No corrective alias is inserted.
+
+Native qualification currently covers the T25 public query, matching input
+observation, Save v2 and Unload/Destroy. That witness has no living already-met
+major targets. Positive initial requests, major dialogue display/responses and
+the live request-registry guard have software/source checks, without a native
+positive witness in this delivery. The twenty compiled mappings do not mean
+twenty qualified native actions. No learner changes or training occurred.
+
+## Trade information
+
+On a supported Base hotseat session, `client.information("trade")` reads the
+current player's two native trade catalogues from the cached decision. The
+result includes outgoing routes, offered destinations with their native paths
+and yield quotes, and the offered changes of origin. It carries the same
+episode, turn, sequence and decision ID as `client.view()` and makes no engine
+call. A different player's trade catalogue requires their own acting boundary.
+
+Submit `make_trade_route` and `change_trade_origin` through `act` using their
+candidate IDs from `view()["decisions"]`. The client checks that these commands
+match the native catalogues. The same read contract is available on
+`SessionClient` for the local Gathering Storm and BBG 7.5.1 profile. Set
+`trade_diagnostic=True` on the current-image `NetworkBackend` with its
+source-qualified governor and initial-diplomacy options. The v34 catalogue
+publishes `trade_routes` and `trade_origins` for the acting player. While
+waiting or after closure, these fields are unavailable.
+
+The T50–T52 native witness changes a Trader's origin, starts a route to a
+city-state and reads back both the active route and the official BBG
+`CS_TRADERS` change before saving and closing. The BBG property readback
+is kept in the host receipt. The public client receives the trade catalogue.
+A fresh process reloads the same observation and both catalogues with the route active.
+Expiry, reissuing an expired route, Amani's modifier and visibility across
+other target and map conditions remain separate qualification cases.
+
+## Espionage information and orders
+
+The current-image GS + BBG 7.5.1 session accepts `espionage_diagnostic=True`
+alongside its existing `trade_diagnostic=True` options. Its v35 decision
+catalogue adds `espionage`; previous v34 fields and historical checkpoints
+retain their meaning. This remains a partially qualified API capability.
+
+`client.information("espionage")["data"]` exposes the acting player's spies,
+capacity, known captives, spies travelling off-map, completed mission history
+and current offers. Enemy captives have `level=None`, because that rank is not
+shown in the corresponding official screen. Probability fields contain the
+rounded aggregate percentages shown by the game; `-1` means not displayed.
+The query uses the cached player boundary and performs no additional RPC.
+The information is unavailable while waiting or after closing the session.
+
+The common `client.act(player_id, decision_id, candidate_id)` path accepts
+`spy_travel`, `spy_mission`, `spy_cancel` and `spy_escape` choices from that
+catalogue. Orders are revalidated through the native UI API. Offensive mission
+start has no coordinate parameters in the underlying native request; counterspy
+and travel orders use their offered target coordinates. Escape routes require
+the local player's actual escape notification and next escaping spy identity.
+The host never chooses a route or mission automatically.
+
+Native archive delivery, order application and mission completion are distinct.
+A command is `completed` only when the order's native state change is read back;
+that status does not mean the multi-turn mission has finished. An unconfirmed
+order is `pending`, and a choice that has become unavailable is `refused`.
+Repeat from a mission-completion popup remains explicitly unqualified as
+`spy_completion_repeat_pending_identity`; historical missions are not treated
+as pending popups. The family's `queried_partial` status and global
+`complete_action_space=False` preserve this limitation.
+
+Software fixtures cover all four order types and channel boundaries. Native
+spy order execution and completed-mission effects require their own recorded
+witnesses; the presence of candidates or a successful empty query is not that
+qualification.
+
+The retained T31 native checkpoint has now exercised this v35 query through
+`SessionClient`: spy capacity is zero and all spy lists/offers are empty. The
+native BBG spy listener loads, the previous promotion and public observation
+survive reload, and Save plus Unload/Destroy complete. Peak private memory was
+429.7 MiB under the 512 MiB limit. This verifies the empty query and lifecycle,
+with no positive spy order or completed mission. The private local receipt is
+`evidence/host-xp2-espionage-client.json` in the lab.
+
+### Completion choices
+
+The current source adds v36 with a separate cached public group,
+`client.information("spy_completion")`. A current completion comes from the
+owned native `SpyMissionCompleted` event. It is never inferred from recent
+history. The caller can choose `spy_renew` when the official predicates allow
+it, or `spy_completion_dismiss`. Renewal uses the historical plot coordinates,
+even when the spy currently occupies another plot, and adds no movement-point
+or strategic filter.
+
+Dismissal changes local presentation state and issues no native simulation
+request. A renewal enqueues the native order and closes that completion before
+the archive is applied, matching the official callback. Closing displays at
+most one newest queued completion. A suppressed counterspy result does not
+cause the host to drain older records automatically. BBG gameplay effects run
+only from the original native event, once per delivered occurrence.
+
+This v36 addition has source and grouped software checks; the previous native
+empty-query witness remains v35. Positive completion/renewal events, interaction
+with interface-mode changes and notification reactivation still need native
+qualification. The API keeps those gaps explicit. Checkpoint creation refuses
+a pending completion or its queue until an explicit dismissal clears it;
+restoring that presentation lifetime is not yet qualified. This does not block
+checkpoints with no pending completions or weaken their previous native proofs.
+
+### Installed BBG listener authority
+
+Native UI callbacks retain their event owner, which can differ from the local
+player. Their internal EXECUTE_SCRIPT requests use the official GameCore gate;
+a request producing no archive is recorded as filtered, with unchanged native
+readbacks, and is never called successful delivery. Public client actions keep
+their local ownership checks. Spy callbacks retain the installed Lua's explicit
+local-player filter. These private callback receipts are not actor inputs.
+
+The current T52–T56 native interval confirms the foreign-governor filtered case
+and local governor delivery. It then stopped on the promotion owner's former
+local restriction. The grouped promotion/trade correction passed 67 software
+checks after that run; the run does not qualify those corrected foreign cases.
+No checkpoint or route expiry was observed in this interval. Private lab proof:
+`evidence/host-xp2-bbg-listener-authority-native.json`.
 

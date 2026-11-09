@@ -52,6 +52,47 @@ class XP2CaptureSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'correlated capture994'):
             selection.inspect_capture({'path': str(path), 'sha256': sha256(path.read_bytes()).hexdigest()})
 
+    def test_different_bbg_save_and_stream_can_reuse_the_reference_map_seed(self):
+        from tools.check_bbg_capture_selection import compare_saved_maps
+        from civ6_host.runtime.xp2_bbg_inputs import CAPTURE, SAVE_SHA256
+
+        captures = resource_root() / 'work/official-capture'
+        early_digest = '7623d1bf90591bcf4664791b654e9e846e12c98d65eccf0f16e30def074cb8dd'
+        early = captures / 'xp2-bbg751-lan-20261104-02/save' / early_digest / 'source.Civ6Save'
+        reference = (resource_root() / CAPTURE / 'recovered-save-components'
+                     / SAVE_SHA256 / 'source.Civ6Save')
+        if not early.is_file() or not reference.is_file():
+            self.skipTest('Retained BBG saves required')
+        matched = compare_saved_maps(early, early_digest, reference, SAVE_SHA256)
+        self.assertFalse(matched['map_seed_distinct'])
+        self.assertTrue(matched['gamecore_stream_distinct'])
+        self.assertEqual(matched['candidate']['map_seed'], 2095665172)
+        self.assertFalse(matched['independent_official_generation_verified'])
+        with self.assertRaisesRegex(ValueError, 'changed identity'):
+            compare_saved_maps(early, SAVE_SHA256, reference, SAVE_SHA256)
+
+        stock_digest = '48b816c0af186d477f412c10bba40d22f1281d57341d4c5644e95a0e2ce0a430'
+        stock = self.manifest.parent / 'save-capture' / stock_digest / 'source.Civ6Save'
+        distinct = compare_saved_maps(stock, stock_digest, reference, SAVE_SHA256)
+        self.assertTrue(distinct['map_seed_distinct'])
+        self.assertTrue(distinct['gamecore_stream_distinct'])
+        self.assertFalse(distinct['independent_official_generation_verified'])
+
+    def test_same_map_rejected_before_database_capture_verification(self):
+        from tools.check_bbg_capture_selection import inspect
+
+        digest = '48b816c0af186d477f412c10bba40d22f1281d57341d4c5644e95a0e2ce0a430'
+        save = self.manifest.parent / 'save-capture' / digest / 'source.Civ6Save'
+        with self.assertRaisesRegex(ValueError, 'reuses the reference map seed or GameCore stream'):
+            inspect(self.manifest, REFERENCE[1], different_map_from=(save, digest))
+
+    def test_bbg_input_review_requires_exact_content_and_localization_provenance(self):
+        reference = dict(zip(('path', 'sha256'), REFERENCE))
+        with self.assertRaisesRegex(ValueError, 'requires full captured Localization provenance'):
+            selection.inspect_capture(reference, bbg751=True)
+        with self.assertRaisesRegex(ValueError, 'qualified BBG 7.5.1 content scope'):
+            selection.inspect_capture(reference, localization_sources=retained_localization_sources(), bbg751=True)
+
     def test_selected_capture_stages_the_verified_inputs_in_one_private_worker(self):
         with TemporaryDirectory(dir=resource_root() / 'work') as workspace:
             run = Path(workspace) / 'worker-run'

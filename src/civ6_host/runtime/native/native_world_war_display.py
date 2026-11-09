@@ -165,52 +165,11 @@ def read(owner, observation: dict, prompt: dict) -> dict:
     return result
 
 def parse_display(raw: bytes, player_id: int, expected_turn: int, defender_player_ids, war_type: int) -> dict:
-    if type(raw) is not bytes or not raw or len(raw) > MAX_BYTES:
-        raise ValueError('invalid war display payload size')
-    try:
-
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError('duplicate war display JSON key')
-                result[key] = value
-            return result
-        value = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda token: (_ for _ in ()).throw(ValueError('nonfinite JSON')))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError('malformed war display JSON') from exc
-    pid = _int(player_id, 'player ID', _PLAYER_MAX)
-    turn = _int(expected_turn, 'turn', 4294967295)
-    war = _war_int(war_type)
-    if type(defender_player_ids) not in (list, tuple) or not defender_player_ids or len(defender_player_ids) > 64:
-        raise ValueError('invalid requested defender list')
-    defenders = [_int(item, 'defender player ID', _PLAYER_MAX) for item in defender_player_ids]
-    if len(set(defenders)) != len(defenders) or pid in defenders:
-        raise ValueError('invalid or repeated requested defender')
-    if type(value) is not dict or set(value) != {'schema', 'player_id', 'turn', 'defender_player_ids', 'war_type', 'targets', 'message', 'warmonger_text', 'source_sha256', 'buttons', 'static_text'} or value['schema'] != SCHEMA or (type(value['player_id']) is not int) or (value['player_id'] != pid) or (type(value['turn']) is not int) or (value['turn'] != turn) or (type(value['war_type']) is not int) or (value['war_type'] != war) or (type(value['defender_player_ids']) is not list) or (value['defender_player_ids'] != defenders):
-        raise ValueError('war display identity or schema mismatch')
-    if type(value['targets']) is not list or len(value['targets']) != len(defenders):
-        raise ValueError('war display target count mismatch')
-    for target, defender in zip(value['targets'], defenders):
-        if type(target) is not dict or set(target) != {'player_id', 'display_name', 'icon_name'} or type(target['player_id']) is not int or (target['player_id'] != defender):
-            raise ValueError('war display target identity mismatch')
-        for key in ('display_name', 'icon_name'):
-            _text(value=target[key], name=key)
-    _text(value=value['message'], name='message')
-    _text(value=value['warmonger_text'], name='warmonger text')
-    if type(value['buttons']) is not list or len(value['buttons']) != 2:
-        raise ValueError('war confirmation requires both official buttons')
-    for button, accept in zip(value['buttons'], (False, True)):
-        if type(button) is not dict or set(button) != {'accept', 'text'} or button['accept'] is not accept:
-            raise ValueError('war confirmation button order or identity changed')
-        _text(button['text'], 'button text')
-    if type(value['static_text']) is not dict or set(value['static_text']) != {'title', 'warmonger_heading'}:
-        raise ValueError('war confirmation static label fields changed')
-    for key, text in value['static_text'].items():
-        _text(text, key)
-    if type(value['source_sha256']) is not str or not re.fullmatch('[0-9a-f]{64}', value['source_sha256']) or value['source_sha256'] != _projection_sha256():
-        raise ValueError('invalid war display source digest')
-    return value
+    # The runtime authenticates its selected renderer; the shared client codec
+    # validates the wire payload without importing game files on the learner.
+    from civ6_host.contracts.war_confirmation import parse_display as parse_public_display
+    return parse_public_display(raw, player_id, expected_turn, defender_player_ids, war_type,
+                                expected_source_sha256=_projection_sha256())
 
 def _text(value, name: str):
     if type(value) is not str or len(value.encode('utf-8')) > MAX_TEXT_BYTES or '\x00' in value:

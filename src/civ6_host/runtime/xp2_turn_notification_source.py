@@ -5,6 +5,7 @@ callable interfaces and typed fields, not transitive gameplay or live effects.
 """
 import hashlib
 import re
+from types import MappingProxyType
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .a0_family_source import _path, verify_pinned_files, verify_extracted_sources
 
@@ -49,6 +50,8 @@ SNAPSHOT = {'bytes': 184,
  'string_free': 10029296,
  'string_offset': 16,
  'target_rva': 849568}
+
+_VALIDATED_BODY_PROFILES = None
 PRIVATE_EVENTS = {'0x1be52206': {'builder': 6276512,
                 'fields': {'0xa1e5a149': 3, '0xa1fbc372': 2, '0xd6fcf3e4': 2},
                 'private_type': 84,
@@ -102,8 +105,44 @@ def bodies(p=None):
     return (*p['functions'].values(),filter_source()['body'])
 
 
+def _validate_complete_bodies(p, filter_profile):
+    """Check complete bodies once per pair of frozen proof objects."""
+    global _VALIDATED_BODY_PROFILES
+    key = (p, filter_profile)
+    if (type(p) is MappingProxyType and type(filter_profile) is MappingProxyType
+            and _VALIDATED_BODY_PROFILES is not None
+            and _VALIDATED_BODY_PROFILES[0] is p
+            and _VALIDATED_BODY_PROFILES[1] is filter_profile):
+        return
+    selected_bodies=(*p['functions'].values(),filter_profile['body'])
+    starts=set()
+    for body in selected_bodies:
+        parts=[]
+        for f in body['fragments']:
+            raw=bytes.fromhex(f['raw_hex']);parts.append(raw)
+            if (len(raw)!=f['length'] or hashlib.sha256(raw).hexdigest()!=f['sha256']
+                    or ''.join(r['bytes'] for r in f['instructions'])!=raw.hex()):
+                raise ValueError('XP2 notification native fragment changed')
+            cursor=int(f['start_rva'],16)
+            for row in f['instructions']:
+                if int(row['rva'],16)!=cursor:raise ValueError('XP2 instruction boundary changed')
+                starts.add(cursor);cursor+=len(bytes.fromhex(row['bytes']))
+        raw=b''.join(parts)
+        if len(raw)!=body['bytes'] or hashlib.sha256(raw).hexdigest()!=body['sha256']:
+            raise ValueError('XP2 notification complete native body changed')
+    for body in selected_bodies:
+        for f in body['fragments']:
+            for row in f['instructions']:
+                if re.fullmatch(r'j(?!mp)[a-z]+ 0x[0-9a-f]+',row['text']):
+                    if int(row['text'].split()[-1],16)-0x180000000 not in starts:
+                        raise ValueError('XP2 notification conditional successor missing')
+    if type(p) is MappingProxyType and type(filter_profile) is MappingProxyType:
+        _VALIDATED_BODY_PROFILES=key
+
+
 def source():
     p=_source(SOURCE)
+    filter_profile=filter_source()
     if (p['schema']!='civ6-host.xp2-turn-notifications.static.v1'
             or p['image']['sha256']!=XP2_CORE_SHA256
             or any(p[k] is not False for k in ('native_execution','process_memory_read','runtime_modified'))
@@ -118,27 +157,7 @@ def source():
             or p['contracts']['native_effect_admission'] is not False
             or p['contracts']['internal_before_host_dispatch'] is not True):
         raise ValueError('XP2 first-turn notification source contract changed')
-    starts=set()
-    for body in bodies(p):
-        parts=[]
-        for f in body['fragments']:
-            raw=bytes.fromhex(f['raw_hex']);parts.append(raw)
-            if (len(raw)!=f['length'] or hashlib.sha256(raw).hexdigest()!=f['sha256']
-                    or ''.join(r['bytes'] for r in f['instructions'])!=raw.hex()):
-                raise ValueError('XP2 notification native fragment changed')
-            cursor=int(f['start_rva'],16)
-            for row in f['instructions']:
-                if int(row['rva'],16)!=cursor:raise ValueError('XP2 instruction boundary changed')
-                starts.add(cursor);cursor+=len(bytes.fromhex(row['bytes']))
-        raw=b''.join(parts)
-        if len(raw)!=body['bytes'] or hashlib.sha256(raw).hexdigest()!=body['sha256']:
-            raise ValueError('XP2 notification complete native body changed')
-    for body in bodies(p):
-        for f in body['fragments']:
-            for row in f['instructions']:
-                if re.fullmatch(r'j(?!mp)[a-z]+ 0x[0-9a-f]+',row['text']):
-                    if int(row['text'].split()[-1],16)-0x180000000 not in starts:
-                        raise ValueError('XP2 notification conditional successor missing')
+    _validate_complete_bodies(p,filter_profile)
     from .native.native_event_1be52206 import verify_source_evidence as verify54
     from .native.native_event_66ade3b3 import verify_source_evidence as verify57
     from .native.native_private_ring_consumer import verify_source_evidence as verify_consumer

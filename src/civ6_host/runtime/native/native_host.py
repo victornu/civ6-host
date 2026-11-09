@@ -499,15 +499,21 @@ def initialize_context(core, context, manifest_path, dll_directory, emit, *, con
     if context_profile is not None:
         from civ6_host.runtime.native.native_core_context_profiles import NativeCoreContextProfile
         from civ6_host.runtime.native.native_core_context_profiles import profile_for_core
+        from civ6_host.runtime.native.native_core_context_profiles import require_executable_profile
         if type(context_profile) is not NativeCoreContextProfile:
             raise ValueError('Expected an exact native context profile')
         if (context_profile.ruleset, context_profile.mode) not in (('base', 'init'), ('xp1', 'context'), ('xp2', 'context')):
             raise ValueError('Context initialization profile is not admitted')
         if context_profile.ruleset == 'xp2':
             from civ6_host.runtime.saved_load_profiles import XP2_CORE_SHA256
-            if context_profile.core_sha256 != XP2_CORE_SHA256:
+            if context_profile.source_core_sha256 != XP2_CORE_SHA256:
                 raise ValueError('XP2 context profile engine identity differs')
-        actual_profile = profile_for_core(core._name, mode=context_profile.mode, shared_dependency_directory=dll_directory)
+        if context_profile.execution_image is not getattr(core, '_civ6_host_execution_image', None):
+            raise ValueError('Context profile differs from the retained loaded execution identity')
+        require_executable_profile(context_profile)
+        actual_profile = profile_for_core(core._name, mode=context_profile.mode,
+            shared_dependency_directory=dll_directory,
+            execution_image=context_profile.execution_image)
         if actual_profile != context_profile:
             raise ValueError('Context profile differs from installed source-bound engine')
         expansion = context_profile.ruleset in ('xp1', 'xp2')
@@ -523,7 +529,14 @@ def initialize_context(core, context, manifest_path, dll_directory, emit, *, con
         raise ValueError('XP2 Init requires an explicit captured input owner')
     manifest = validate_fixture(manifest_path)
     db_path = _resolve_resource_path(Path(dll_directory)) / 'DatabaseDLL_FinalRelease.dll'
-    if sha256(db_path) != DATABASE_SHA256:
+    shared_dependencies = (context_profile.shared_dependency_profile
+        if context_profile is not None else None)
+    if shared_dependencies is not None:
+        db_path = shared_dependencies.verify_library_path('DatabaseDLL_FinalRelease.dll', db_path)
+        database_sha256 = shared_dependencies.dependency_sha256['DatabaseDLL_FinalRelease.dll']
+    else:
+        database_sha256 = DATABASE_SHA256
+    if sha256(db_path) != database_sha256:
         raise ValueError('Unrecognized Database DLL')
     database = C.WinDLL(str(db_path))
     initialize = getattr(database, '?Initialize@Database@@YA_NXZ')
@@ -531,7 +544,7 @@ def initialize_context(core, context, manifest_path, dll_directory, emit, *, con
     emit('before_database_initialize')
     if not initialize():
         raise RuntimeError('Native Database::Initialize returned false')
-    emit('database_initialized', dll_sha256=DATABASE_SHA256)
+    emit('database_initialized', dll_sha256=database_sha256)
     native_free = None
     if not expansion:
         free_address = C.c_void_p.from_address(core._handle + 7722592).value
@@ -548,6 +561,11 @@ def initialize_context(core, context, manifest_path, dll_directory, emit, *, con
     host.database = database
     host.manifest = manifest
     host.dll_directory = _resolve_resource_path(Path(dll_directory))
+    if context_profile is not None:
+        host.context_profile = context_profile
+    if shared_dependencies is not None:
+        host._civ6_host_shared_dependencies = shared_dependencies
+        core._civ6_host_shared_dependencies = shared_dependencies
     core._diagnostic_host = host
     if expansion and context_profile.ruleset == 'xp2':
         from civ6_host.runtime.xp2_context_lifecycle import initialize_xp2_context, install_xp2_teardown_callbacks
@@ -596,7 +614,8 @@ def finish_database(host, emit):
     host.log_writers.close()
     if getattr(host, 'localization_initialized', False):
         from civ6_host.runtime.native.native_localization import finish_localization
-        finish_localization(host)
+        finish_localization(host, shared_dependency_profile=getattr(
+            host, '_civ6_host_shared_dependencies', None))
     shutdown = getattr(host.database, '?Shutdown@Database@@YA_NXZ')
     shutdown.argtypes, shutdown.restype = ([], C.c_bool)
     result = shutdown()

@@ -39,7 +39,7 @@ def _city_source():
     return path, proof
 
 
-def source_dependencies():
+def source_dependencies(*, execution_image=None):
     path, proof = _source()
     city_path, city_proof = _city_source()
     refs = {
@@ -51,7 +51,9 @@ def source_dependencies():
             district.PROOF_SHA256,
     }
     refs.update({Path(row['path']): row['sha256'] for row in (*proof['ui_sources'], *city_proof['official_ui'])})
-    return {str(resolve_path(path).resolve()): digest for path, digest in refs.items()}
+    pins = {str(resolve_path(path).resolve()): digest for path, digest in refs.items()}
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image)
 
 
 def _bind(saved, *, active):
@@ -88,7 +90,9 @@ def _bind(saved, *, active):
     saved._xp2_plot_purchase_lifetime = lifetime
 
 
-def catalogue(saved, observation):
+def catalogue(saved, observation, *, allow_faith=False):
+    if type(allow_faith) is not bool:
+        raise ValueError('Explicit faith purchase catalogue flag required')
     _bind(saved, active=False)
     prefix = saved.prefix
     turn, player_id = observation['turn'], observation['player_id']
@@ -96,15 +100,16 @@ def catalogue(saved, observation):
     for city in sorted(observation['cities'], key=lambda row: row['id']):
         plot_rows.append(plots.catalog(prefix, city['id'], turn, player_id=player_id))
         quote = purchases.catalog(prefix, city['id'], turn, player_id=player_id)
-        quote['offers'] = [row for row in quote['offers'] if row['action']['currency'] == 'YIELD_GOLD']
+        if not allow_faith:
+            quote['offers'] = [row for row in quote['offers'] if row['action']['currency'] == 'YIELD_GOLD']
         city_rows.append(quote)
     return plot_rows, city_rows
 
 
-def apply(saved, action, observation):
+def apply(saved, action, observation, *, allow_faith=False):
     _bind(saved, active=True)
     from civ6_host.contracts.plot_purchases import validate_purchase_action
-    validate_purchase_action(action)
+    validate_purchase_action(action, allow_faith=allow_faith)
     provider = plots if 'plot_id' in action else purchases
     return provider.apply(saved, saved.prefix, action, observation['turn'], observation,
                           player_id=observation['player_id'])

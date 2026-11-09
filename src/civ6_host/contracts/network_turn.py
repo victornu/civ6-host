@@ -41,6 +41,41 @@ CAPABILITY_XP2_CITY_PURCHASE_SCHEMA = 'civ6-host.network-capability-decisions.v2
 CAPABILITY_XP2_PROMOTION_SCHEMA = 'civ6-host.network-capability-decisions.v22'
 CAPABILITY_XP2_UNIT_UPGRADE_SCHEMA = 'civ6-host.network-capability-decisions.v23'
 CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA = 'civ6-host.network-capability-decisions.v24'
+CAPABILITY_XP2_POLICIES_SCHEMA = 'civ6-host.network-capability-decisions.v25'
+CAPABILITY_XP2_POLICY_UNLOCK_SCHEMA = 'civ6-host.network-capability-decisions.v26'
+CAPABILITY_XP2_GOVERNMENT_SCHEMA = 'civ6-host.network-capability-decisions.v27'
+CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA = 'civ6-host.network-capability-decisions.v28'
+CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA = 'civ6-host.network-capability-decisions.v29'
+CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA = 'civ6-host.network-capability-decisions.v30'
+CAPABILITY_XP2_ENVOYS_SCHEMA = 'civ6-host.network-capability-decisions.v31'
+CAPABILITY_XP2_GOVERNORS_SCHEMA = 'civ6-host.network-capability-decisions.v32'
+CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA = 'civ6-host.network-capability-decisions.v33'
+CAPABILITY_XP2_TRADE_SCHEMA = 'civ6-host.network-capability-decisions.v34'
+CAPABILITY_XP2_ESPIONAGE_SCHEMA = 'civ6-host.network-capability-decisions.v35'
+CAPABILITY_XP2_SPY_COMPLETION_SCHEMA = 'civ6-host.network-capability-decisions.v36'
+CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA = 'civ6-host.network-capability-decisions.v37'
+CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA = 'civ6-host.network-capability-decisions.v38'
+CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA = 'civ6-host.network-capability-decisions.v39'
+CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA = 'civ6-host.network-capability-decisions.v40'
+CONGRESS_READ_ONLY_KINDS = frozenset((
+    'government', 'retain_government', 'policies', 'policy_unlock',
+    'appoint_governor', 'promote_governor', 'assign_governor', 'consider_governor_titles'))
+
+
+def congress_action_read_only(value, kind):
+    """The three official screens are read-only during native IsInSession.
+
+    Great People has no admitted action kind yet; no future opcode is invented.
+    Historical catalogues and the underlying observations retain their meaning.
+    """
+    return (value.get('schema') in WORLD_CONGRESS_CAPABILITY_SCHEMAS
+            and type(value.get('world_congress')) is dict
+            and value['world_congress'].get('in_session') is True
+            and kind in CONGRESS_READ_ONLY_KINDS)
+ESPIONAGE_GAPS = ('spy_completion_repeat_pending_identity',)
+SPY_COMPLETION_GAPS = ('spy_popup_interface_mode_lifetime', 'spy_notification_reactivation')
+INITIAL_DIPLOMACY_GAPS = ('deal_screens_and_non_direct_initial_choices',)
+WORLD_WAR_DECISIONS_SCHEMA = 'civ6-host.network-world-war-decisions.v1'
 # Known capability revisions in wire order. Each revision inherits the earlier
 # groups, with field and migration exceptions handled by their own validators.
 _CAPABILITY_SCHEMAS = (
@@ -68,6 +103,22 @@ _CAPABILITY_SCHEMAS = (
     CAPABILITY_XP2_PROMOTION_SCHEMA,
     CAPABILITY_XP2_UNIT_UPGRADE_SCHEMA,
     CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA,
+    CAPABILITY_XP2_POLICIES_SCHEMA,
+    CAPABILITY_XP2_POLICY_UNLOCK_SCHEMA,
+    CAPABILITY_XP2_GOVERNMENT_SCHEMA,
+    CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA,
+    CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA,
+    CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA,
+    CAPABILITY_XP2_ENVOYS_SCHEMA,
+    CAPABILITY_XP2_GOVERNORS_SCHEMA,
+    CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA,
+    CAPABILITY_XP2_TRADE_SCHEMA,
+    CAPABILITY_XP2_ESPIONAGE_SCHEMA,
+    CAPABILITY_XP2_SPY_COMPLETION_SCHEMA,
+    CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA,
+    CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA,
+    CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA,
+    CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA,
 )
 
 
@@ -81,6 +132,68 @@ PUBLIC_COMBAT_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_COMBAT_PU
 COMBAT_READINESS_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_COMBAT_READINESS_SCHEMA)
 UNIT_WORK_STATE_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_UNIT_WORK_STATE_SCHEMA)
 CURRENT_PRODUCTION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_CURRENT_PRODUCTION_SCHEMA)
+POLICY_RELOCATION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA)
+POLICY_RECONFIRM_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA)
+ESPIONAGE_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_ESPIONAGE_SCHEMA)
+SPY_COMPLETION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_SPY_COMPLETION_SCHEMA)
+WORLD_CONGRESS_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA)
+WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA)
+NATIVE_COMMAND_PERMISSIONS_SCHEMAS = _capability_schemas_from(CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA)
+CONGRESS_ACTIVE_EFFECTS_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA)
+STRATEGIC_READER_FAMILIES = frozenset((
+    'found_city', 'queue_append', 'queue_remove', 'queue_swap',
+    'world_select_unit', 'world_deselect_unit', 'world_plot_click', 'unit_order', 'unit_attack',
+    'upgrade_unit', 'policies', 'policy_unlock', 'government', 'retain_government',
+    'send_envoy', 'retain_envoys', 'change_trade_origin',
+    'city_range_attack', 'district_range_attack',
+))
+NATIVE_STRATEGIC_READER_UNAVAILABLE = 'native_strategic_command_permission_false_reader_unavailable'
+_STRATEGIC_READER_FIELDS = {
+    'production_queues': 'queue_append', 'production_current': 'queue_append',
+    'world_input': 'world_select_unit', 'queued_orders': 'world_select_unit',
+    'unit_orders': 'unit_order', 'unit_attacks': 'unit_attack',
+    'unit_upgrades': 'upgrade_unit', 'policies': 'policies',
+    'policy_unlock': 'policy_unlock', 'government': 'government',
+    'envoys': 'send_envoy', 'trade_origins': 'change_trade_origin',
+    'city_shots': 'city_range_attack', 'district_shots': 'district_range_attack',
+}
+
+
+def validate_native_command_permissions(value, player_id, turn, sequence):
+    """Validate an exact native read; neither flag is inferred from turn state."""
+    if (type(value) is not dict or set(value) != {
+            'player_id', 'turn', 'sequence', 'allow_strategic', 'allow_tactical'}):
+        raise ValueError('Malformed native command permissions')
+    for key, expected in (('player_id', player_id), ('turn', turn), ('sequence', sequence)):
+        if (type(expected) is not int or expected < 0 or key == 'player_id' and expected > 63
+                or type(value[key]) is not int or value[key] != expected):
+            raise ValueError('Foreign native command permissions boundary')
+    if any(type(value[key]) is not bool for key in ('allow_strategic', 'allow_tactical')):
+        raise ValueError('Native command permissions must be exact booleans')
+    return value
+
+
+def family_query_unavailable(value, family, *, actions_closed=False, native_command_permissions=None):
+    """Current reader admission, separate from actual activity and human legality.
+
+    Tactical permission remains an observation until a family-specific reader
+    contract consumes it. Unlisted readers retain their historical activity gate.
+    The explicit permissions argument supports construction before sealing v39.
+    """
+    if type(value) is not dict or type(family) is not str or type(actions_closed) is not bool:
+        raise ValueError('Malformed native family query boundary')
+    controls = validate_turn_controls(value['turn_controls'], value['player_id'], value['turn'])
+    permissions = native_command_permissions
+    if value.get('schema') in NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+        retained = value['native_command_permissions']
+        if permissions is not None and permissions != retained:
+            raise ValueError('Conflicting native command permission reads')
+        permissions = retained
+    if permissions is not None:
+        validate_native_command_permissions(permissions, value['player_id'], value['turn'], value['sequence'])
+    return (actions_closed or is_waiting(controls)
+            or permissions is not None and not permissions['allow_strategic']
+               and family in STRATEGIC_READER_FAMILIES)
 
 COMBAT_READINESS_SOURCE_SHA256 = '3441a99fe192ace6b1d57af5813b834f54c7b57bd3237669d20667dbed4c7477'
 _XP1_COMBAT_CORE='259b90a473a256aff6a7d621a4f3717e46f6921c59b9817475375c88b97e8c83'
@@ -119,6 +232,15 @@ def is_capability_catalogue(value):
     return type(value) is dict and value.get('schema') in _CAPABILITY_SCHEMAS
 
 
+def is_world_war_decisions(value):
+    return type(value) is dict and value.get('schema') == WORLD_WAR_DECISIONS_SCHEMA
+
+
+def is_diplomacy_decisions(value):
+    return (type(value) is dict
+            and value.get('schema') == 'civ6-host.network-diplomacy-decisions.v1')
+
+
 def offered_forced_turn(value, action):
     """Same inactive-player exception on client and server, after validation.
 
@@ -146,6 +268,22 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         raise ValueError('Unexpected capability catalogue fields')
     version = _CAPABILITY_SCHEMAS.index(value['schema']) + 1
     resources_v24 = version >= 24
+    policies_v25 = version >= 25
+    policy_unlock_v26 = version >= 26
+    government_v27 = version >= 27
+    policy_relocation_v28 = version >= 28
+    policy_reconfirm_v29 = version >= 29
+    faith_purchase_v30 = version >= 30
+    envoys_v31 = version >= 31
+    governors_v32 = version >= 32
+    initial_diplomacy_v33 = version >= 33
+    xp2_trade_v34 = version >= 34
+    espionage_v35 = version >= 35
+    spy_completion_v36 = version >= 36
+    world_congress_v37 = version >= 37
+    world_congress_review_v38 = version >= 38
+    command_permissions_v39 = version >= 39
+    congress_active_effects_v40 = version >= 40
     upgrade_v23 = version >= 23
     promotion_v22 = version >= 22
     city_purchase_v21 = version >= 21
@@ -186,6 +324,19 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
               | ({'unit_promotions'} if promotion_v22 else set())
               | ({'unit_upgrades'} if upgrade_v23 else set())
               | ({'strategic_resources'} if resources_v24 else set())
+              | ({'policies'} if policies_v25 else set())
+              | ({'policy_unlock'} if policy_unlock_v26 else set())
+              | ({'government'} if government_v27 else set())
+              | ({'envoys'} if envoys_v31 else set())
+              | ({'governors'} if governors_v32 else set())
+              | ({'diplomacy_overview'} if initial_diplomacy_v33 else set())
+              | ({'trade_routes', 'trade_origins'} if xp2_trade_v34 else set())
+              | ({'espionage'} if espionage_v35 else set())
+              | ({'spy_completion'} if spy_completion_v36 else set())
+              | ({'world_congress'} if world_congress_v37 else set())
+              | ({'world_congress_review', 'world_congress_review_status'} if world_congress_review_v38 else set())
+              | ({'native_command_permissions'} if command_permissions_v39 else set())
+              | ({'world_congress_active_effects','world_congress_active_effects_status'} if congress_active_effects_v40 else set())
               | ({'city_focus_catalogs','citizen_catalogs'} if city_controls_v12 else set()))
     from .capability_choices import ACTION_FIELDS, validate_action, validate_state
     action_fields = dict(_CAPABILITY_ACTION_FIELDS)
@@ -226,6 +377,38 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     if upgrade_v23:
         from . import unit_upgrades
         action_fields['upgrade_unit'] = unit_upgrades.FIELDS
+    if policies_v25:
+        action_fields['policies'] = frozenset(('kind', 'slots'))
+    if policy_unlock_v26:
+        from . import policy_unlock
+        action_fields['policy_unlock'] = frozenset(('kind', 'cost', 'currency'))
+    if government_v27:
+        action_fields['government'] = frozenset(('kind', 'index', 'hash'))
+        action_fields['retain_government'] = frozenset(('kind', 'index'))
+    if envoys_v31:
+        from . import envoys
+        action_fields.update(envoys.ACTION_FIELDS)
+    if governors_v32:
+        from . import governors
+        action_fields.update(governors.ACTION_FIELDS)
+    if initial_diplomacy_v33:
+        from . import diplomacy_overview as initial_diplomacy
+        action_fields.update(initial_diplomacy.ACTION_FIELDS)
+    if xp2_trade_v34:
+        from . import trade
+        action_fields.update({
+            'make_trade_route': frozenset(trade.ROUTE_FIELDS),
+            'change_trade_origin': frozenset(trade.ORIGIN_FIELDS),
+        })
+    if espionage_v35:
+        from . import espionage
+        action_fields.update(espionage.ACTION_FIELDS)
+    if spy_completion_v36:
+        from . import spy_completion
+        action_fields.update(spy_completion.ACTION_FIELDS)
+    if world_congress_v37:
+        from . import world_congress
+        action_fields.update(world_congress.CANDIDATE_FIELDS)
     if city_controls_v12:
         from . import capability_city_controls as city_controls
         action_fields.update(city_controls.ACTION_FIELDS)
@@ -242,6 +425,11 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             or value['family_inventory_complete'] is not False):
         raise ValueError('Foreign or overstated capability catalogue')
     controls = validate_turn_controls(value['turn_controls'], player_id, turn)
+    if command_permissions_v39:
+        validate_native_command_permissions(value['native_command_permissions'], player_id, turn, sequence)
+        if not value['native_command_permissions']['allow_strategic']:
+            if any(value[field] is not None for field in _STRATEGIC_READER_FIELDS):
+                raise ValueError('Strategic-gated reader must remain explicitly unavailable')
     if resources_v24:
         from . import strategic_resources
         resources = value['strategic_resources']
@@ -249,6 +437,92 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('Strategic resources differ from the session closure')
         if resources is not None:
             strategic_resources.validate(resources, player_id, turn)
+    if policies_v25:
+        policy_catalogue = value['policies']
+        unavailable = family_query_unavailable(value, 'policies', actions_closed=actions_closed)
+        if (policy_catalogue is None) != unavailable:
+            raise ValueError('Policy query differs from its native acting boundary')
+        if policy_catalogue is not None:
+            from . import capability_policies
+            capability_policies.validate_catalogue(policy_catalogue, player_id, turn,
+                allow_relocation=policy_relocation_v28)
+    if government_v27:
+        from . import government as capability_government
+        government_catalogue = value['government']
+        unavailable = family_query_unavailable(value, 'government', actions_closed=actions_closed)
+        if (government_catalogue is None) != unavailable:
+            raise ValueError('Government query differs from its native acting boundary')
+        if government_catalogue is not None:
+            capability_government.validate_catalogue(government_catalogue, player_id, turn)
+    if envoys_v31:
+        envoy_catalogue = value['envoys']
+        unavailable = family_query_unavailable(value, 'send_envoy', actions_closed=actions_closed)
+        if (envoy_catalogue is None) != unavailable:
+            raise ValueError('Envoy query differs from its native acting boundary')
+        if envoy_catalogue is not None:
+            envoys.validate_catalogue(envoy_catalogue, player_id, turn)
+    if governors_v32:
+        governor_catalogue = value['governors']
+        if actions_closed or is_waiting(value['turn_controls']):
+            if governor_catalogue is not None:
+                raise ValueError('Unavailable governor query must remain unknown')
+        elif governor_catalogue is None:
+            raise ValueError('Acting governor catalogue is unavailable')
+        else:
+            governors.validate_catalogue(governor_catalogue, player_id, turn)
+    if initial_diplomacy_v33:
+        diplomacy_catalogue = value['diplomacy_overview']
+        if (diplomacy_catalogue is None) != (actions_closed or is_waiting(controls)):
+            raise ValueError('Initial diplomacy query differs from its acting boundary')
+        if diplomacy_catalogue is not None:
+            initial_diplomacy.validate(diplomacy_catalogue, player_id, turn)
+    if xp2_trade_v34:
+        from . import trade
+        unavailable = actions_closed or is_waiting(controls)
+        origins_unavailable = family_query_unavailable(value, 'change_trade_origin', actions_closed=actions_closed)
+        routes, origins = value['trade_routes'], value['trade_origins']
+        if (routes is None) != unavailable or (origins is None) != origins_unavailable:
+            raise ValueError('Trade queries differ from their native acting boundary')
+        if not unavailable:
+            trade.validate_routes(routes, player_id, turn)
+            if observation is not None:
+                trade.compare_routes(routes, observation)
+        if not origins_unavailable:
+            trade.validate_origins(origins, player_id, turn)
+            if observation is not None:
+                trade.compare_origins(origins, observation)
+    if espionage_v35:
+        espionage_catalogue = value['espionage']
+        if (espionage_catalogue is None) != (actions_closed or is_waiting(controls)):
+            raise ValueError('Espionage query differs from its native acting boundary')
+        if espionage_catalogue is not None:
+            espionage.validate_catalogue(espionage_catalogue, player_id, turn)
+            if observation is not None:
+                espionage.compare_own(espionage_catalogue, observation)
+    if spy_completion_v36:
+        completion_catalogue = value['spy_completion']
+        if (completion_catalogue is None) != (actions_closed or is_waiting(controls)):
+            raise ValueError('Spy completion query differs from its native acting boundary')
+        if completion_catalogue is not None:
+            spy_completion.validate_catalogue(completion_catalogue, player_id, turn)
+            if observation is not None:
+                spy_completion.compare_own(completion_catalogue, observation)
+    if world_congress_v37:
+        congress_catalogue = value['world_congress']
+        if (congress_catalogue is None) != (actions_closed or is_waiting(controls)):
+            raise ValueError('Congress query differs from its acting boundary')
+        if congress_catalogue is not None:
+            world_congress.validate_catalogue(congress_catalogue, player_id, turn, sequence)
+            if observation is not None:
+                world_congress.compare_own(congress_catalogue, observation, sequence)
+    if world_congress_review_v38:
+        from . import world_congress_review
+        world_congress_review.validate_group(value['world_congress_review'],
+            value['world_congress_review_status'], congress_catalogue, player_id, turn, sequence)
+    if congress_active_effects_v40:
+        from . import world_congress_active_effects
+        world_congress_active_effects.validate_group(value['world_congress_active_effects'],
+            value['world_congress_active_effects_status'], congress_catalogue, player_id, turn, sequence)
     if (type(value['decision_id']) is not str or value['decision_id'] != digest(
             {key: item for key, item in value.items() if key != 'decision_id'})):
         raise ValueError('Capability catalogue digest differs')
@@ -258,6 +532,52 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             or len(candidates) > (ORDINARY_ACTION_LIMIT + MAP_CELL_LIMIT if world_v4 else 4096)
             or actions_closed and candidates):
         raise ValueError('Malformed or closed capability catalogue')
+    if envoys_v31:
+        for kind in envoys.ACTION_FIELDS:
+            family = families.get(kind, {})
+            if family.get('status') != ('unqualified' if envoy_catalogue is None else 'queried_complete'):
+                raise ValueError('Envoy family differs from its public query availability')
+    if governors_v32:
+        for kind in governors.ACTION_FIELDS:
+            family = families.get(kind, {})
+            if family.get('status') != ('unqualified' if governor_catalogue is None else 'queried_complete'):
+                raise ValueError('Governor family differs from its public query availability')
+    if initial_diplomacy_v33:
+        family = families.get('diplomacy_initiate', {})
+        if family.get('status') != ('unqualified' if diplomacy_catalogue is None else 'queried_partial'):
+            raise ValueError('Initial diplomacy family differs from its public query')
+        if diplomacy_catalogue is not None and family.get('unqualified') != list(INITIAL_DIPLOMACY_GAPS):
+            raise ValueError('Initial diplomacy family has an unqualified source gap')
+    if xp2_trade_v34:
+        for kind in ('make_trade_route', 'change_trade_origin'):
+            trade_available = not family_query_unavailable(value, kind, actions_closed=actions_closed)
+            if families.get(kind, {}).get('status') != ('queried_complete' if trade_available else 'unqualified'):
+                raise ValueError('Trade family differs from its native query availability')
+    if espionage_v35:
+        for kind in espionage.ACTION_FIELDS:
+            expected_status = 'unqualified' if espionage_catalogue is None else 'queried_partial'
+            family = families.get(kind, {})
+            if family.get('status') != expected_status:
+                raise ValueError('Espionage family differs from its native query availability')
+            gaps = SPY_COMPLETION_GAPS if spy_completion_v36 else ESPIONAGE_GAPS
+            if espionage_catalogue is not None and family.get('unqualified') != list(gaps):
+                raise ValueError('Espionage family must retain its versioned source gaps')
+    if spy_completion_v36:
+        for kind in spy_completion.ACTION_FIELDS:
+            family = families.get(kind, {})
+            expected_status = 'unqualified' if completion_catalogue is None else 'queried_partial'
+            if family.get('status') != expected_status:
+                raise ValueError('Spy completion family differs from its native query availability')
+            if completion_catalogue is not None and family.get('unqualified') != list(SPY_COMPLETION_GAPS):
+                raise ValueError('Spy completion family must retain its exact source gaps')
+    if world_congress_v37:
+        for kind in world_congress.CANDIDATE_FIELDS:
+            family = families.get(kind, {})
+            expected_status = 'unqualified' if congress_catalogue is None else 'queried_partial'
+            if family.get('status') != expected_status:
+                raise ValueError('Congress family differs from its query availability')
+            if congress_catalogue is not None and family.get('unqualified') != list(world_congress.GAPS):
+                raise ValueError('Congress family must retain its source gaps')
     if turns_v3:
         availability = value['turn_availability']
         if (type(availability) is not dict or set(availability) != _CAPABILITY_TURN_KINDS
@@ -326,6 +646,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('Invalid capability family')
         status = family.get('status')
         if status in ('queried_complete', 'queried_partial'):
+            if command_permissions_v39 and family_query_unavailable(value, name, actions_closed=actions_closed) and name in STRATEGIC_READER_FAMILIES:
+                raise ValueError('Native strategic permission does not admit this coupled reader')
             ids = family.get('candidate_ids')
             partial = status == 'queried_partial'
             if (name not in action_fields
@@ -363,6 +685,12 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
                     raise ValueError('Unit-work query must retain its unqualified routes')
                 if placements_v7 and name in placement.GAPS and gaps!=list(placement.GAPS[name]):
                     raise ValueError('Placement query must retain its exact unqualified branches')
+                if policies_v25 and name == 'policies' and gaps != (
+                        ['active_policy_relocation'] if policy_unlock_v26 else
+                        ['paid_policy_unlock', 'active_policy_relocation']):
+                    raise ValueError('Policy query must retain its exact unqualified branches')
+                if government_v27 and name == 'government' and gaps != ['anarchy_transition']:
+                    raise ValueError('Government query must retain its exact unqualified branch')
             if actions_closed or (is_waiting(controls) and not (turns_v3 and name in _CAPABILITY_TURN_KINDS)):
                 raise ValueError('Choice query requires the native acting boundary')
             by_family[name] = []
@@ -398,14 +726,16 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             if type(dimensions) is not dict or any(
                     type(dimensions.get(k)) is not int or dimensions[k] <= 0 for k in ('width', 'height')):
                 raise ValueError('Plot purchase catalogue lacks map dimensions')
-            gaps = plot_purchases.CITY_GAPS if city_purchase_v21 else plot_purchases.GAPS
+            gaps = (plot_purchases.CITY_FAITH_GAPS if faith_purchase_v30 else
+                    plot_purchases.CITY_GAPS if city_purchase_v21 else plot_purchases.GAPS)
             if family.get('unqualified') != list(gaps):
                 raise ValueError('Plot purchase family must retain its exact unqualified routes')
             plot_purchases.validate_catalogue(purchases, player_id, turn, width=dimensions['width'],
                                                height=dimensions['height'], own_cities=own_cities)
             if city_purchase_v21:
                 plot_purchases.validate_catalogue(city_purchases, player_id, turn,
-                    own_cities=[city['city_id'] for city in purchases], city_items=True)
+                    own_cities=[city['city_id'] for city in purchases], city_items=True,
+                    allow_faith=faith_purchase_v30)
     if choices_v2:
         validate_state(value['choice_state'], own_cities,
                        unavailable=actions_closed or is_waiting(controls))
@@ -479,7 +809,7 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         if not unavailable:
             unit_promotions.validate_catalogue(promotion_catalogue, player_id, turn, observation=observation)
     if upgrade_v23:
-        unavailable = actions_closed or is_waiting(controls)
+        unavailable = family_query_unavailable(value, 'upgrade_unit', actions_closed=actions_closed)
         upgrade_catalogue = value['unit_upgrades']
         if ((upgrade_catalogue is None) != unavailable
                 or families.get('upgrade_unit', {}).get('status') !=
@@ -487,6 +817,30 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('Upgrade family differs from its native query availability')
         if not unavailable:
             unit_upgrades.validate_catalogue(upgrade_catalogue, player_id, turn, observation=observation)
+    if policies_v25:
+        unavailable = family_query_unavailable(value, 'policies', actions_closed=actions_closed)
+        if families.get('policies', {}).get('status') != (
+                'unqualified' if unavailable else
+                'queried_complete' if policy_relocation_v28 else 'queried_partial'):
+            raise ValueError('Policy family differs from its native query availability')
+    if policy_unlock_v26:
+        unavailable = family_query_unavailable(value, 'policy_unlock', actions_closed=actions_closed)
+        if ((value['policy_unlock'] is None) != unavailable
+                or families.get('policy_unlock', {}).get('status') != (
+                    'unqualified' if unavailable else 'queried_complete')):
+            raise ValueError('Policy unlock differs from its native acting boundary')
+        if not unavailable:
+            policy_unlock.validate(value['policy_unlock'], player_id, turn)
+            unlock, window = value['policy_unlock'], policy_catalogue['reason']
+            if ((window == 'already_changed') != (unlock['reason'] == 'already_changed')
+                    or window == 'not_free' and unlock['cost'] == 0
+                    or window in ('available', 'window_closed') and unlock['cost'] != 0):
+                raise ValueError('Policy assignment and unlock queries disagree')
+    if government_v27:
+        unavailable = family_query_unavailable(value, 'government', actions_closed=actions_closed)
+        if families.get('government', {}).get('status') != (
+                'unqualified' if unavailable else 'queried_partial'):
+            raise ValueError('Government family differs from its native query availability')
     seen = set()
     for row in candidates:
         if type(row) is not dict or set(row) != {'candidate_id', 'action'}:
@@ -495,8 +849,11 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         if type(action) is not dict or type(action.get('kind')) is not str:
             raise ValueError('Malformed capability action')
         kind = action['kind']
+        if congress_action_read_only(value, kind):
+            raise ValueError('Congress makes this screen read-only')
+        family_kind = ('government' if government_v27 and kind == 'retain_government' else kind)
         city_purchase = city_purchase_v21 and kind == 'purchase' and set(action) == plot_purchases.CITY_FIELDS
-        if kind not in by_family or (set(action) != action_fields[kind] and not city_purchase):
+        if family_kind not in by_family or (set(action) != action_fields[kind] and not city_purchase):
             raise ValueError('Action has no completed qualified family query')
         if kind == 'found_city':
             for key, maximum in (('unit_id', 0xffffffff), ('x', 65535), ('y', 65535)):
@@ -524,13 +881,37 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         elif unit_work_v15 and kind in unit_work.NETWORK_ACTION_FIELDS:
             unit_work.validate_action(action)
         elif purchase_v20 and kind == 'purchase':
-            plot_purchases.validate_purchase_action(action)
+            plot_purchases.validate_purchase_action(action, allow_faith=faith_purchase_v30)
         elif promotion_v22 and kind == 'promote_unit':
             unit_promotions.validate_action(action)
         elif upgrade_v23 and kind == 'upgrade_unit':
             unit_upgrades.validate_action(action)
         elif city_controls_v12 and kind in city_controls.ACTION_FIELDS:
             city_controls.validate_action(action)
+        elif policies_v25 and kind == 'policies':
+            # The catalogue-backed equality check below validates its slots.
+            pass
+        elif policy_unlock_v26 and kind == 'policy_unlock':
+            policy_unlock.validate_action(action)
+        elif government_v27 and kind in ('government', 'retain_government'):
+            # The exact native offer list is rebuilt and compared below.
+            pass
+        elif envoys_v31 and kind in envoys.ACTION_FIELDS:
+            envoys.validate_action(action)
+        elif governors_v32 and kind in governors.ACTION_FIELDS:
+            governors.validate_action(action)
+        elif initial_diplomacy_v33 and kind == 'diplomacy_initiate':
+            initial_diplomacy.validate_action(action)
+        elif xp2_trade_v34 and kind == 'make_trade_route':
+            trade.validate_route_action(action, value['trade_routes']['width'], value['trade_routes']['height'])
+        elif xp2_trade_v34 and kind == 'change_trade_origin':
+            trade.validate_origin_action(action, value['trade_origins']['width'], value['trade_origins']['height'])
+        elif espionage_v35 and kind in espionage.ACTION_FIELDS:
+            espionage.validate_action(action, espionage_catalogue['width'], espionage_catalogue['height'])
+        elif spy_completion_v36 and kind in spy_completion.ACTION_FIELDS:
+            spy_completion.validate_action(action, completion_catalogue['width'], completion_catalogue['height'])
+        elif world_congress_v37 and kind in world_congress.CANDIDATE_FIELDS:
+            world_congress.validate_candidate(action)
         elif not (turns_v3 and kind in _CAPABILITY_TURN_KINDS):
             validate_action(action, own_cities)
         candidate_id = row['candidate_id']
@@ -538,7 +919,7 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
                 or candidate_id in seen):
             raise ValueError('Duplicate or mismatched capability candidate identity')
         seen.add(candidate_id)
-        by_family[kind].append(candidate_id)
+        by_family[family_kind].append(candidate_id)
     if any(families[name]['candidate_ids'] != ids for name, ids in by_family.items()):
         raise ValueError('Completed family query does not exactly cover its candidates')
     if world_v4:
@@ -569,6 +950,61 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         offered = [row['action'] for row in candidates if row['action']['kind'] == 'upgrade_unit']
         if offered != ([] if upgrade_catalogue is None else unit_upgrades.actions(upgrade_catalogue)):
             raise ValueError('Upgrade candidates differ from their native catalogue')
+    if policies_v25:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == 'policies']
+        from . import capability_policies
+        expected_policy_actions = capability_policies.actions(policy_catalogue,
+            allow_relocation=policy_relocation_v28,
+            allow_unchanged=policy_reconfirm_v29)
+        if congress_action_read_only(value, 'policies'):
+            expected_policy_actions = []
+        if offered != expected_policy_actions:
+            raise ValueError('Policy candidates differ from their native slot catalogue')
+    if policy_unlock_v26:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == 'policy_unlock']
+        expected = [] if congress_action_read_only(value, 'policy_unlock') else policy_unlock.actions(value['policy_unlock'])
+        if offered != expected:
+            raise ValueError('Policy unlock candidates differ from their native query')
+    if government_v27:
+        offered = [row['action'] for row in candidates
+                   if row['action']['kind'] in ('government', 'retain_government')]
+        expected = [] if congress_action_read_only(value, 'government') else capability_government.actions(government_catalogue)
+        if offered != expected:
+            raise ValueError('Government candidates differ from their native query')
+    if governors_v32:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in governors.ACTION_FIELDS]
+        expected = [] if congress_action_read_only(value, 'appoint_governor') else governors.actions(governor_catalogue)
+        if offered != expected:
+            raise ValueError('Governor candidates differ from their exact public catalogue')
+    if initial_diplomacy_v33:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == 'diplomacy_initiate']
+        expected = [] if diplomacy_catalogue is None else initial_diplomacy.candidates(diplomacy_catalogue)
+        if offered != expected:
+            raise ValueError('Initial diplomacy candidates differ from their exact public catalogue')
+    if xp2_trade_v34:
+        from . import trade
+        for kind, expected in (
+                ('make_trade_route', [] if value['trade_routes'] is None else trade.route_actions(value['trade_routes'])),
+                ('change_trade_origin', [] if value['trade_origins'] is None else trade.origin_actions(value['trade_origins']))):
+            offered = [row['action'] for row in candidates if row['action']['kind'] == kind]
+            if offered != expected:
+                raise ValueError('Trade candidates differ from their exact native catalogue: ' + kind)
+    if espionage_v35:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in espionage.ACTION_FIELDS]
+        if offered != espionage.actions(espionage_catalogue):
+            raise ValueError('Espionage candidates differ from their exact native catalogue')
+    if spy_completion_v36:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in spy_completion.ACTION_FIELDS]
+        if offered != spy_completion.actions(completion_catalogue):
+            raise ValueError('Spy completion candidates differ from their exact native catalogue')
+    if world_congress_v37:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in world_congress.CANDIDATE_FIELDS]
+        if offered != world_congress.actions(congress_catalogue):
+            raise ValueError('Congress candidates differ from their exact parameter domains')
+    if envoys_v31:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in envoys.ACTION_FIELDS]
+        if offered != envoys.actions(envoy_catalogue):
+            raise ValueError('Envoy candidates differ from their native query')
     if unit_work_v15:
         offered = [row['action'] for row in candidates if row['action']['kind'] in unit_work.NETWORK_ACTION_FIELDS]
         if offered != ([] if work_catalogue is None else unit_work.actions(work_catalogue)):
@@ -594,10 +1030,171 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     return value
 
 
+def upgrade_espionage_catalogue(value, espionage, observation=None):
+    """Add the explicit espionage query to a validated v34 decision boundary."""
+    from . import espionage as espionage_contract
+    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_TRADE_SCHEMA:
+        raise ValueError('Espionage requires the complete XP2 v34 query group')
+    unavailable = value.get('trade_routes') is None
+    if (espionage is None) != unavailable:
+        raise ValueError('Espionage query differs from its native acting boundary')
+    if espionage is not None:
+        espionage_contract.validate_catalogue(espionage, value['player_id'], value['turn'])
+        if observation is not None:
+            espionage_contract.compare_own(espionage, observation)
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_XP2_ESPIONAGE_SCHEMA
+    result['espionage'] = copy.deepcopy(espionage)
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in espionage_contract.actions(espionage)]
+    result['candidates'].extend(rows)
+    for kind in espionage_contract.ACTION_FIELDS:
+        result['families'][kind] = (
+            dict(status='unqualified', reason='native_espionage_acting_boundary_unavailable')
+            if unavailable else dict(status='queried_partial', candidate_ids=[
+                row['candidate_id'] for row in rows if row['action']['kind'] == kind],
+                unqualified=list(ESPIONAGE_GAPS)))
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_spy_completion_catalogue(value, spy_completion, observation=None):
+    """Add a separately offered current completion to a validated v35 boundary."""
+    from . import espionage
+    from . import spy_completion as completion_contract
+    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_ESPIONAGE_SCHEMA:
+        raise ValueError('Spy completion requires the complete XP2 v35 query group')
+    unavailable = value.get('espionage') is None
+    if (spy_completion is None) != unavailable:
+        raise ValueError('Spy completion query differs from its native acting boundary')
+    if spy_completion is not None:
+        completion_contract.validate_catalogue(spy_completion, value['player_id'], value['turn'])
+        if observation is not None:
+            completion_contract.compare_own(spy_completion, observation)
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_XP2_SPY_COMPLETION_SCHEMA
+    result['spy_completion'] = copy.deepcopy(spy_completion)
+    if not unavailable:
+        for kind in espionage.ACTION_FIELDS:
+            family = result['families'][kind]
+            if (family.get('status') != 'queried_partial'
+                    or family.get('unqualified') != list(ESPIONAGE_GAPS)):
+                raise ValueError('Spy completion cannot substitute historical espionage source gaps')
+            family['unqualified'] = list(SPY_COMPLETION_GAPS)
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in completion_contract.actions(spy_completion)]
+    result['candidates'].extend(rows)
+    for kind in completion_contract.ACTION_FIELDS:
+        result['families'][kind] = (
+            dict(status='unqualified', reason='native_spy_completion_acting_boundary_unavailable')
+            if unavailable else dict(status='queried_partial', candidate_ids=[
+                row['candidate_id'] for row in rows if row['action']['kind'] == kind],
+                unqualified=list(SPY_COMPLETION_GAPS)))
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_world_congress_catalogue(value, congress, observation=None):
+    """Append an explicitly queried Congress catalogue to the v36 boundary."""
+    from . import world_congress
+    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_SPY_COMPLETION_SCHEMA:
+        raise ValueError('Congress requires the complete XP2 v36 query group')
+    unavailable = value.get('spy_completion') is None
+    if (congress is None) != unavailable:
+        raise ValueError('Congress query differs from its native acting boundary')
+    if congress is not None:
+        world_congress.validate_catalogue(congress, value['player_id'], value['turn'], value['sequence'])
+        if observation is not None:
+            world_congress.compare_own(congress, observation, value['sequence'])
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA
+    result['world_congress'] = copy.deepcopy(congress)
+    removed = {row['candidate_id'] for row in result['candidates']
+               if congress_action_read_only(result, row['action']['kind'])}
+    result['candidates'] = [row for row in result['candidates'] if row['candidate_id'] not in removed]
+    for family in result['families'].values():
+        if 'candidate_ids' in family:
+            family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
+    rows = [dict(candidate_id=digest(action), action=action) for action in world_congress.actions(congress)]
+    result['candidates'].extend(rows)
+    for kind in world_congress.CANDIDATE_FIELDS:
+        result['families'][kind] = (
+            dict(status='unqualified', reason='native_congress_acting_boundary_unavailable')
+            if unavailable else dict(status='queried_partial', candidate_ids=[
+                row['candidate_id'] for row in rows if row['action']['kind'] == kind],
+                unqualified=list(world_congress.GAPS)))
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_review_catalogue(value, review, observation=None, *, status=None):
+    """Append historical public results; preserve every existing choice ID."""
+    from . import world_congress_review
+    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA:
+        raise ValueError('Congress review requires the complete XP2 v37 query group')
+    if status is None:
+        if review is not None: status = 'available'
+        elif value['world_congress'] is None: status = 'waiting_or_closed'
+        else: raise ValueError('Unavailable Congress review requires an explicit status')
+    world_congress_review.validate_group(review, status, value['world_congress'],
+        value['player_id'], value['turn'], value['sequence'])
+    if review is not None and observation is not None:
+        world_congress_review.compare_own(review, observation, value['sequence'])
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA
+    result['world_congress_review'] = copy.deepcopy(review)
+    result['world_congress_review_status'] = status
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_command_permissions_catalogue(value, permissions, observation=None, *, actions_closed=False):
+    """Add the actual native permissions without manufacturing a query result."""
+    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA:
+        raise ValueError('Native command permissions require the complete v38 query group')
+    validate_native_command_permissions(permissions, value['player_id'], value['turn'], value['sequence'])
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA
+    result['native_command_permissions'] = copy.deepcopy(permissions)
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    from types import SimpleNamespace
+    identity = SimpleNamespace(episode_id=result['episode_id'], game_generation=result['game_generation'])
+    validate_capability_catalogue(result, identity, result['sequence'], result['turn'],
+        player_id=result['player_id'], observation=observation, actions_closed=actions_closed)
+    return result
+
+
+def upgrade_active_effects_catalogue(value, effects, observation=None, *, status=None):
+    """Append public current effects without changing any action or candidate ID."""
+    from . import world_congress_active_effects
+    if type(value) is not dict or value.get('schema') != CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA:
+        raise ValueError('Congress active effects require the complete v39 query group')
+    if status is None:
+        if effects is not None: status = 'available'
+        elif value['world_congress'] is None: status = 'waiting_or_closed'
+        else: raise ValueError('Unavailable Congress active effects require an explicit status')
+    world_congress_active_effects.validate_group(effects,status,value['world_congress'],
+        value['player_id'],value['turn'],value['sequence'])
+    if effects is not None and observation is not None:
+        world_congress_active_effects.compare_own(effects,observation,value['sequence'])
+    result=copy.deepcopy(value)
+    result['schema']=CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA
+    result['world_congress_active_effects']=copy.deepcopy(effects)
+    result['world_congress_active_effects_status']=status
+    result.pop('decision_id',None);result['decision_id']=digest(result)
+    return result
+
+
 def select_capability(value, selection):
     """Resolve an exact choice from an already validated capability catalogue."""
     if (not is_capability_catalogue(value) or type(selection) is not dict
-            or set(selection) != {'decision_id', 'candidate_id'}
+            or set(selection) not in ({'decision_id', 'candidate_id'},
+                                      {'decision_id', 'candidate_id', 'parameters'})
             or selection['decision_id'] != value['decision_id']
             or type(selection['candidate_id']) is not str):
         raise ValueError('Malformed or stale capability selection')
@@ -605,6 +1202,30 @@ def select_capability(value, selection):
                if row['candidate_id'] == selection['candidate_id']]
     if len(matches) != 1:
         raise ValueError('Choice is absent from the completed family queries')
+    if (type(matches[0].get('kind')) is str and matches[0].get('kind').startswith('congress_')):
+        from . import world_congress
+        if value.get('schema') not in WORLD_CONGRESS_CAPABILITY_SCHEMAS:
+            raise ValueError('Congress requires its explicit capability revision')
+        has_parameters = matches[0]['kind'] in world_congress.PARAMETER_FIELDS
+        if ('parameters' in selection) != has_parameters:
+            raise ValueError('Congress selection parameters differ from its operation')
+        return world_congress.choose(value['world_congress'], matches[0], selection.get('parameters'))
+    if matches[0].get('kind') == 'policies':
+        if set(selection) != {'decision_id', 'candidate_id', 'parameters'}:
+            raise ValueError('Explicit policy assignment parameters required')
+        parameters = selection['parameters']
+        if type(parameters) is not dict or set(parameters) != {'assignments'}:
+            raise ValueError('Malformed explicit policy assignment parameters')
+        from . import policies
+        candidate = policies.choose(matches[0]['slots'], parameters['assignments'],
+                                    value['player_id'], value['turn'],
+                                    allow_relocation=(
+                                        _CAPABILITY_SCHEMAS.index(value['schema']) + 1 >= 28),
+                                    allow_unchanged=(
+                                        _CAPABILITY_SCHEMAS.index(value['schema']) + 1 >= 29))
+        return dict(kind='policies', candidate=candidate)
+    if set(selection) != {'decision_id', 'candidate_id'}:
+        raise ValueError('Parameters are unsupported for this capability action')
     return copy.deepcopy(matches[0])
 
 
@@ -665,6 +1286,60 @@ def _checkpoint_busy_attack_projection(current, saved, projected):
     return copy.deepcopy(added)
 
 
+def checkpoint_city_query_projection(current, saved, observation, *, requested=(False, False)):
+    """Compare prior known fields when explicit city queries are first enabled.
+
+    None means unqueried, not an empty city state. Only newly observed families
+    are removed from this detached comparison copy; existing city data and all
+    other decisions still have to match. The published catalogue is unchanged.
+    """
+    if (type(requested) is not tuple or len(requested)!=2
+            or any(type(flag) is not bool for flag in requested)
+            or requested[1] and not requested[0]):
+        raise ValueError('City-query transition requires exact complete opt-ins')
+    if not any(requested):
+        return current, None
+    pairs=(('city_focus','city_focus_catalogs'),('city_citizen','citizen_catalogs'))
+    added=[(kind,key) for flag,(kind,key) in zip(requested,pairs)
+           if flag and saved.get(key) is None and current.get(key) is not None]
+    if not added:
+        return current, None
+    if (current.get('schema')!=saved.get('schema')
+            or current.get('schema') not in _capability_schemas_from(CAPABILITY_CITY_CONTROLS_SCHEMA)):
+        raise ValueError('City-query activation cannot substitute a catalogue version')
+    from types import SimpleNamespace
+    for value in (current,saved):
+        identity=SimpleNamespace(episode_id=value['episode_id'],game_generation=value['game_generation'])
+        validate_capability_catalogue(value,identity,value['sequence'],observation['turn'],
+            player_id=observation['player_id'],observation=observation)
+    projected=copy.deepcopy(current)
+    kinds={kind for kind,_ in added}
+    changed_fields=[]
+    for flag,(kind,key) in zip(requested,pairs):
+        if saved.get(key) is None and current.get(key) is not None and not flag:
+            raise ValueError('An unrequested city query cannot be excluded from comparison')
+        if kind in kinds:
+            previous_family=saved['families'].get(kind)
+            if previous_family is not None and previous_family['status']!='unqualified':
+                raise ValueError('Known city state cannot be excluded from checkpoint comparison')
+            changed_fields.append(key)
+            if key in saved:projected[key]=None
+        if key not in saved:
+            projected.pop(key,None)
+            if key not in changed_fields:changed_fields.append(key)
+        if kind in kinds or key not in saved:
+            if kind in saved['families']:projected['families'][kind]=copy.deepcopy(saved['families'][kind])
+            else:projected['families'].pop(kind,None)
+    projected['candidates']=[row for row in projected['candidates']
+                             if row['action']['kind'] not in kinds]
+    projected.pop('decision_id')
+    projected['decision_id']=digest(projected)
+    return projected,dict(source_schema=saved['schema'],target_schema=current['schema'],
+        historical_fields_unchanged=True,explicit_city_query_opt_in=list(requested),
+        added_public_fields=changed_fields,
+        added_action_families=[kind for kind,_ in added])
+
+
 def checkpoint_catalogue(current, saved, observation, *, production_evidence=None, combat_evidence=None, combat_source_sha256=None, combat_readiness_source_sha256=None, core_sha256=None):
     """Explicit source-bound readback transitions; never rewrite old data.
 
@@ -685,6 +1360,473 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         CAPABILITY_UNIT_WORK_STATE_SCHEMA: (CAPABILITY_UNIT_WORK_SCHEMA, 'unit_work_state'),
     }
     current_schema = current.get('schema')
+    if current_schema == CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Congress active effects checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity=SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected=copy.deepcopy(current)
+        projected['schema']=CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA
+        projected.pop('world_congress_active_effects');projected.pop('world_congress_active_effects_status')
+        projected.pop('decision_id');projected['decision_id']=digest(projected)
+        projected,prior=checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition=dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                        historical_fields_unchanged=True)
+        transition['added_public_fields']=transition.get('added_public_fields',[])+[
+            'world_congress_active_effects','world_congress_active_effects_status']
+        return projected,transition
+    if current_schema == CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Native permissions checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA
+        projected.pop('native_command_permissions')
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        # An unavailable coupled reader cannot masquerade as a historical v38
+        # query. Only metadata is removed, and every old field remains strict.
+        try:
+            validate_capability_catalogue(projected, identity, projected['sequence'], observation['turn'],
+                                          player_id=observation['player_id'], observation=observation)
+        except ValueError as exc:
+            raise ValueError('Native permissions checkpoint has no comparable historical query') from exc
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['native_command_permissions']
+        return projected, transition
+    if current_schema == CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Congress review checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA
+        projected.pop('world_congress_review')
+        projected.pop('world_congress_review_status')
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + [
+            'world_congress_review', 'world_congress_review_status']
+        return projected, transition
+    if current_schema == CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Congress checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from . import world_congress
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_SPY_COMPLETION_SCHEMA
+        projected.pop('world_congress')
+        for kind in world_congress.CANDIDATE_FIELDS:
+            projected['families'].pop(kind)
+        projected['candidates'] = [row for row in projected['candidates']
+                                  if row['action']['kind'] not in world_congress.CANDIDATE_FIELDS]
+        if current['world_congress'] is not None and current['world_congress']['in_session']:
+            prior = [row for row in saved['candidates'] if row['action']['kind'] in CONGRESS_READ_ONLY_KINDS]
+            present = [row for row in projected['candidates'] if row['action']['kind'] in CONGRESS_READ_ONLY_KINDS]
+            if prior != present:
+                raise ValueError('Congress checkpoint read-only action intersection differs from history')
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['world_congress']
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(world_congress.CANDIDATE_FIELDS)
+        return projected, transition
+    if current_schema == CAPABILITY_XP2_SPY_COMPLETION_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Spy completion checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from . import espionage, spy_completion
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_ESPIONAGE_SCHEMA
+        projected.pop('spy_completion')
+        kinds = tuple(spy_completion.ACTION_FIELDS)
+        for kind in kinds:
+            projected['families'].pop(kind)
+        for kind in espionage.ACTION_FIELDS:
+            if projected['families'][kind]['status'] == 'queried_partial':
+                projected['families'][kind]['unqualified'] = list(ESPIONAGE_GAPS)
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] not in kinds]
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['spy_completion']
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(kinds)
+        transition['espionage_comparison_gaps'] = list(ESPIONAGE_GAPS)
+        return projected, transition
+    if current_schema == CAPABILITY_XP2_ESPIONAGE_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Espionage checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from . import espionage
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_TRADE_SCHEMA
+        projected.pop('espionage')
+        kinds = tuple(espionage.ACTION_FIELDS)
+        for kind in kinds:
+            projected['families'].pop(kind)
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] not in kinds]
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['espionage']
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(kinds)
+        return projected, transition
+    if current_schema == CAPABILITY_XP2_TRADE_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Trade checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA
+        fields = ('trade_routes', 'trade_origins')
+        kinds = ('make_trade_route', 'change_trade_origin')
+        for field in fields:
+            projected.pop(field)
+        for kind in kinds:
+            projected['families'].pop(kind)
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] not in kinds]
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + list(fields)
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(kinds)
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Initial diplomacy checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_GOVERNORS_SCHEMA
+        projected.pop('diplomacy_overview')
+        projected['families'].pop('diplomacy_initiate')
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] != 'diplomacy_initiate']
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['diplomacy_overview']
+        transition['added_action_families'] = transition.get('added_action_families', []) + ['diplomacy_initiate']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_GOVERNORS_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_GOVERNORS_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Governor checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from .governors import ACTION_FIELDS as governor_fields
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_ENVOYS_SCHEMA
+        projected.pop('governors')
+        for kind in governor_fields:
+            projected['families'].pop(kind)
+        projected['candidates'] = [row for row in projected['candidates']
+            if row['action']['kind'] not in governor_fields]
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['governors']
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(governor_fields)
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_ENVOYS_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_ENVOYS_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Envoy checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA
+        projected.pop('envoys')
+        for kind in ('send_envoy', 'retain_envoys'):
+            projected['families'].pop(kind)
+        projected['candidates'] = [row for row in projected['candidates']
+            if row['action']['kind'] not in ('send_envoy', 'retain_envoys')]
+        projected.pop('decision_id')
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['envoys']
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'send_envoy', 'retain_envoys']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Faith-purchase checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        from . import plot_purchases
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA
+        if projected['city_purchases'] is not None:
+            for city in projected['city_purchases']:
+                city['offers'] = [row for row in city['offers']
+                                  if row['action']['currency'] != 'YIELD_FAITH']
+            faith_ids = {row['candidate_id'] for row in projected['candidates']
+                         if row['action'].get('kind') == 'purchase'
+                         and 'plot_id' not in row['action']
+                         and row['action']['currency'] == 'YIELD_FAITH'}
+            projected['candidates'] = [row for row in projected['candidates']
+                                       if row['candidate_id'] not in faith_ids]
+            family = projected['families']['purchase']
+            if family['status'] == 'queried_partial':
+                family['unqualified'] = list(plot_purchases.CITY_GAPS)
+                family['candidate_ids'] = [key for key in family['candidate_ids']
+                                           if key not in faith_ids]
+        projected.pop('decision_id', None)
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'],
+                          target_schema=current_schema, historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'faith_unit_building_purchase']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Policy reconfirm checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        catalogue = projected['policies']
+        if catalogue is not None:
+            from . import capability_policies
+            old_actions = capability_policies.actions(catalogue, allow_relocation=True)
+            if not old_actions:
+                projected['candidates'] = [row for row in projected['candidates']
+                                           if row['action']['kind'] != 'policies']
+            projected['families']['policies']['candidate_ids'] = [
+                digest(action) for action in old_actions]
+        projected['schema'] = CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA
+        projected.pop('decision_id', None)
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'unchanged_policy_confirmation']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Policy relocation checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        catalogue = projected['policies']
+        if catalogue is not None:
+            prior = {row['prior_index'] for row in catalogue['slots']
+                     if row['prior_index'] != -1}
+            for row in catalogue['slots']:
+                row['options'] = [option for option in row['options']
+                                  if option['index'] not in prior
+                                  or option['index'] == row['prior_index']]
+            from . import capability_policies
+            actions = capability_policies.actions(catalogue)
+            replacement = (dict(candidate_id=digest(actions[0]), action=actions[0])
+                           if actions else None)
+            rebuilt = []
+            inserted = False
+            for row in projected['candidates']:
+                if row['action']['kind'] == 'policies':
+                    if replacement is not None and not inserted:
+                        rebuilt.append(replacement)
+                        inserted = True
+                else:
+                    rebuilt.append(row)
+            projected['candidates'] = rebuilt
+            family = projected['families']['policies']
+            family['status'] = 'queried_partial'
+            family['unqualified'] = ['active_policy_relocation']
+            family['candidate_ids'] = ([] if replacement is None else
+                                       [replacement['candidate_id']])
+        projected['schema'] = CAPABILITY_XP2_GOVERNMENT_SCHEMA
+        projected.pop('decision_id', None)
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'active_policy_relocation']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_GOVERNMENT_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_GOVERNMENT_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Government checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        del projected['government'], projected['families']['government']
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] not in ('government', 'retain_government')]
+        projected['schema'] = CAPABILITY_XP2_POLICY_UNLOCK_SCHEMA
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['government']
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'government', 'retain_government']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_POLICY_UNLOCK_SCHEMA
+            and saved.get('schema') != current_schema):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Policy unlock transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        del projected['policy_unlock'], projected['families']['policy_unlock'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] != 'policy_unlock']
+        family = projected['families']['policies']
+        if family['status'] == 'queried_partial':
+            family['unqualified'] = ['paid_policy_unlock', 'active_policy_relocation']
+        projected['schema'] = CAPABILITY_XP2_POLICIES_SCHEMA
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['policy_unlock']
+        transition['added_action_families'] = transition.get('added_action_families', []) + ['policy_unlock']
+        return projected, transition
+    if (current_schema == CAPABILITY_XP2_POLICIES_SCHEMA
+            and saved.get('schema') != CAPABILITY_XP2_POLICIES_SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Policy checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        del projected['policies'], projected['families']['policies']
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] != 'policies']
+        projected['schema'] = CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['policies']
+        transition['added_action_families'] = transition.get('added_action_families', []) + ['policies']
+        return projected, transition
     if current_schema in (CAPABILITY_XP2_PLOT_PURCHASE_SCHEMA, CAPABILITY_XP2_CITY_PURCHASE_SCHEMA,
                           CAPABILITY_XP2_PROMOTION_SCHEMA, CAPABILITY_XP2_UNIT_UPGRADE_SCHEMA
                           ) and saved.get('schema') != current_schema:
@@ -1133,15 +2275,29 @@ def unready_action_available(controls, *, actions_closed=False):
 
 
 def validate_catalogue(value, identity, sequence, turn, *, player_id,
-                       actions_closed=False, observation=None):
-    """Validate wrapper shape/digests and return its legacy base catalogue.
+                       actions_closed=False, observation=None,
+                       expected_war_source_sha256=None):
+    """Validate wrapper shape/digests and return its routed catalogue.
 
     A ``None`` result means the actor is waiting and the catalogue contains
-    only turn controls. A dictionary result is the reconstructed, digest-bound
-    legacy catalogue; the caller must pass it to native ``validate_decisions``.
-    The explicit capability schema instead returns its validated catalogue;
-    callers must route it with ``is_capability_catalogue``, not as legacy data.
+    only turn controls. A legacy dictionary result is reconstructed and
+    digest-bound; the caller must pass it to native ``validate_decisions``.
+    Public dialogue, world-war and capability catalogues return their own
+    validated contracts and must be routed by their schema predicates.
     """
+    if is_diplomacy_decisions(value):
+        from .diplomacy_decisions import validate as validate_diplomacy_decisions
+        return validate_diplomacy_decisions(value, identity, sequence, turn,
+            player_id=player_id, observation=observation,
+            actions_closed=actions_closed)
+    if is_world_war_decisions(value):
+        if expected_war_source_sha256 is None:
+            raise ValueError('World-war modal requires a pinned renderer source profile')
+        from .world_war_decisions import validate as validate_world_war_decisions
+        return validate_world_war_decisions(value, identity, sequence, turn,
+            player_id=player_id, observation=observation,
+            expected_source_sha256=expected_war_source_sha256,
+            actions_closed=actions_closed)
     if is_capability_catalogue(value):
         return validate_capability_catalogue(value, identity, sequence, turn,
             player_id=player_id, actions_closed=actions_closed, observation=observation)
@@ -1270,5 +2426,13 @@ def validate_catalogue(value, identity, sequence, turn, *, player_id,
 __all__ = ['SCHEMA', 'WORK_SCHEMA', 'WORK_SCHEMAS', 'INFO_SCHEMA', 'INFO_SCHEMAS','GROWTH_SCHEMA','LATEST_SCHEMA', 'MAP_SCHEMAS', 'PREVIOUS_SCHEMA', 'LEGACY_SCHEMA', 'SUPPORTED_SCHEMAS',
            'TURN_CONTROLS_SCHEMA', 'digest', 'validate_turn_controls',
            'is_waiting', 'unready_action_available', 'validate_catalogue',
-           'CAPABILITY_SCHEMA', 'CAPABILITY_CHOICES_SCHEMA', 'CAPABILITY_TURNS_SCHEMA', 'CAPABILITY_WORLD_SCHEMA', 'CAPABILITY_UNIT_ORDERS_SCHEMA', 'CAPABILITY_PRODUCTION_QUEUE_SCHEMA', 'CAPABILITY_PLACEMENT_SCHEMA', 'CAPABILITY_PLACEMENT_INVENTORY_SCHEMA', 'CAPABILITY_UNIT_ATTACKS_SCHEMA', 'CAPABILITY_COMBAT_PUBLIC_SCHEMA', 'CAPABILITY_COMBAT_READINESS_SCHEMA', 'CAPABILITY_CITY_CONTROLS_SCHEMA', 'CAPABILITY_CITY_SHOT_SCHEMA', 'CAPABILITY_DISTRICT_SHOT_SCHEMA', 'CAPABILITY_UNIT_WORK_SCHEMA', 'CAPABILITY_UNIT_WORK_STATE_SCHEMA', 'CAPABILITY_UNIT_WORK_INFO_SCHEMA', 'CAPABILITY_CURRENT_PRODUCTION_SCHEMA', 'COMBAT_READINESS_SOURCE_SHA256', 'is_capability_catalogue',
-           'validate_capability_catalogue', 'select_capability']
+           'CAPABILITY_SCHEMA', 'CAPABILITY_CHOICES_SCHEMA', 'CAPABILITY_TURNS_SCHEMA', 'CAPABILITY_WORLD_SCHEMA', 'CAPABILITY_UNIT_ORDERS_SCHEMA', 'CAPABILITY_PRODUCTION_QUEUE_SCHEMA', 'CAPABILITY_PLACEMENT_SCHEMA', 'CAPABILITY_PLACEMENT_INVENTORY_SCHEMA', 'CAPABILITY_UNIT_ATTACKS_SCHEMA', 'CAPABILITY_COMBAT_PUBLIC_SCHEMA', 'CAPABILITY_COMBAT_READINESS_SCHEMA', 'CAPABILITY_CITY_CONTROLS_SCHEMA', 'CAPABILITY_CITY_SHOT_SCHEMA', 'CAPABILITY_DISTRICT_SHOT_SCHEMA', 'CAPABILITY_UNIT_WORK_SCHEMA', 'CAPABILITY_UNIT_WORK_STATE_SCHEMA', 'CAPABILITY_UNIT_WORK_INFO_SCHEMA', 'CAPABILITY_CURRENT_PRODUCTION_SCHEMA', 'CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA', 'CAPABILITY_XP2_POLICIES_SCHEMA', 'CAPABILITY_XP2_GOVERNMENT_SCHEMA', 'CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA', 'CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA', 'CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA', 'CAPABILITY_XP2_ENVOYS_SCHEMA', 'CAPABILITY_XP2_GOVERNORS_SCHEMA', 'POLICY_RELOCATION_CAPABILITY_SCHEMAS', 'POLICY_RECONFIRM_CAPABILITY_SCHEMAS', 'COMBAT_READINESS_SOURCE_SHA256', 'is_capability_catalogue',
+           'validate_capability_catalogue', 'select_capability',
+            'WORLD_WAR_DECISIONS_SCHEMA', 'is_world_war_decisions',
+            'is_diplomacy_decisions', 'CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA', 'CAPABILITY_XP2_TRADE_SCHEMA',
+            'CAPABILITY_XP2_ESPIONAGE_SCHEMA', 'ESPIONAGE_CAPABILITY_SCHEMAS', 'ESPIONAGE_GAPS',
+            'upgrade_espionage_catalogue', 'CAPABILITY_XP2_SPY_COMPLETION_SCHEMA',
+            'SPY_COMPLETION_CAPABILITY_SCHEMAS', 'SPY_COMPLETION_GAPS', 'upgrade_spy_completion_catalogue',
+            'CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA', 'WORLD_CONGRESS_CAPABILITY_SCHEMAS',
+            'upgrade_world_congress_catalogue', 'CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA',
+            'WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS', 'upgrade_review_catalogue']

@@ -134,6 +134,24 @@ class PlacementSourceTests(unittest.TestCase):
         b.poisoned=True
         with self.assertRaises((ValueError,RuntimeError)):inventory.bind_owner(b,b.core,b.runtime.read)
 
+    def test_saved_owner_projects_selected_execution_image_through_all_three_binders(self):
+        from civ6_host.runtime.execution_images import known_path, select
+        from civ6_host.runtime import xp2_production_queue_source as queue
+        image=select('xp2-gamecore-current-092abfbb',core_path=known_path('xp2-gamecore-current-092abfbb'))
+        f,b,c=self.graph();b.core._civ6_host_execution_image=image
+        with patch.object(queue,'source_dependencies',wraps=queue.source_dependencies) as queue_pins, \
+             patch.object(placement,'source_dependencies',wraps=placement.source_dependencies) as placement_pins, \
+             patch.object(inventory,'source_dependencies',wraps=inventory.source_dependencies) as inventory_pins:
+            receipt=inventory.bind_owner(b,b.core,b.runtime.read)
+        self.assertIs(receipt.placement_receipt,b._xp2_production_placement_source_receipt)
+        self.assertTrue(queue_pins.call_args_list)
+        self.assertTrue(placement_pins.call_args_list)
+        for call in queue_pins.call_args_list:
+            self.assertIs(call.kwargs['execution_image'],image)
+        for call in placement_pins.call_args_list:
+            self.assertIs(call.kwargs['execution_image'],image)
+        inventory_pins.assert_called_once_with(XP2,execution_image=image)
+
     def test_composed_native_helper_mutation_never_installs_inventory_receipt(self):
         f,b,c=self.graph()
         f.memory[f.core_base+0x717A2]^=1

@@ -78,6 +78,9 @@ class A0FamilyService(SharedHostEventDispatch):
         self.improvement_change_profile = self._improvement_change_profile = None
         self.district_damage_profile = self._district_damage_profile = None
         self.natural_wonder_event_profile = self._natural_wonder_event_profile = None
+        self.policy_unlock_event_profile = self._policy_unlock_event_profile = None
+        self.statement_event_profile = self._statement_event_profile = None
+        self.bbg_trade_event_profile = self._bbg_trade_event_profile = None
 
     @property
     def pending(self):
@@ -253,8 +256,18 @@ class A0FamilyService(SharedHostEventDispatch):
             raise RuntimeError('A0 natural-wonder event profile replaced')
         if self.district_damage_profile is not self._district_damage_profile:
             raise RuntimeError('A0 district damage/combat event profile replaced')
+        if self.policy_unlock_event_profile is not self._policy_unlock_event_profile:
+            raise RuntimeError('A0 policy unlock event profile replaced')
+        if self.bbg_trade_event_profile is not self._bbg_trade_event_profile:
+            raise RuntimeError('A0 BBG trade event profile replaced')
 
     def handles_kind(self, kind):
+        if getattr(self,'statement_event_profile',None) is not None and kind in self.statement_event_profile.record_types_by_kind:
+            return True
+        if self.bbg_trade_event_profile is not None and kind in self.bbg_trade_event_profile.record_types_by_kind:
+            return True
+        if self.policy_unlock_event_profile is not None and kind in self.policy_unlock_event_profile.record_types_by_kind:
+            return True
         if self.natural_wonder_event_profile is not None and kind in self.natural_wonder_event_profile.record_types_by_kind:
             return True
         if kind in self.presentation_sources:
@@ -284,6 +297,10 @@ class A0FamilyService(SharedHostEventDispatch):
         return ((kind in self.profile.record_types_by_kind or (self.controller_profile is not None and kind in self.controller_profile.record_types_by_kind) or (self.player_query_profile is not None and kind in self.player_query_profile.record_types_by_kind)) or (self.publication_event_profile is not None and kind in self.publication_event_profile.record_types_by_kind)) or (self.district_event_profile is not None and kind in self.district_event_profile.record_types_by_kind)
 
     def handles_record(self, kind):
+        if self.policy_unlock_event_profile is not None and kind in self.policy_unlock_event_profile.record_sizes:
+            return True
+        if self.bbg_trade_event_profile is not None and kind in self.bbg_trade_event_profile.record_sizes:
+            return True
         if self.natural_wonder_event_profile is not None and kind in self.natural_wonder_event_profile.record_sizes:
             return True
         if self.climate_event_profile is not None and kind in self.climate_event_profile.record_sizes:
@@ -362,8 +379,11 @@ class A0FamilyService(SharedHostEventDispatch):
         self._require_no_f391_reentry()
         if self.notification_scope_profile is not None or self.arguments.depth or self.active_kind is not None or self.pending or self.deferred._draining_empty_receivers or (type(self.host_notification_counter) is not int) or (self.host_notification_counter != 0) or (type(self.host_metadata_counter) is not int) or (self.host_metadata_counter != 0):
             raise ValueError('A0 notification scopes require one idle owner and closed counters')
-        from .a0_notification_scope_source import notification_scope_profile
-        profile = notification_scope_profile()
+        from .a0_notification_scope_source import RESEARCH_CHANGED, notification_scope_profile, verify_research_changed_live
+        image = getattr(self.deferred.core, '_civ6_host_execution_image', None)
+        profile = notification_scope_profile(execution_image=image)
+        if RESEARCH_CHANGED in profile.records:
+            verify_research_changed_live(image, self.deferred.core._handle, self.read)
         for record_type, size, _ in profile.records.values():
             record = bytearray(size)
             struct.pack_into('<II', record, 0, size, record_type)
@@ -394,9 +414,12 @@ class A0FamilyService(SharedHostEventDispatch):
         private = self.private_notification_profile is not None and kind in self.private_notification_profile.record_types_by_kind
         presentation = kind in self.presentation_sources
         xp2_victory = self.deferred.cache_core_sha256 == XP2_CORE_SHA256 and kind in EVENT_SPECS
+        policy_unlock = self.policy_unlock_event_profile is not None and kind in self.policy_unlock_event_profile.record_types_by_kind
+        statement = getattr(self,'statement_event_profile',None) is not None and kind in self.statement_event_profile.record_types_by_kind
+        bbg_trade = self.bbg_trade_event_profile is not None and kind in self.bbg_trade_event_profile.record_types_by_kind
         from .a0_district_damage import is_xp2_sibling
         district_sibling = is_xp2_sibling(self,kind,fields)
-        if (n or m) and not foundation and not history and not climate and not turn_unit and not placement and not combat and not city_scalar and not private and not presentation and not district_sibling and not natural_wonder:
+        if (n or m) and not foundation and not history and not climate and not turn_unit and not placement and not combat and not city_scalar and not private and not presentation and not district_sibling and not natural_wonder and not policy_unlock and not bbg_trade:
             if xp2_victory:
                 expected = (EVENT_SPECS[kind].record_type, VICTORY_RECORD_SIZE, 6)
             else:
@@ -414,12 +437,35 @@ class A0FamilyService(SharedHostEventDispatch):
         self.active_kind = kind
         self._active_notification_scope = scope
         try:
+            if kind == 0x5d706996 and self.bbg_trade_event_profile is None:
+                # BBG's UI subscriber can submit an EXECUTE_SCRIPT operation.
+                # The Base empty receiver would discard that gameplay effect.
+                from .xp2_bbg_inputs import is_reference
+                bundle = getattr(getattr(self, '_foundation_backend', None), 'captured_bundle', None)
+                if is_reference(getattr(bundle, 'reference', None)):
+                    raise ValueError('BBG TradeRouteActivityChanged requires the official UI-to-gameplay bridge')
             if xp2_victory:
                 verify_xp2_producer(kind, self.deferred.core._handle, self.read)
                 if scope is None:
                     result = self._dispatch_fields(kind, fields)
                 else:
                     result = self._enqueue_scoped_victory(kind, fields)
+            elif bbg_trade:
+                from .a0_xp2_bbg_trade import dispatch
+                result = dispatch(self, kind, fields, borrowed_argument)
+            elif (self.bbg_trade_event_profile is not None and kind == 0x30fbf8d2
+                    and 0xd6fcf3e4 in fields):
+                from .a0_xp2_bbg_trade import dispatch_city_property
+                result = dispatch_city_property(self, fields, borrowed_argument)
+            elif scope is not None and kind == 0x48062f97:
+                from .a0_notification_scope_source import dispatch_scoped_research
+                result = dispatch_scoped_research(self, fields)
+            elif statement:
+                from .a0_diplomacy_statement import dispatch
+                result=dispatch(self,kind,fields,borrowed_argument)
+            elif policy_unlock:
+                from .a0_policy_unlock import dispatch
+                result = dispatch(self,kind,fields)
             elif natural_wonder:
                 from .a0_natural_wonder import dispatch
                 result=dispatch(self,kind,fields,borrowed_argument)
@@ -487,14 +533,22 @@ class A0FamilyService(SharedHostEventDispatch):
         if self.active_kind is None:
             raise RuntimeError('A0 record produced outside an explicit dispatch')
         kind = int.from_bytes(record[4:8], 'little')
-        profile = next((p for p in (self.climate_event_profile, self.history_event_profile, self.profile, self.controller_profile, self.player_query_profile, self.publication_event_profile, self.district_event_profile, self.found_unit_event_profile, self.foundation_event_profile, self.city_scalar_event_profile, self.private_notification_profile, self.turn_unit_event_profile, self.placement_event_profile,self.combat_event_profile,self.improvement_change_profile,self.district_damage_profile,self.natural_wonder_event_profile) if p is not None and self.active_kind in p.record_types_by_kind), None)
+        profile = next((p for p in (self.bbg_trade_event_profile,self.policy_unlock_event_profile,self.climate_event_profile, self.history_event_profile, self.profile, self.controller_profile, self.player_query_profile, self.publication_event_profile, self.district_event_profile, self.found_unit_event_profile, self.foundation_event_profile, self.city_scalar_event_profile, self.private_notification_profile, self.turn_unit_event_profile, self.placement_event_profile,self.combat_event_profile,self.improvement_change_profile,self.district_damage_profile,self.natural_wonder_event_profile) if p is not None and self.active_kind in p.record_types_by_kind), None)
         if profile is None or kind not in profile.record_types_by_kind[self.active_kind]:
             raise ValueError('A0 codec produced a record outside its source-qualified family')
         if kind==248 and profile is self.combat_event_profile:
             from .a0_combat_events import validate_enqueue
             validate_enqueue(self,record)
+        elif kind == 207 and getattr(self.deferred.core, '_civ6_host_execution_image', None) is not None:
+            raise ValueError('Unqualified current-image record-207 producer')
+        elif kind == 184 and profile is self.bbg_trade_event_profile:
+            from .a0_xp2_bbg_amani import validate_plot_record
+            validate_plot_record(self, record, self._sequence + 1)
+        elif kind == 86 and profile is self.bbg_trade_event_profile:
+            from .xp2_bbg_spy import validate_enqueue
+            validate_enqueue(self, record)
         else:
-            validate_empty_profile_record(record, **self.empty_receiver_state)
+            validate_empty_profile_record(record,**self.empty_receiver_state)
         if self._active_notification_scope is not None:
             n, m, sequence, count, expected = self._active_notification_scope
             record_type, size, flag = expected
@@ -524,9 +578,17 @@ class A0FamilyService(SharedHostEventDispatch):
         self._check(loaded_lifetime=loaded_lifetime)
         if loaded_lifetime is not None:
             loaded_lifetime.check_a0_consume(self, record)
-        if self.active_kind is not None or not self.handles_record(int.from_bytes(record[4:8], 'little')):
+        record_type = int.from_bytes(record[4:8], 'little')
+        if self.active_kind is not None or not self.handles_record(record_type):
             raise ValueError('A0 record consumer is active or unqualified')
-        if self.climate_event_profile is not None and int.from_bytes(record[4:8], 'little') in self.climate_event_profile.record_sizes:
+        if (record_type == 208 and self.policy_unlock_event_profile is not None
+                and getattr(self, '_policy_unlock_current_image_id', None) is not None):
+            from .a0_policy_unlock_current import consume
+            return consume(self, record, sequence)
+        if self.bbg_trade_event_profile is not None and record_type in self.bbg_trade_event_profile.record_sizes:
+            from .a0_xp2_bbg_trade import consume
+            return consume(self, record, sequence)
+        if self.climate_event_profile is not None and record_type in self.climate_event_profile.record_sizes:
             from .a0_xp2_turn_events import consume
             return consume(self, record, sequence)
         self.deferred._consume_empty_record(record, sequence, empty_receiver_state=self.empty_receiver_state)

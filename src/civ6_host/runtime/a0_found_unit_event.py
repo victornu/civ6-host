@@ -17,7 +17,9 @@ def enable(owner):
     core_sha256=owner.deferred.cache_core_sha256
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unit activity event has no selected Core query profile')
-    verify_live(owner.deferred.core._handle,owner.read,core_sha256=core_sha256)
+    execution_image=getattr(owner.deferred.core,'_civ6_host_execution_image',None)
+    verify_live(owner.deferred.core._handle,owner.read,core_sha256=core_sha256,
+        execution_image=execution_image)
     if owner.handles_kind(codec.EVENT_KIND) or _ROWS[0x23]['handler_va']!='0x1400d6cd0' or _ROWS[0x23]['record_sizes']!={128}:
         raise ValueError('Unit activity event overlaps or has a different receiver')
     record=bytearray(128);struct.pack_into('<II',record,0,128,0x23)
@@ -43,8 +45,10 @@ def dispatch(owner,kind,fields):
     if owner.found_unit_event_profile.source_sha256 != (
             XP2_MAP_SOURCE[1] if core_sha256==XP2_CORE_SHA256 else SOURCE[1]):
         raise ValueError('Unit activity event source selection changed')
+    execution_image=getattr(owner.deferred.core,'_civ6_host_execution_image',None)
     query=(codec.query_unit_parameters(owner.deferred.core,owner.deferred.context,identity,
-        incoming_selector=identity['selector'],read=owner.read,core_sha256=core_sha256)
+        incoming_selector=identity['selector'],read=owner.read,core_sha256=core_sha256,
+        execution_image=execution_image)
         if identity['selector']==codec.SELECTOR else None)
     record=codec.encode_record(owner._sequence+1,identity,query,queue_callback_result=0,padding_policy='zero')
     owner._enqueue(record)

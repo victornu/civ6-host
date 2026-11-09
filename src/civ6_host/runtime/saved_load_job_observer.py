@@ -61,14 +61,19 @@ def _live_body_matches(read,base,body):
 
 
 def _verify_core(backend):
-    digest=backend.profile.core_sha256
+    profile=backend.profile
+    digest=getattr(profile,'source_core_sha256',profile.core_sha256)
+    actual_digest=profile.core_sha256
+    if getattr(profile,'execution_image',None) is not None:
+        from .native.native_core_context_profiles import require_executable_profile
+        require_executable_profile(profile)
     if backend.load_abi.core_sha256!=digest:
         raise ValueError('Job observer Core differs from saved-Load ABI')
     spec=CORE_JOB_PROFILES.get(digest)
     if spec is None:
         raise ValueError('No exact Base, XP1, or XP2 job profile; refusing fallback')
     path=Path(backend.core._name).resolve(strict=True)
-    if path.name!=spec['module'] or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+    if path.name!=spec['module'] or hashlib.sha256(path.read_bytes()).hexdigest()!=actual_digest:
         raise ValueError('Selected GameCore file differs from exact job profile')
     proof=_source(spec['source'])
     if spec['kind']=='base':
@@ -118,7 +123,8 @@ def _verify_core(backend):
     rebased_table_bytes=struct.pack('<QQ',base+spec['destroy_rva'],base+spec['execute_rva'])+table_bytes[16:]
     if read(base+spec['vtable_rva'],len(rebased_table_bytes))!=rebased_table_bytes:
         raise ValueError('Live job vtable differs from exact source profile')
-    return dict(sha256=digest,base=base,path=str(path),profile=spec['profile'],
+    return dict(sha256=digest,actual_image_sha256=actual_digest,
+                reference_core_sha256=digest,base=base,path=str(path),profile=spec['profile'],
                 vtable_rva=spec['vtable_rva'],destroy_rva=spec['destroy_rva'],
                 execute_rva=spec['execute_rva'],completed_offset=spec['completed_offset'],
                 source=spec['source'],source_sha256=spec['source'][1],
@@ -133,6 +139,7 @@ class SavedLoadJobObserver:
         self.api=CurrentProcessApi()
         self.host=backend.prefix.runtime.host
         self.busy=False
+        self._query_owner=None
         self.last_snapshots={}
         base=self.api.main_module()
         if int(self.host._handle)!=base or self.api.current_thread_id()!=backend.thread[1]:
@@ -140,7 +147,11 @@ class SavedLoadJobObserver:
         path=Path(self.api.module_filename(base)).resolve(strict=True)
         self.identity=dict(host_base=base,executable_path=str(path),os_thread_id=backend.thread[1])
         self.core=_verify_core(backend)
-        self.build=verify_source_build(path,required_components={'gamecore_python_host.c':self.core['host_component_sha']})
+        from .source_build_identity import xp2_component_requirements
+        required = {'gamecore_python_host.c':self.core['host_component_sha']}
+        if self.core.get('reference_core_sha256', self.core['sha256']) == XP2_CORE_SHA256:
+            required = xp2_component_requirements(path, required)
+        self.build=verify_source_build(path,required_components=required)
         self.bind=self.host.LAB_BindJobCore
         self.bind.argtypes,self.bind.restype=[C.c_uint32,C.c_size_t],C.c_int
         self.layout=self.host.LAB_GetJobRegistryLayout
@@ -177,11 +188,27 @@ class SavedLoadJobObserver:
 
     def _exclusive(self):
         b=self.backend
+        query=getattr(self,'_query_owner',None)
+        if query is not None:
+            from .xp1_saved_load_owner import SavedLoadOwner
+            if (type(query) is not SavedLoadOwner or query.backend is not b
+                    or b.jobs is not self or b.busy is not False
+                    or b.snapshot_phase not in ('before','after')
+                    or b.runtime.thread()!=b.thread or b.poisoned or b.destroyed):
+                return False
+            # The exact retained query graph, including the READY continuation,
+            # owns this read. Do not impersonate an active game command by
+            # changing stage/busy flags just to inspect the scheduler.
+            query._check_query()
+            return True
         if not (b.busy is True and b.snapshot_phase in ('before','after')
                 and b.runtime.thread()==b.thread and not b.poisoned and not b.destroyed):
             return False
         if b.stage in ('loaded-lifetime-wrappers', 'loaded-lifetime-unloaded'):
-            if getattr(getattr(b,'profile',None),'core_sha256',None)==XP2_CORE_SHA256:
+            selected_profile=getattr(b,'profile',None)
+            selected_source=getattr(selected_profile,'source_core_sha256',
+                                    getattr(selected_profile,'core_sha256',None))
+            if selected_source==XP2_CORE_SHA256:
                 from .xp1_loaded_lifetime import LoadedLifetime
                 from .xp2_loaded_lifetime_source import SOURCE as XP2_LIFETIME_SOURCE
                 lifetime=getattr(b,'_loaded_lifetime',None)
@@ -254,6 +281,25 @@ class SavedLoadJobObserver:
             return False
         lease._check()
         return True
+
+    def query_snapshot(self,saved,phase):
+        """Inspect jobs during an existing saved-session read-only attempt."""
+        from .xp1_saved_load_owner import SavedLoadOwner
+        b=self.backend
+        if (type(saved) is not SavedLoadOwner or saved.backend is not b
+                or b.jobs is not self or phase not in ('before','after')
+                or self.busy or getattr(self,'_query_owner',None) is not None):
+            raise ValueError('Job query requires its exact idle saved-session observer')
+        saved._check_query()
+        previous=b.snapshot_phase
+        self._query_owner=saved
+        try:
+            result=b.jobs_snapshot(phase)
+            saved._check_query()
+            return result
+        finally:
+            self._query_owner=None
+            b.snapshot_phase=previous
 
     def __call__(self):
         if self.busy or not self._exclusive():

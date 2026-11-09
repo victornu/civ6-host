@@ -77,10 +77,12 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_production_queue_source import source_dependencies as selected
-        return selected()
+        return selected(execution_image=execution_image)
+    if execution_image is not None:
+        raise ValueError('Selected execution image requires the XP2 production-queue ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown production queue engine')
     from .paths import resource_root
     from .resource_resolution import resolve_path

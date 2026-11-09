@@ -81,13 +81,15 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return proof
 
 
-def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
+def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     from .paths import resource_root
     from .resource_resolution import resolve_path
     from .xp1_status_profiles import source_dependencies as status_dependencies
     from .network_timer import PROOF_PATH, PROOF_SHA256
     proof = verify_source(core_sha256)
-    pins = dict(status_dependencies(core_sha256=core_sha256))
+    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('Selected execution image requires the XP2 turn UI source ABI')
+    pins = dict(status_dependencies(core_sha256=core_sha256,execution_image=execution_image))
     selected=source_reference(core_sha256)
     refs = [dict(path=selected[0], sha256=selected[1]),
             dict(path=PROOF_PATH, sha256=PROOF_SHA256),

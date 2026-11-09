@@ -5,12 +5,47 @@ interfaces. It is source/ABI verification, not native effect admission.
 """
 import hashlib
 import re
+from types import MappingProxyType
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
 
 SOURCE = ('work/host-extensions/xp2-initial-choices/source-profile-v2.json',
  'dd224972c1d91878fc14ce79bf7ebb31ecb78c572a4b43304da151eabd97060a')
+CURRENT_LITERAL_SOURCE = (
+ 'work/bbg751-turn-source-scope/actual-core-092-integration/initial-choice-literal-compatibility-v1.json',
+ '5a3b5632b6f45aac87f87b0910a2e0aef672cee681d90d10d0d03acf287da185')
+
+
+def _execution_literal_spans(proof, execution_image):
+    """Expected bytes for five exact current-image spans; never rewrite memory."""
+    if execution_image is None:
+        return {}
+    from .execution_images import identity
+    image = identity(execution_image)
+    supplement = _source(CURRENT_LITERAL_SOURCE)
+    if (supplement['schema'] != 'civ6-host.xp2-initial-choice-literal-compatibility.v1'
+            or supplement['reference']['proof_sha256'] != SOURCE[1]
+            or supplement['reference']['image_sha256'] != image['reference_core_sha256']
+            or supplement['current']['image_sha256'] != image['image_sha256']
+            or supplement['current']['image_path'] != image['path']
+            or supplement['comparison'] != dict(literal_count=2009, exact_matches=2004,
+                                                mismatches=5, unmapped=0)):
+        raise ValueError('Initial-choice literal supplement differs from the selected image')
+    result = {}
+    for row in supplement['mismatches']:
+        rva = int(row['rva'], 16) if isinstance(row['rva'], str) else row['rva']
+        original = proof['literals'][hex(rva)]
+        before, after = bytes.fromhex(row['old_raw_hex']), bytes.fromhex(row['new_raw_hex'])
+        if (rva in result or original['raw_hex'] != row['old_raw_hex']
+                or original['bytes'] != row['length'] or len(after) != row['length']
+                or hashlib.sha256(before).hexdigest() != row['old_raw_sha256']
+                or hashlib.sha256(after).hexdigest() != row['new_raw_sha256']):
+            raise ValueError('Initial-choice paired literal bytes differ')
+        result[rva] = after
+    if set(result) != {0x9be590, 0xac0b70, 0xabfb20, 0xabf2b0, 0x9bdc20}:
+        raise ValueError('Initial-choice exact literal span set differs')
+    return result
 CALLBACKS = {'status': {'Game.GetCurrentGameTurn': 6926160,
             'Game.GetLocalPlayer': 6928560,
             'Game.GetLocalObserver': 6928496,
@@ -158,6 +193,38 @@ SLOTS = ((10551784, 536, 5838096),
  (10214376, 48, 213872),
  (11270424, 56, 10110048))
 
+_VALIDATED_BODY_PROFILE = None
+
+
+def _validate_complete_bodies(p):
+    """Check expensive complete-body structure once per frozen proof object."""
+    global _VALIDATED_BODY_PROFILE
+    if type(p) is MappingProxyType and _VALIDATED_BODY_PROFILE is p:
+        return
+    starts=set()
+    for b in p['functions'].values():
+        parts=[]
+        for f in b['fragments']:
+            raw=bytes.fromhex(f['raw_hex']);parts.append(raw)
+            if (len(raw)!=f['length'] or hashlib.sha256(raw).hexdigest()!=f['sha256']
+                    or ''.join(r['bytes'] for r in f['instructions'])!=raw.hex()):
+                raise ValueError('XP2 complete native fragment changed')
+            cursor=int(f['start_rva'],16)
+            for r in f['instructions']:
+                if int(r['rva'],16)!=cursor:raise ValueError('XP2 instruction boundary changed')
+                starts.add(cursor);cursor+=len(bytes.fromhex(r['bytes']))
+        raw=b''.join(parts)
+        if len(raw)!=b['bytes'] or hashlib.sha256(raw).hexdigest()!=b['sha256']:
+            raise ValueError('XP2 complete native body changed')
+    for b in p['functions'].values():
+        for f in b['fragments']:
+            for r in f['instructions']:
+                if re.fullmatch(r'j(?!mp)[a-z]+ 0x[0-9a-f]+',r['text']):
+                    if int(r['text'].split()[-1],16)-0x180000000 not in starts:
+                        raise ValueError('XP2 conditional successor missing from selected source')
+    if type(p) is MappingProxyType:
+        _VALIDATED_BODY_PROFILE=p
+
 
 def source(family):
     if type(family) is not str or family not in CALLBACKS:
@@ -184,36 +251,19 @@ def source(family):
             if (b['callback_rva']!=rva or b['registrar_rva']!=REGISTRARS[name.split('.')[0]]
                     or b['lua_callback_abi']!='int __cdecl(LuaState*) / Windows x64'
                     or hex(rva) not in p['functions']):raise ValueError('XP2 named registration changed')
-    starts=set()
-    for b in p['functions'].values():
-        parts=[]
-        for f in b['fragments']:
-            raw=bytes.fromhex(f['raw_hex']);parts.append(raw)
-            if (len(raw)!=f['length'] or hashlib.sha256(raw).hexdigest()!=f['sha256']
-                    or ''.join(r['bytes'] for r in f['instructions'])!=raw.hex()):
-                raise ValueError('XP2 complete native fragment changed')
-            cursor=int(f['start_rva'],16)
-            for r in f['instructions']:
-                if int(r['rva'],16)!=cursor:raise ValueError('XP2 instruction boundary changed')
-                starts.add(cursor);cursor+=len(bytes.fromhex(r['bytes']))
-        raw=b''.join(parts)
-        if len(raw)!=b['bytes'] or hashlib.sha256(raw).hexdigest()!=b['sha256']:
-            raise ValueError('XP2 complete native body changed')
-    for b in p['functions'].values():
-        for f in b['fragments']:
-            for r in f['instructions']:
-                if re.fullmatch(r'j(?!mp)[a-z]+ 0x[0-9a-f]+',r['text']):
-                    if int(r['text'].split()[-1],16)-0x180000000 not in starts:
-                        raise ValueError('XP2 conditional successor missing from selected source')
+    _validate_complete_bodies(p)
     return p
 
 
-def source_dependencies(family="status"):
+def source_dependencies(family="status", *, execution_image=None):
     from .xp1_ui_binding import source_dependencies as ui_dependencies
     p=source(family);pins=dict(ui_dependencies(core_sha256=XP2_CORE_SHA256))
+    if execution_image is not None:
+        _execution_literal_spans(p, execution_image)
+        pins[str(resolve_path(resource_root()/CURRENT_LITERAL_SOURCE[0]).resolve())] = CURRENT_LITERAL_SOURCE[1]
     if family in ('research','production'):
         from .xp2_action_transport_source import source_dependencies as transport_dependencies
-        pins.update(transport_dependencies())
+        pins.update(transport_dependencies(execution_image=execution_image))
     for ref in (dict(path=SOURCE[0],sha256=SOURCE[1]),*p['references'],*p['extractors']):
         path=resolve_path(resource_root()/ref['path']).resolve(strict=True)
         actual=hashlib.sha256(path.read_bytes()).hexdigest();name=str(path)
@@ -223,7 +273,7 @@ def source_dependencies(family="status"):
     return pins
 
 
-def verify_live(base,read,family):
+def verify_live(base,read,family,*,execution_image=None):
     """Guard all selected complete bodies, slots and names without calling Core."""
     if type(base) is not int or base<=0 or not callable(read):
         raise ValueError('XP2 initial-choice source requires an exact module/reader')
@@ -242,9 +292,12 @@ def verify_live(base,read,family):
     for name,b in p['bindings'].items():
         raw=name.split('.')[1].encode('ascii')+b'\0'
         if bytes(read(base+b['name_rva'],len(raw)))!=raw:raise ValueError('XP2 getter literal changed')
+    literal_spans = _execution_literal_spans(p, execution_image)
     for rva,b in p['literals'].items():
-        if bytes(read(base+int(rva,16),b['bytes']))!=bytes.fromhex(b['raw_hex']):
-            raise ValueError('XP2 native owner/type literal changed')
+        expected = literal_spans.get(int(rva,16), bytes.fromhex(b['raw_hex']))
+        if bytes(read(base+int(rva,16),b['bytes']))!=expected:
+            selected = execution_image.id if execution_image is not None else 'reference-only'
+            raise ValueError('XP2 native owner/type literal changed at '+rva+' ('+selected+')')
     for name,b in p['enums'].items():
         raw=name.split('.')[1].encode('ascii')+b'\0'
         if bytes(read(base+b['name_rva'],len(raw)))!=raw:raise ValueError('XP2 operation enum name changed')

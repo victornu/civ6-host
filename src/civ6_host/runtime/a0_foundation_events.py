@@ -26,7 +26,9 @@ def enable(owner, backend):
             or getattr(backend, '_xp1_commands_requested', False) is not True):
         raise ValueError('Foundation callbacks require the original idle saved command owner')
     from .foundation_event_profile import event_profile, verify_project_live, verify_pillage_live
-    profile = event_profile(core_sha256=core_sha256)
+    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    execution_options = {'execution_image': image} if image is not None else {}
+    profile = event_profile(core_sha256=core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('Foundation event family overlaps an existing owner')
     for kind, size in profile.record_sizes.items():
@@ -42,7 +44,7 @@ def enable(owner, backend):
         from .xp2_wonder_completion import verify_live as verify_wonder_completion
         verify_wmd_visibility(backend.core._handle,owner.read)
         verify_project_live(backend.core._handle, owner.read)
-        verify_pillage_live(backend.core._handle, owner.read)
+        verify_pillage_live(backend.core._handle, owner.read, **execution_options)
         verify_wonder_completion(backend.core._handle, owner.read)
     owner.foundation_event_profile = owner._foundation_event_profile = profile
     owner._foundation_backend = backend
@@ -58,6 +60,7 @@ def _active_profile(owner):
                             ('combat_event_profile','_combat_event_profile'),
                             ('improvement_change_profile','_improvement_change_profile'),
                             ('district_damage_profile','_district_damage_profile'),
+                            ('statement_event_profile','_statement_event_profile'),
                             ('natural_wonder_event_profile','_natural_wonder_event_profile')):
         profile=getattr(owner,public,None)
         if profile is not None and profile is getattr(owner,private,None) and owner.active_kind in profile.record_types_by_kind:
@@ -92,7 +95,9 @@ def enable_history_events(owner, backend):
             or owner.normalizer_transform_present is not False):
         raise ValueError('History callbacks require the exact idle prepared XP2 command owner')
     from .xp2_history_event_profile import event_profile,bind_owner
-    profile=event_profile(core_sha256=core_sha256)
+    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    execution_options = {'execution_image': image} if image is not None else {}
+    profile=event_profile(core_sha256=core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('History callbacks overlap an installed A0 family')
     for kind,size in profile.record_sizes.items():
@@ -156,7 +161,9 @@ def enable_turn_units(owner, backend):
     if hasattr(owner, 'entity_event_count') or hasattr(owner, 'visual_profile'):
         raise ValueError('Turn unit producer state already exists')
     from .turn_unit_event_profile import event_profile, bind_owner
-    profile=event_profile(core_sha256=backend.load_abi.core_sha256)
+    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    execution_options = {'execution_image': image} if image is not None else {}
+    profile=event_profile(core_sha256=backend.load_abi.core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('Turn unit callbacks overlap an installed family')
     for kind,size in profile.record_sizes.items():
@@ -279,7 +286,8 @@ def dispatch_building_pillage(owner, fields):
             or type(owner._sequence) is not int or not 0 <= owner._sequence < 0x7fffffff):
         raise ValueError('Building pillage requires its active empty-receiver XP2 owner')
     owner.deferred._check()
-    decoded = event.decode_fields(fields, owner.read)
+    decoded = event.decode_fields(fields, owner.read,
+                                  execution_image=getattr(owner.core, '_civ6_host_execution_image', None))
     profile = dict(padding_policy=event.PADDING_POLICY,
                    empty_receiver_state=dict(owner.empty_receiver_state),
                    notification_counter=owner.host_notification_counter,

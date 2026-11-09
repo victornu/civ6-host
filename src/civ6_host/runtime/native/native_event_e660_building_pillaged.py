@@ -60,12 +60,19 @@ def _source_path(path_from_lab: str, digest: str, kind: str) -> Path:
     return _resolve_resource_path(path).resolve()
 
 
-def source_dependencies() -> dict[str, str]:
+def source_dependencies(*, execution_image=None) -> dict[str, str]:
     from civ6_host.runtime.native.native_source_cache import load_pinned_json
+    if execution_image is not None:
+        from civ6_host.runtime.execution_images import identity
+        identity(execution_image)
 
     proof = load_pinned_json(_PROOF, SOURCE_PROOF_SHA256)
     pins = {str(_PROOF.resolve()): SOURCE_PROOF_SHA256}
     for ref in proof['sources'].values():
+        if execution_image is not None and ref['kind'] == 'binary':
+            # Captured images document the static source origin; the host does
+            # not load either the EXE or Base Core for this receiver.
+            continue
         digest = ref['sha256']
         path = str(_source_path(ref['path_from_lab'], digest, ref['kind']))
         if path in pins and pins[path] != digest:
@@ -74,25 +81,31 @@ def source_dependencies() -> dict[str, str]:
     return pins
 
 
-def _load(path_from_lab: str, digest: str, kind: str):
+def _load(path_from_lab: str, digest: str, kind: str, *, verify_binary=True):
     path = _source_path(path_from_lab, digest, kind)
     if kind == 'json':
         from civ6_host.runtime.native.native_source_cache import load_pinned_json
         return load_pinned_json(path, digest)
-    actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != digest:
-        raise RuntimeError(f'AA source changed: {path_from_lab}')
+    if verify_binary:
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != digest:
+            raise RuntimeError(f'AA source changed: {path_from_lab}')
     return path
 
-def verify_source_evidence() -> dict:
+def verify_source_evidence(*, execution_image=None) -> dict:
     from civ6_host.runtime.native.native_source_cache import load_pinned_json
+    if execution_image is not None:
+        from civ6_host.runtime.execution_images import identity
+        identity(execution_image)
     proof = load_pinned_json(_PROOF, SOURCE_PROOF_SHA256)
     if proof.get('schema') != 'civ6rl.native_e660_building_pillaged.codec_static_proof.v2' or proof.get('event') != {'kind': EVENT_KIND, 'selector': SELECTOR, 'name': 'GameCoreEvent::BuildingPillaged', 'queue_type': RECORD_TYPE, 'record_size': RECORD_SIZE, 'payload_size': PAYLOAD_SIZE} or proof.get('images', {}).get('exe_sha256') != 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63' or (proof.get('images', {}).get('core_sha256') != 'd7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'):
         raise RuntimeError('AA codec composite proof identity changed')
     header = proof.get('record_header_contract', {})
     if header.get('writer_va') != '0x140136400' or header.get('instruction_source_sha256') != '857f3ea9a3b6ba0accc50517306661d240577bd39f70ce642345693dad6a12ad' or header.get('source_bytes_rechecked') != 93 or (header.get('unwritten_tail') != '0x4c..0x4f is not assigned by writer body; canonical encoder leaves zero, and this is not asserted as a native store.'):
         raise RuntimeError('AA writer header contract changed')
-    docs = {name: _load(ref['path_from_lab'], ref['sha256'], ref['kind']) for name, ref in proof['sources'].items()}
+    docs = {name: _load(ref['path_from_lab'], ref['sha256'], ref['kind'],
+                        verify_binary=execution_image is None or ref['kind'] != 'binary')
+            for name, ref in proof['sources'].items()}
     witness = docs['witness399']
     failure = next((row for row in witness.get('failure_rows', []) if row.get('stage') == 'native_host_event_failed_input'), None)
     expected_raw = {'0x8c468e3c': '0000000000000000f0204fb5e80100000800000001000021', '0xa1e5a149': '030000000000000071063351000000000000000000000000', '0xa1fbc372': '0200000045575f5201000000000000000000000000000000', '0xd6fcf3e4': '020000000000000004000000000000000000000000000000'}
@@ -130,8 +143,8 @@ def _check_fields(fields: Fields) -> None:
     if fields.selector != SELECTOR:
         raise ValueError('AA codec admits only source-routed selector 0x51330671')
 
-def decode_fields(raw_fields: dict, read) -> Fields:
-    verify_source_evidence()
+def decode_fields(raw_fields: dict, read, *, execution_image=None) -> Fields:
+    verify_source_evidence(execution_image=execution_image)
     keys = {594779970, 2353434172, 2716180809, 2717631346, 3606901732}
     if type(raw_fields) is not dict or set(raw_fields) != keys or any((type(raw_fields[k]) is not bytes for k in keys)):
         raise ValueError('AA requires exactly its five complete typed fields')
@@ -180,7 +193,7 @@ def produce_record_lease(sequence: int, fields: Fields, *, core, context: int, r
     conditions raise before yielding; no sentinel or replacement bytes are
     synthesized for that source branch.
     """
-    verify_source_evidence()
+    verify_source_evidence(execution_image=getattr(core, '_civ6_host_execution_image', None))
     if type(profile) is not dict:
         raise ValueError('AA requires the exact host empty-receiver profile')
     validate_profile(sequence, fields, normalizer_transform_present=normalizer_transform_present, **profile)

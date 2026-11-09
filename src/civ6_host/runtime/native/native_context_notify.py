@@ -15,6 +15,30 @@ CAPTURE_SHA = '916b1d85cf97eff0f0a5684d978386fc66718eaf2bf9488db4adad1cad13b37e'
 COMPONENT_SHA = '4806f9c630cc03179308acee44de7b4e696660be3cf7b0b927ba923b1474dc2c'
 BUILD_SHA = 'f52124cb0e81524e9bb8902ca30a0bf94364603b78a070a369221c19ed2dae0d'
 ADMITTED_BUILDS = frozenset((BUILD_SHA, '8b94513b96926a60e20aa0f62943adf903e9d5fc8799ebd05bf587e4364b7e9d'))
+_CAPTURED_EXE_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\Base\Binaries\Win64Steam\CivilizationVI.exe"
+_CAPTURED_EXE_SHA256 = 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
+
+def verify_captured_executable_source(source, *, execution_image=None):
+    """Verify the old capture strictly, or retain it as provenance for XP2.
+
+    The pinned JSON captures an older CivilizationVI.exe. Under an explicit
+    current XP2 profile that EXE is provenance only; the loaded native host has
+    its own build/component verification below. No current EXE is substituted
+    for the captured identity.
+    """
+    if execution_image is None:
+        expected = source['sha256']
+        actual = hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(source['path']))).read_bytes()).hexdigest()
+        if actual != expected:
+            raise ValueError('Captured context executable source changed')
+        return
+    from civ6_host.runtime.execution_images import identity
+    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    selected = identity(execution_image)
+    if selected['reference_core_sha256'] != XP2_CORE_SHA256:
+        raise ValueError('Context capture provenance requires the canonical XP2 execution profile')
+    if source != {'path': _CAPTURED_EXE_PATH, 'sha256': _CAPTURED_EXE_SHA256}:
+        raise ValueError('Pinned context capture executable identity differs')
 
 def verify_loaded_host(host):
     from civ6_host.runtime.script_context_source import verify_notification_host
@@ -23,7 +47,7 @@ def verify_loaded_host(host):
 class NativeContextNotification:
     """Borrow a live script root and own only its notification-service binding."""
 
-    def __init__(self, runtime, native_host, *, project_root):
+    def __init__(self, runtime, native_host, *, project_root, execution_image=None):
         if runtime.closed or runtime.notification_service is not None:
             raise RuntimeError('Notification service requires an unbound live script root')
         capture = _resolve_resource_path(Path(project_root)) / 'work/native-context-notify886/capture886.json'
@@ -31,8 +55,7 @@ class NativeContextNotification:
         if hashlib.sha256(data).hexdigest() != CAPTURE_SHA:
             raise ValueError('Context notification source capture changed')
         source = json.loads(data)['source']
-        if hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(source['path']))).read_bytes()).hexdigest() != source['sha256']:
-            raise ValueError('Installed context notification source binary changed')
+        verify_captured_executable_source(source, execution_image=execution_image)
         verify_loaded_host(runtime.host)
         self.runtime, self.native_host = (runtime, native_host)
         self.receiver = C.addressof(native_host.aux_object)

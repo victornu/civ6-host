@@ -58,6 +58,7 @@ def registry_from_capture(reference, *, process):
     from .native.native_gameplay_source_capture import recheck_selected_sources
     from .native.native_gameplay_script_registry import NativeGameplayScriptRegistry, GameplayScriptEntry
     from .resource_resolution import resolve_path
+    from .script_observer_sources import retained_observer_path
     dependencies = {}
     report = json.loads(_file(reference, dependencies, maximum=4 * 1024 ** 2))
     folder = resolve_path(Path(reference['path'])).resolve(strict=True).parent
@@ -92,7 +93,8 @@ def registry_from_capture(reference, *, process):
     if files != expected_files:
         raise ValueError('Captured source files do not exactly cover the selected records')
     for pin in report.get('path_resolution', {}).get('dependencies', []):
-        _file(pin, dependencies, workspace=False, maximum=4 * 1024 ** 2)
+        physical = retained_observer_path(pin['path'], pin['bytes'], pin['sha256'])
+        _file(dict(pin, path=physical), dependencies, workspace=False, maximum=4 * 1024 ** 2)
     registry = NativeGameplayScriptRegistry((folder,), selected_scripts=selected,
                                             wire_paths=report['selected_paths'])
     return registry, hashes, dependencies

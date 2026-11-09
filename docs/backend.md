@@ -505,3 +505,31 @@ bytes. The static source is revalidated before publication. The native
 three-turn comparison kept all 25 public responses and the recorded
 event order while reducing the measured gameplay window from 78.15 to
 68.63 seconds. This result covers one instrumented worker and capture.
+
+`NetworkBackend(..., command_profile_diagnostic=True)` is an optional diagnostic
+for an explicit XP2 execution image. It profiles the command and response
+of the first `act`/`poll`; close and later requests are not profiled. The current
+XP2 path also captures the actual `load_raw()` call on its owner thread, excluding
+the surrounding job snapshots. Its administrative `native_load_python_profile`
+record is emitted once, after the real episode and continuation exist, with
+`operation="reset"`, `phase="load"` and separate actual/reference image identities.
+The captured profiler is then discarded. A Load failure remains an error even
+if diagnostic cleanup also fails; no successful episode is inferred from it.
+The default is disabled. Administrative `native_command_python_profile` records
+join episode, generation, player and sequence and report at most 80 Python
+functions per phase, with truncation and cumulative/self time. They contain no
+command arguments or game values and are not actor observations. The profiler
+does not replace an already active Python profiler. Its overhead is separate
+from unprofiled measurements.
+
+The Load addition is implemented and covered by focused Python fixtures;
+its first native attribution remains pending a useful actual continuation.
+It establishes no production speedup. Private preparation evidence:
+`evidence/host-current-xp2-load-attribution-preparation.json` in the lab.
+
+Two XP2 source validators now retain a single receipt for complete-body
+structural validation of the identical recursively frozen source object (a pair
+for notifications and their filter). Mutable fixtures and new identities are
+revalidated. File metadata/hash admission, header contracts and notification
+dependencies are still checked; native code/vtable reads remain live.
+This caches static proof work, without caching the game's state or legality.

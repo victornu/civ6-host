@@ -23,9 +23,12 @@ def initialize_xp2_context(core, context, host, *, configuration_path,
     from .xp2_context_profile import verify_source, verify_live
     if candidate_bundle is None:
         raise ValueError('XP2 Init requires its registered captured input owner')
-    profile = profile_for_core(core._name, mode='context')
+    profile = profile_for_core(core._name, mode='context',
+        execution_image=getattr(core, '_civ6_host_execution_image', None))
+    from .native.native_core_context_profiles import require_executable_profile
+    require_executable_profile(profile)
     if (profile.ruleset != 'xp2' or profile.mode != 'context'
-            or profile.core_sha256 != XP2_CORE_SHA256):
+            or profile.source_core_sha256 != XP2_CORE_SHA256):
         raise ValueError('XP2 Init refuses a different engine/context profile')
     validate_loaded_modules(profile, module_paths)
     contract = verify_source()
@@ -38,12 +41,22 @@ def initialize_xp2_context(core, context, host, *, configuration_path,
     inputs['host_callbacks_allowlist'] = [
         'host+' + hex(n) for n in contract['host_slots']
     ] + ['logger+' + hex(n) for n in contract['logger_slots']]
-    return shared.initialize(core, context, host, profile=profile,
-        source=contract['receipt'], input_receipt=inputs, callback_receipt=callbacks,
-        slots=contract['slots'], globals_rvas=contract['globals_rvas'],
-        declarations=contract['declarations'], vtable_bytes=contract['vtable_bytes'],
-        context_validator=validate_loaded_context, virtual_factory=virtual,
-        read=_native_reader, emit=emit, error_type=XP2ContextInitError)
+    try:
+        receipt = shared.initialize(core, context, host, profile=profile,
+            source=contract['receipt'], input_receipt=inputs, callback_receipt=callbacks,
+            slots=contract['slots'], globals_rvas=contract['globals_rvas'],
+            declarations=contract['declarations'], vtable_bytes=contract['vtable_bytes'],
+            context_validator=validate_loaded_context, virtual_factory=virtual,
+            read=_native_reader, emit=emit, error_type=XP2ContextInitError)
+    except XP2ContextInitError as exc:
+        from .xp2_saved_init import stamp_context_init_receipt
+        try:
+            stamp_context_init_receipt(profile, exc.receipt)
+        except ValueError as identity_error:
+            exc.receipt.setdefault('identity_annotation_error', str(identity_error))
+        raise
+    from .xp2_saved_init import stamp_context_init_receipt
+    return stamp_context_init_receipt(profile, receipt)
 
 
 def install_xp2_teardown_callbacks(core, context, host, init_receipt, *,
@@ -51,7 +64,8 @@ def install_xp2_teardown_callbacks(core, context, host, init_receipt, *,
     """Install source-selected registrar cleanup, never invoke Destroy here."""
     import struct
     from .xp2_context_profile import verify_source, verify_live
-    from .xp2_saved_init import validate_init_receipt_binding
+    from .xp2_saved_init import (validate_init_receipt_binding,
+        validate_context_receipt_engine_identity, context_receipt_engine_fields)
     from .native.native_core_context_profiles import (profile_for_core,
         validate_loaded_context, validate_loaded_modules)
     from .native.native_xp1_context_init import _native_reader
@@ -61,17 +75,20 @@ def install_xp2_teardown_callbacks(core, context, host, init_receipt, *,
     if candidate_bundle is None or getattr(host,'_xp2_teardown_binding',None)is not None:
         raise ValueError('XP2 teardown needs a fresh exact captured Init owner')
     _check_host(host)
-    profile=profile_for_core(core._name,mode='context')
-    if profile.ruleset!='xp2' or profile.core_sha256!=XP2_CORE_SHA256:
+    profile=profile_for_core(core._name,mode='context',
+        execution_image=getattr(core,'_civ6_host_execution_image',None))
+    from .native.native_core_context_profiles import require_executable_profile
+    require_executable_profile(profile)
+    if profile.ruleset!='xp2' or profile.source_core_sha256!=XP2_CORE_SHA256:
         raise ValueError('XP2 teardown engine differs')
     validate_loaded_modules(profile,module_paths)
     validate_loaded_context(profile,core._handle,context,_native_reader)
     contract=verify_source()
     verify_live(core._handle,_native_reader,contract)
+    validate_context_receipt_engine_identity(profile, init_receipt)
     if (getattr(host,'context_init_receipt',None)is not init_receipt
             or init_receipt['schema']!='civ6rl.native_xp2_context_init_receipt.v1'
             or init_receipt['status']!='xp2_context_initialized_diagnostic_only'
-            or init_receipt['core_sha256']!=XP2_CORE_SHA256
             or any(init_receipt.get(k)is not True for k in
                    ('init_called','init_returned','initialized_after','host_setter_called'))
             or any(init_receipt.get(k)is not False for k in
@@ -95,7 +112,7 @@ def install_xp2_teardown_callbacks(core, context, host, init_receipt, *,
     host._bind(host.registrar_vtable,8,None,[C.c_void_p,C.c_void_p],host._remove_type)
     host._bind(host.vtable,0x110,C.c_void_p,[C.c_void_p],host._registrar)
     receipt=dict(schema='civ6-host.xp2-context-teardown-installation.v1',installed=True,
-        core_sha256=XP2_CORE_SHA256,source=contract['receipt'],
+        **context_receipt_engine_fields(profile),source=contract['receipt'],
         host_globals_verified=actual,type_names_allowed=list(contract['teardown_names']),
         host_slot='0x110',registrar_remove_slot='0x8',aligned_free_iat_rva=hex(contract['aligned_free_iat_rva']),
         aligned_free_runtime_owner=owner,callback_references_retained=True,

@@ -68,11 +68,14 @@ def verify_live(base,read):
 
 
 def verify_runtime(runtime,core,read):
-    from .native.native_core_context_profiles import profile_for_core,validate_loaded_modules
+    from .native.native_core_context_profiles import (profile_for_core,
+        require_executable_profile, validate_loaded_modules)
     from .native.native_probe import Windows
     from .profile_script_binding import _current_executable
-    selected=profile_for_core(core._name,mode='context')
-    if selected.core_sha256!=XP2_CORE_SHA256:
+    selected=profile_for_core(core._name,mode='context',
+        execution_image=getattr(core,'_civ6_host_execution_image',None))
+    require_executable_profile(selected)
+    if selected.source_core_sha256!=XP2_CORE_SHA256:
         raise ValueError('Mutable map engine differs from its actual file')
     validate_loaded_modules(selected,Windows().modules())
     kernel=C.WinDLL('kernel32',use_last_error=True)
@@ -96,7 +99,17 @@ def verify_runtime(runtime,core,read):
     # wrapper; an arbitrary differently named/rewritten component is refused.
     core_components={k:v for k,v in COMPONENTS.items() if k not in
                      ('script_game_events_full.inc','script_aux_a8.inc')}
-    native=verify_source_build(_current_executable(),required_components=core_components)
+    executable = _current_executable()
+    from . import xp2_bbg_property_table as bbg
+    from .source_build_identity import (xp2_component_requirements, CURRENT_HAVOK_BUILD_PROFILE,
+                                        CURRENT_STRINGS_BUILD_PROFILE)
+    build = verify_source_build(executable, required_components=xp2_component_requirements(executable, {
+        'script_game_event_result_map.inc': core_components['script_game_event_result_map.inc']}))
+    if build['profile'] in (bbg.BUILD_PROFILE, CURRENT_HAVOK_BUILD_PROFILE, CURRENT_STRINGS_BUILD_PROFILE):
+        core_components['script_game_event_dispatch_bbg_parent.inc'] = core_components['script_game_event_dispatch.inc']
+        core_components['script_game_event_dispatch.inc'] = bbg.dispatch_wrapper_sha256(build)
+        core_components['script_aux_b8.inc'] = bbg.property_component_sha256(build)
+    native = verify_source_build(executable, required_components=xp2_component_requirements(executable, core_components))
     if any(native['sources'].get(k)!=COMPONENTS[k] for k in
            ('script_game_events_full.inc','script_aux_a8.inc')):
         from .script_event_state import COMPONENTS as scoped

@@ -38,8 +38,7 @@ class Fixture(existing.Fixture):
         with patch.object(existing.Memory,'base',0x180000000):
             super().__init__();self.memory.base=0x180000000;self.enable();self.activate()
         self.stack=ExitStack();self.regions=[];self.allocations=[];self.machine=[]
-        sys.path.insert(0,str(LAB/'tools'))
-        from extract_phase31_next_export import pefile
+        import pefile
         from civ6_host.runtime.xp1_world_input_profile import verify_source
         self.pe=pefile.PE(verify_source()['image']['path'],fast_load=True)
         self.raw_read=self.memory.read
@@ -55,6 +54,8 @@ class Fixture(existing.Fixture):
         b.captured_bundle=PreparedBundle(REFERENCE,b.inputs,8,Path(verify_source()['image']['path']),{}, {}, {},
             dict(engine=dict(gamecore_sha256=b.load_abi.core_sha256)))
         p.core_sha256=b.load_abi.core_sha256
+        # __new__ fixture: keep the constructor's explicit cache profile.
+        self.deferred.cache_core_sha256=b.load_abi.core_sha256
         b.thread=(threading.get_ident(),1357);b.runtime=NS(thread=lambda:b.thread,read=self.read)
         b.raw_load_result={};b.loaded_readback=dict(width=8,height=8)
         t.owner=b;t.prefix=p;t.sequence=0;t.publication_count=0;t.publishing=False

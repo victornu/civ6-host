@@ -99,19 +99,33 @@ class _Runtime:
     def thread(self):
         return (threading.get_ident(), int(self.kernel.GetCurrentThreadId()))
 
-    def image(self, base, proof):
-        _require_owner_profile(_configuration_abi(proof['images']['core']['sha256']))
+    def image(self, base, proof, *, execution_image=None, actual_core_sha256=None):
+        reference_sha = proof['images']['core']['sha256']
+        expected_path = proof['images']['core']['path']
+        expected_sha = reference_sha
+        if execution_image is not None:
+            from civ6_host.runtime.execution_images import verify as verify_execution_image
+            verified = verify_execution_image(execution_image)
+            if not verified.executable:
+                raise ValueError('Execution image is not admitted for provider access')
+            if verified.reference_core_sha256 != reference_sha:
+                raise ValueError('Execution image reference differs from provider ABI source')
+            expected_path = verified.path
+            expected_sha = verified.image_sha256
+            if actual_core_sha256 != expected_sha:
+                raise ValueError('Execution image actual SHA differs from the selected provider image')
+        _require_owner_profile(_configuration_abi(reference_sha))
         path_buffer = C.create_unicode_buffer(32768)
         length = self.kernel.GetModuleFileNameW(base, path_buffer, len(path_buffer))
         if not length or length >= len(path_buffer):
             raise OSError('Cannot establish actual loaded Core path')
         actual = _resolve_resource_path(Path(path_buffer.value))
-        expected = _resolve_resource_path(Path(proof['images']['core']['path']))
+        expected = _resolve_resource_path(Path(expected_path))
         if not actual.is_absolute() or not expected.is_absolute() or '..' in actual.parts or ('..' in expected.parts):
             raise ValueError('Loaded Core path is not absolute and traversal-free')
         if os.path.normcase(str(actual)) != os.path.normcase(str(expected)):
             raise ValueError('Loaded Core path differs from pinned Base image')
-        if _sha(_resolve_resource_path(actual).read_bytes()) != proof['images']['core']['sha256']:
+        if _sha(_resolve_resource_path(actual).read_bytes()) != expected_sha:
             raise ValueError('Loaded Core file hash differs')
         return str(actual)
 
@@ -148,7 +162,11 @@ class _Session:
         self.busy = self.poisoned = self.restore_attempted = self.restore_sealed = False
         self.streams = []
         self.proof = verify_source(core_sha256=self.abi.core_sha256)
-        self.loaded_path = self.runtime.image(self.base, self.proof)
+        self.execution_image = getattr(core, '_civ6_host_execution_image', None)
+        execution_options = ({'execution_image': self.execution_image,
+            'actual_core_sha256': self.execution_image.image_sha256}
+            if self.execution_image is not None else {})
+        self.loaded_path = self.runtime.image(self.base, self.proof, **execution_options)
         self._validate_owner(False)
         self._live_code()
 
@@ -242,6 +260,11 @@ class _Session:
                 raise RuntimeError('Provider Save changed its object identity/topology/header')
             output = b'' if restoring else stream.output_bytes()
             receipt = {'operation': 'restore' if restoring else 'serialize', 'proof_sha256': self.abi.codec_proof_sha256, 'core_sha256': self.abi.core_sha256, 'native_method_result_observed': False, 'native_return_interpreted': False, 'writer_flags32': 0 if not restoring else None, 'reader_optional_pointer': None, 'bytes': len(data) if restoring else len(output), 'sha256': expected_sha256 if restoring else _sha(output), 'stream_calls': stream.transport.calls, 'identity_checked_before_after': True, 'all_property_values_compared': False, 'eligible_for_training': False}
+            image = getattr(self, 'execution_image', None)
+            if image is not None:
+                receipt.update(execution_image_sha256=image.image_sha256,
+                    reference_core_sha256=self.abi.core_sha256,
+                    execution_profile_id=image.id)
             stream.close()
             return receipt if restoring else (output, receipt)
         except BaseException as exc:

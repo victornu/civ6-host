@@ -79,11 +79,15 @@ class SavedLoadServices(SavedConfigurationReadback,ExplicitSavedOperations):
             self.events=ScriptEventService(self.host,runtime,map_factory=self.map_arguments)
             if core_sha256==XP2_CORE_SHA256:
                 self.events.install_mutable_map_result(self.core,core_sha256=core_sha256,read=read)
+                from .source_build_identity import CURRENT_STRINGS_HOST_REFERENCE
+                if self.events.mutable_map_dispatcher.proof['native_host_sha256'] == CURRENT_STRINGS_HOST_REFERENCE[1]:
+                    self.events.install_string_arguments(self.core,read=read)
                 if bootstrap is None:
                     from .script_context_service import bootstrap_cached_context
                     bootstrap=lambda context_child,name:bootstrap_cached_context(runtime,context_child,name)
             self.contexts=ScriptContextService(self.host,runtime,registry,
-                expected_hashes=script_hashes,bootstrap=bootstrap,read=read)
+                expected_hashes=script_hashes,bootstrap=bootstrap,read=read,
+                execution_image=getattr(self.core,'_civ6_host_execution_image',None))
         except BaseException:
             self.quarantined=True
             raise  # Isolated worker owns termination after possible native effects.
@@ -218,6 +222,8 @@ class SavedLoadServices(SavedConfigurationReadback,ExplicitSavedOperations):
             if self.application_mirror is not None:
                 self.application_mirror.close()
             self.contexts.close()
+            if hasattr(self, 'bbg_property_tables'):
+                self.bbg_property_tables.close()
             self.events.close()
             self.map_arguments.close()
             self.maps.close()
