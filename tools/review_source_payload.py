@@ -20,6 +20,7 @@ _BUILD_FILES = (
     'distributions/runtime/LICENSE-pydt-civ6-save-parser.txt',
     'tools/build_native_host.py', 'tools/review_wheel_payload.py', 'tools/review_source_payload.py',
     'examples/local_session.py',
+    'lua/capture_row_stream.lua',
     'docs/backend.md', 'docs/capture-package.md', 'docs/client.md',
     'docs/native-build.md', 'docs/resource-bundle.md', 'docs/resources.md',
     'docs/runtime-paths.md', 'docs/xp1-services.md', 'docs/xp2-capture-inputs.md',

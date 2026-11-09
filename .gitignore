@@ -22,6 +22,8 @@
 !/tests/**
 !/tools/
 !/tools/**
+!/lua/
+!/lua/capture_row_stream.lua
 !/distributions/
 !/distributions/**
 !/config/
