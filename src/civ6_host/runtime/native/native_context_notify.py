@@ -19,10 +19,10 @@ _CAPTURED_EXE_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's
 _CAPTURED_EXE_SHA256 = 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
 
 def verify_captured_executable_source(source, *, execution_image=None):
-    """Verify the old capture strictly, or retain it as provenance for XP2.
+    """Verify the old capture strictly, or retain it as provenance for a selected expansion.
 
     The pinned JSON captures an older CivilizationVI.exe. Under an explicit
-    current XP2 profile that EXE is provenance only; the loaded native host has
+    current expansion profile that EXE is provenance only; the loaded native host has
     its own build/component verification below. No current EXE is substituted
     for the captured identity.
     """
@@ -33,10 +33,10 @@ def verify_captured_executable_source(source, *, execution_image=None):
             raise ValueError('Captured context executable source changed')
         return
     from civ6_host.runtime.execution_images import identity
-    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
     selected = identity(execution_image)
-    if selected['reference_core_sha256'] != XP2_CORE_SHA256:
-        raise ValueError('Context capture provenance requires the canonical XP2 execution profile')
+    if selected['reference_core_sha256'] not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
+        raise ValueError('Context capture provenance requires a registered expansion execution profile')
     if source != {'path': _CAPTURED_EXE_PATH, 'sha256': _CAPTURED_EXE_SHA256}:
         raise ValueError('Pinned context capture executable identity differs')
 

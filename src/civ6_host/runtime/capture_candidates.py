@@ -94,10 +94,16 @@ def consume_input_handoff(family, reference, *, official_bundle=None, execution_
         return bbg.read_bundle(**({'execution_image': execution_image} if execution_image is not None else {}))
     capture_admission.require_explicit_stock_execution(reference,execution_image)
     if execution_image is not None:
-        from . import xp2_bundle_inputs as xp2
-        if family!='xp2-lan' or not (contract.reference==xp2.REFERENCE
-                                    or contract.reference == bbg.registered_reference()):
-            raise ValueError('The selected execution image requires the exact stock XP2 capture')
+        from .execution_images import _XP1_PROFILE
+        if execution_image is _XP1_PROFILE:
+            expected=dict(path=contract.reference[0],sha256=contract.reference[1])
+            if family!='xp1-lan' or official_bundle not in (contract.reference,expected):
+                raise ValueError('The selected XP1 image requires the exact retained Rise and Fall capture')
+        else:
+            from . import xp2_bundle_inputs as xp2
+            if family!='xp2-lan' or not (contract.reference==xp2.REFERENCE
+                                        or contract.reference == bbg.registered_reference()):
+                raise ValueError('The selected execution image requires the exact stock XP2 capture')
     bundle = capture_admission.try_bundle(contract.reference, input_profile=family,
                                          _candidate_profile=family,
                                          **({'execution_image':execution_image}

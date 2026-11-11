@@ -1,4 +1,4 @@
-"""Private XP2 v37 end-turn effect marker from the retained public UI getter."""
+"""XP2 end-turn effect marker from the retained public UI getter."""
 import hashlib
 from pathlib import Path
 
@@ -24,6 +24,7 @@ def source_dependencies(*, execution_image):
 
 
 def read(saved, player_id, turn):
+    """Return the native hash, preserving the absent marker as uint32 0xffffffff."""
     from .xp1_world_input import _owner
     from .xp1_session_view import _reference
     if (type(player_id) is not int or not 0 <= player_id <= 63
@@ -32,8 +33,9 @@ def read(saved, player_id, turn):
     b, c, p, identity = _owner(saved, active=True)
     _reference(saved, player_id)
     if (b.load_abi.core_sha256 != XP2_CORE_SHA256
-            or getattr(saved, 'world_congress_diagnostic', False) is not True):
-        raise ValueError('Turn-segment marker requires the explicit v37 saved owner')
+            or (getattr(saved, 'world_congress_diagnostic', False) is not True
+                and getattr(saved, 'stock_dedications', False) is not True)):
+        raise ValueError('Turn-segment marker requires a source-qualified XP2 saved owner')
     image = getattr(b.core, '_civ6_host_execution_image', None)
     source_dependencies(execution_image=image)
     proof = _source(SOURCE)
@@ -50,7 +52,7 @@ end
 identity()
 local value=Game.GetCurrentTurnSegment()
 assert(type(value)=='number' and value%1==0 and value>=-2147483648 and
- value<=2147483647 and value~=-1,'native turn segment unavailable')
+ value<=2147483647,'invalid native turn segment')
 identity()
 return string.format('%.0f',value%4294967296)
 ''')
@@ -60,6 +62,6 @@ return string.format('%.0f',value%4294967296)
             or c.sequence != revision or p.runtime is not runtime or p.ui_child is not child):
         raise RuntimeError('Turn-segment owner changed during native read')
     if (type(raw) is not bytes or not 1 <= len(raw) <= 10 or not raw.isdigit()
-            or str(int(raw)).encode('ascii') != raw or not 0 <= int(raw) < 0xffffffff):
+            or str(int(raw)).encode('ascii') != raw or not 0 <= int(raw) <= 0xffffffff):
         raise ValueError('Malformed native turn-segment marker')
     return int(raw)

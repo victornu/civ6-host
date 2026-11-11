@@ -1498,7 +1498,9 @@ def review_lifetime_seconds(closure, report, *, placement_preparation=None, city
                 or closure.get('checkpoint_on_close') is not city_checkpoint
                 or closure.get('network_checkpoint') is not None):
             raise ValueError('Placement preparation lifetime lacks its exact captured session selection')
-    if (type(seconds) is not int or seconds not in ((45,60,120,300,420,600,900) if placement_preparation is not None or closure.get('input_profile')=='xp2-lan' else (45,60,120,300,420))
+    allowed=(45,60,120,300,420,600,900) if placement_preparation is not None else (
+        (45,60,120,300,420,600,900,1800) if closure.get('input_profile')=='xp2-lan' else (45,60,120,300,420))
+    if (type(seconds) is not int or seconds not in allowed
             or type(report.get('timeout_seconds')) is not int or report['timeout_seconds']!=seconds):
         raise ValueError('Session review lifetime differs from its actual pinned supervision')
     return seconds

@@ -264,9 +264,8 @@ def initialize_xp1_context(core, context, host, *, configuration_path, gameplay_
     modules_validator = modules_validator or validate_loaded_modules
     context_validator = context_validator or validate_loaded_context
     virtual_factory = virtual_factory or host_virtual
-    profile = profile_loader(core._name, mode='context')
-    if profile.ruleset != 'xp1' or profile.mode != 'context' or profile.core_sha256 != XP1_CORE_SHA256:
-        raise ValueError('XP1 Init refuses a non-XP1 or non-context GameCore profile')
+    from civ6_host.runtime.xp1_saved_load import select_context
+    profile = select_context(core, candidate_bundle, profile_loader)
     modules_validator(profile, module_paths)
     callback_receipt = _rebind_unapproved_host_callbacks(host)
     if candidate_bundle is None:
@@ -277,5 +276,9 @@ def initialize_xp1_context(core, context, host, *, configuration_path, gameplay_
         input_receipt = validate_private_inputs(host, configuration_path, gameplay_path, private_root, path_reader=path_reader, candidate_bundle=candidate_bundle)
     from civ6_host.runtime.context_initialization import initialize
     boundary = _load_json_pinned(root, *PROOF_PINS['init_boundary'])
-    return initialize(core, context, host, profile=profile, source=source, input_receipt=input_receipt, callback_receipt=callback_receipt, slots=XP1_SLOTS, globals_rvas=XP1_HOST_GLOBALS, declarations=XP1_EVENT_DECLARATIONS, vtable_bytes=bytes.fromhex(boundary['rulesets']['xp1']['context_vtable_capture']['raw_hex']), context_validator=context_validator, virtual_factory=virtual_factory, read=read, emit=emit, error_type=XP1ContextInitError)
+    receipt = initialize(core, context, host, profile=profile, source=source, input_receipt=input_receipt, callback_receipt=callback_receipt, slots=XP1_SLOTS, globals_rvas=XP1_HOST_GLOBALS, declarations=XP1_EVENT_DECLARATIONS, vtable_bytes=bytes.fromhex(boundary['rulesets']['xp1']['context_vtable_capture']['raw_hex']), context_validator=context_validator, virtual_factory=virtual_factory, read=read, emit=emit, error_type=XP1ContextInitError)
+    if getattr(profile, 'execution_image', None) is not None:
+        host._xp1_saved_load_bundle = candidate_bundle
+    return receipt
+
 __all__ = ['XP1ContextInitError', 'verify_source', 'validate_private_inputs', 'initialize_xp1_context', 'PROOF_PINS', 'SOURCE_PINS', 'XP1_HOST_VTABLE_ALLOWLIST', 'XP1_LOGGER_VTABLE_ALLOWLIST', 'XP1_EVENT_DECLARATIONS']

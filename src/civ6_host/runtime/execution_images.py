@@ -1,12 +1,12 @@
 """Explicit static identities for native execution images.
 
-This registry keeps the installed XP2 GameCore distinct from the older image
+This registry keeps an installed GameCore distinct from the older image
 that anchors captured ABIs. It can admit only a statically verified bounded
 native trial; it never claims full-game qualification or runs native code.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import os
@@ -255,8 +255,36 @@ _PROFILE = ExecutionImageProfile(
         'This profile does not qualify a full game, later turns, or a complete gameplay scope.',
     ),
 )
+_XP1_CORE_SHA256 = '63c17d9e417aa780427383cfda41d7ab3ca4e964f37ea4d8de30afdb0e8a56cb'
+_XP1_REFERENCE_SHA256 = '259b90a473a256aff6a7d621a4f3717e46f6921c59b9817475375c88b97e8c83'
+_XP1_CORE_PATH = _GAMECORE_PATH.replace(
+    r'\Expansion2\Binaries\Win64\GameCore_XP2_', r'\Expansion1\Binaries\Win64\GameCore_XP1_')
+_XP1_SOURCE_PROOFS = (*_SOURCE_PROOFS[:2], SourceProofReference(
+    'xp1_retained_lan_code_spans', 'work/trade-common-client/xp1-installed-source-comparison.json',
+    '277edae93a3d533e944cf16ca2bd97d40675c241c901a7985228a0e06e6f4b96', 39262, 39262))
+_XP1_UI_BINDER = '1ec54d12e6c014a8ba9b2f97e68edf7ad2d775e9129a16eaa092db2159affc9f'
+_XP1_PROFILE = replace(
+    _PROFILE,
+    id='xp1-gamecore-current-63c17d9',
+    image_sha256=_XP1_CORE_SHA256,
+    image_size_bytes=11159832,
+    reference_core_sha256=_XP1_REFERENCE_SHA256,
+    path=_XP1_CORE_PATH,
+    correspondence_manifest_path='work/trade-common-client/xp1-installed-context-shared-join.json',
+    correspondence_manifest_sha256='b60b2bcf4d711fc037a2ac0b818c6bf3d4d0acb9b94e3c731474a4a3f08ba88f',
+    correspondence_manifest_spans=39290,
+    matching_correspondence_spans=39290,
+    source_proofs=_XP1_SOURCE_PROOFS,
+    covered_groups=tuple(row.group for row in _XP1_SOURCE_PROOFS),
+    matched_interface_groups=(*_PROFILE.matched_interface_groups, 'xp1_imports_resolved_in_shared_libraries'),
+    matched_build_groups=(*_PROFILE.matched_build_groups, 'xp1_legacy_lua_binder_retained'),
+    limitations=(
+        'Only the captured XP1 code spans and the selected shared-library interfaces are compared.',
+        'Context preflight does not qualify an official capture, a native session, or any gameplay family.',
+    ),
+)
 _REGISTRY: Mapping[str, ExecutionImageProfile] = MappingProxyType(
-    {_PROFILE.id: _PROFILE}
+    {row.id: row for row in (_PROFILE, _XP1_PROFILE)}
 )
 _SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
 _REQUIRED_EXECUTION_GROUPS = (
@@ -292,8 +320,6 @@ def select(profile_id: str, *, core_path: str | os.PathLike[str]) -> ExecutionIm
            _SHA256_RE.fullmatch(row.reference_sha256) is None
            for row in profile.shared_dependencies):
         raise RuntimeError('profile contains an invalid dependency image hash')
-    if profile.path != _GAMECORE_PATH:
-        raise RuntimeError('profile image and reference ABI identities disagree')
     if (profile.correspondence_manifest_spans !=
             profile.matching_correspondence_spans):
         raise RuntimeError('pinned source correspondence summary is internally inconsistent')
@@ -306,6 +332,14 @@ def select(profile_id: str, *, core_path: str | os.PathLike[str]) -> ExecutionIm
     if len(profile.shared_dependencies) != 3:
         raise RuntimeError('execution-image profile has an incomplete dependency identity set')
     return profile
+
+
+def select_pair(actual_sha256: str, reference_sha256: str) -> ExecutionImageProfile:
+    """Select the registered installed/reference pair used by a shared service."""
+    for profile in _REGISTRY.values():
+        if (profile.image_sha256, profile.reference_core_sha256) == (actual_sha256, reference_sha256):
+            return select(profile.id, core_path=profile.path)
+    raise ValueError('unrecognized actual/reference execution-image pair')
 
 
 def known_path(profile_id: str) -> Path:
@@ -434,6 +468,8 @@ def _verify_native_host_build(profile: ExecutionImageProfile):
     }
     if required_components != expected_current_components:
         raise ValueError('current strings component transition changed from the reviewed build')
+    if profile is _XP1_PROFILE:
+        required_components = dict(required_components, **{'script_core_bindings_xp1_legacy.inc': _XP1_UI_BINDER})
     receipt = verify_source_build(executable, required_components=required_components)
     if (receipt.get('profile') != build_pin.profile_id or
             receipt.get('source_manifest_sha256') != build_pin.source_manifest_sha256 or
@@ -539,6 +575,9 @@ def runtime_source_pins(
 def _verify_capture_manifest(profile: ExecutionImageProfile, root: Path) -> None:
     path = _resource_file(root, profile.correspondence_manifest_path)
     manifest = json.loads(path.read_bytes())
+    if profile is _XP1_PROFILE:
+        _verify_xp1_capture_manifest(profile, root, manifest)
+        return
     if (manifest.get('schema') != 'civ6-host.current-image-pinned-capture-comparison.v1' or
             manifest.get('classification') !=
             'static_byte_comparison_only_not_ABI_or_runtime_admission'):
@@ -563,6 +602,57 @@ def _verify_capture_manifest(profile: ExecutionImageProfile, root: Path) -> None
         raise ValueError('pinned Core comparison summary differs from its exact rows')
 
 
+def _verify_xp1_capture_manifest(profile: ExecutionImageProfile, root: Path, manifest: dict) -> None:
+    core = manifest['core']
+    if (manifest['schema'] != 'civ6-host.xp1-installed-context-and-shared-join.static.v1'
+            or manifest['native_calls'] != 0 or Path(core['path']) != Path(profile.path)
+            or core['sha256'] != profile.image_sha256 or core['bytes'] != profile.image_size_bytes
+            or manifest['reference_core_sha256'] != profile.reference_core_sha256
+            or manifest['reference_shared_image_pair'] != {
+                'actual_image_sha256': _PROFILE.image_sha256,
+                'interface_reference_sha256': _PROFILE.reference_core_sha256,
+            }):
+        raise ValueError('XP1 context/shared evidence has the wrong image pair')
+    context = manifest['context']
+    if len(context) != 2:
+        raise ValueError('XP1 factory and constructor sources are required')
+    for row, expected in zip(context, profile.source_proofs[:2]):
+        if (row['group'] != expected.group or row['source']['path'] != expected.path
+                or row['source']['sha256'] != expected.sha256
+                or len(row['spans']) != expected.captured_spans):
+            raise ValueError('XP1 context comparison is incomplete')
+    audit_ref = profile.source_proofs[-1]
+    audit = manifest['retained_code_comparison']
+    if (audit['path'], audit['sha256']) != (audit_ref.path, audit_ref.sha256):
+        raise ValueError('XP1 retained source comparison differs')
+    comparison = json.loads(_resource_file(root, audit_ref.path).read_bytes())
+    if (comparison['installed_core'] != core
+            or comparison['reference_core_sha256'] != profile.reference_core_sha256
+            or comparison['retained_sources']['distinct_spans'] != audit_ref.captured_spans
+            or comparison['retained_sources']['mismatches']):
+        raise ValueError('XP1 retained source ranges differ')
+    interface_ref = profile.correspondence_sources[0]
+    interface = manifest['common_interface_source']
+    if (interface['path'], interface['sha256']) != (interface_ref.path, interface_ref.sha256):
+        raise ValueError('XP1 shared library evidence changed')
+    dependencies = manifest['shared_dependencies']
+    if set(dependencies) != {row.name for row in profile.shared_dependencies}:
+        raise ValueError('XP1 shared library set changed')
+    for dependency, count in zip(profile.shared_dependencies, (1, 28, 48)):
+        row = dependencies[dependency.name]
+        library = row['library']
+        if (Path(library['path']) != Path(dependency.path)
+                or library['sha256'] != dependency.sha256
+                or row['reference_sha256'] != dependency.reference_sha256
+                or len(row['imports']) != count):
+            raise ValueError('XP1 shared library import evidence changed: ' + dependency.name)
+    if (manifest['host']['sha256'] != profile.native_host_build.executable_sha256
+            or manifest['xp1_legacy_binder']['sha256'] != _XP1_UI_BINDER
+            or set(manifest['host_exports']) != {'LAB_HavokHeapCreate', 'LAB_HavokHeapDestroy',
+                'LAB_XP1ScriptCoreBindingsInstall', 'LAB_XP1ScriptCoreUIBindingsInstall'}):
+        raise ValueError('XP1 selected host build evidence changed')
+
+
 def _verify_interface_contract(profile: ExecutionImageProfile, root: Path) -> None:
     from .native.native_shared_dependency_profiles import profile_for_shared_dependencies
 
@@ -571,8 +661,8 @@ def _verify_interface_contract(profile: ExecutionImageProfile, root: Path) -> No
     proof = json.loads(proof_path.read_bytes())
     if (proof.get('schema') != 'civ6-host.shared-dependency-interface-current.v1' or
             proof.get('engine_pair') != {
-                'actual_image_sha256': profile.image_sha256,
-                'interface_reference_sha256': profile.reference_core_sha256,
+                'actual_image_sha256': _PROFILE.image_sha256,
+                'interface_reference_sha256': _PROFILE.reference_core_sha256,
             }):
         raise ValueError('shared dependency interface proof has the wrong schema or image pair')
 
@@ -661,7 +751,10 @@ def verify(
     if type(required_groups) not in (tuple, list) or any(
             type(group) is not str or not group for group in required_groups):
         raise ExecutionImageVerificationError('required_groups must be a sequence of non-empty names')
-    requested = tuple(dict.fromkeys((*_REQUIRED_EXECUTION_GROUPS, *required_groups)))
+    default_groups = (_REQUIRED_EXECUTION_GROUPS if profile is _PROFILE else (
+        *profile.covered_groups, *profile.matched_interface_groups, *profile.matched_build_groups,
+        *profile.missing_groups))
+    requested = tuple(dict.fromkeys((*default_groups, *required_groups)))
     evidence_groups = set((
         *profile.covered_groups, *profile.matched_interface_groups,
         *profile.matched_build_groups,

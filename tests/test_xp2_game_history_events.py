@@ -13,7 +13,7 @@ from test_xp1_turn_a0 import scalar
 from test_xp2_turn_notifications import XP2ComposedNotifications
 
 
-def _install_history_with_turn_units(owner, backend, original):
+def _install_history_with_turn_units(owner, backend, original, *, current=False):
     """Populate the test memory from the retained source, then use real enables."""
     p = source.source()
     memory = owner.read.__self__
@@ -39,18 +39,24 @@ def _install_history_with_turn_units(owner, backend, original):
     # to the exact ABI already carried by the real backend.
     owner.arguments.reader.core_sha256 = backend.load_abi.core_sha256
     original(owner, backend)
-    with patch('civ6_host.runtime.foundation_facade_profiles.verify_xp1_once'), patch(
-            'civ6_host.runtime.xp2_wmd_fallout_visibility.verify_live'):
-        foundation.enable(owner, backend)
+    if current:
+        from civ6_host.runtime.execution_images import _PROFILE
+        for rva, raw in source.descriptor_e4_core_fragments():
+            memory.put(memory.core_base + rva, raw)
+        backend.core._civ6_host_execution_image = _PROFILE
+    else:
+        with patch('civ6_host.runtime.foundation_facade_profiles.verify_xp1_once'), patch(
+                'civ6_host.runtime.xp2_wmd_fallout_visibility.verify_live'):
+            foundation.enable(owner, backend)
     foundation.enable_history_events(owner, backend)
 
 
 class XP2GameHistoryTests(unittest.TestCase):
-    def graph(self):
+    def graph(self, *, current=False):
         original = foundation.enable_turn_units
 
         def enable_both(owner, backend):
-            return _install_history_with_turn_units(owner, backend, original)
+            return _install_history_with_turn_units(owner, backend, original, current=current)
 
         with patch.object(foundation, 'enable_turn_units', enable_both):
             graph = XP2ComposedNotifications().graph()
@@ -168,6 +174,29 @@ class XP2GameHistoryTests(unittest.TestCase):
             actual, proof = events._selected(kind, XP2_CORE_SHA256)
             self.assertEqual(actual, expected)
             self.assertEqual(proof, source.SOURCE[1])
+
+    def test_current_e4_descriptor_uses_actual_writer_layout_and_existing_fifo(self):
+        from civ6_host.runtime.execution_images import _PROFILE
+
+        with patch.object(project, 'pillage_source',
+                          return_value=project.pillage_source(execution_image=_PROFILE)):
+            graph = self.graph(current=True)
+        owner, memory = graph.owner, graph.memory
+        pointer = memory.core_base + 0x123000
+        memory.put(pointer, struct.pack('<HHI', 4, 2, 65536))
+        headers = source.descriptor_e4_source()['native_event']['fields']
+        fields = {int(key, 16): bytes.fromhex(raw) for key, raw in headers.items()}
+        descriptor = fields[0x23739F42]
+        fields[0x23739F42] = descriptor[:8] + struct.pack('<Q', pointer) + descriptor[16:]
+        self.assertEqual(owner.history_event_profile.record_types_by_kind[source.DESCRIPTOR_E4_KIND],
+                         frozenset((0xe4,)))
+        self.assertEqual(owner.dispatch(source.DESCRIPTOR_E4_KIND, fields, 0), 0)
+        record, = graph.event.deferred.pending
+        self.assertEqual(struct.unpack_from('<4I', record), (112, 0xe4, 1, 0))
+        self.assertEqual(struct.unpack_from('<IIIIHHI', record, 80), (1, 0, 0, 1, 4, 2, 65536))
+        self.assertEqual(record[104:], bytes(8))
+        self.assertEqual(graph.event.deferred.drain(), 1)
+        self.assertEqual(graph.calls, [])
 
     def test_xp2_building_pillage_reuses_snapshot_and_empty_receiver(self):
         from contextlib import contextmanager

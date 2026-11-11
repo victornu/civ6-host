@@ -157,9 +157,13 @@ def apply(saved,action,before):
     owner=_BoundAttackOwner(saved,catalogue);count=t.publication_count
     from .native import native_saved_combat as combat
     from .xp1_unit_attack_profile import source_reference
+    from .xp2_unit_attack_source import current_lifecycle_image
     SOURCE=source_reference(catalogue.core_sha256)
+    lifecycle = (dict(live_core=b.core, live_read=b.runtime.read)
+                 if current_lifecycle_image(getattr(b.core, '_civ6_host_execution_image', None)) else {})
     try:
-        observed=combat.apply(owner,p,action,before['turn'],before,player_id=before['player_id'],core_sha256=catalogue.core_sha256)
+        observed=combat.apply(owner,p,action,before['turn'],before,player_id=before['player_id'],
+                              core_sha256=catalogue.core_sha256,**lifecycle)
         _check_catalogue(saved,catalogue)
         receipt,readback=owner.receipt,owner.readback
         if (type(receipt) is not dict or receipt.get('action')!=action
@@ -182,6 +186,22 @@ def apply(saved,action,before):
                 or effect.get('combat_resolution_inferred_from_lifecycle') is not False):
             raise RuntimeError('Attack receipt exceeds its actual native observations')
         t.transport.require_empty_native_queue();b.control(empty=True)
+        if effect.get('observable_native_change') is False:
+            from .xp2_unit_attack_source import (
+                CURRENT_XP2_NO_EFFECT, CURRENT_XP2_LIFECYCLE,
+                CURRENT_XP2_RANGE_ADDED, CURRENT_XP2_RANGE_SUBMITTED,
+            )
+            cycle=effect.get('operation_lifecycle')
+            if type(cycle) is not dict or observed != before:
+                raise RuntimeError('Expansion attack lacks an exact no-effect lifecycle')
+            source = cycle.get('current_xp2_source_sha256')
+            if source == CURRENT_XP2_RANGE_ADDED[1] and cycle.get('status') == 'RANGE_ATTACK_added':
+                return dict(status='submitted', refusal_code=CURRENT_XP2_RANGE_SUBMITTED,
+                            observation=deepcopy(observed), receipt=deepcopy(receipt))
+            if source != CURRENT_XP2_LIFECYCLE[1]:
+                raise RuntimeError('Expansion attack lacks an exact no-effect lifecycle')
+            return dict(status='refused',refusal_code=CURRENT_XP2_NO_EFFECT,
+                        observation=deepcopy(observed),receipt=deepcopy(receipt))
         return dict(status='completed',refusal_code=None,observation=deepcopy(observed),receipt=deepcopy(receipt))
     except BaseException:
         saved._poison()

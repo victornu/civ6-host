@@ -269,6 +269,15 @@ def respond(saved, action, before):
             prefix.actions.deliver_one()
             prefix.deferred_events.drain()
             prefix.view_publisher.publish()
+            # A city-state war can revoke Amani's BBG bonus through the
+            # installed UI-to-gameplay callbacks. Settle that native work
+            # before reading the completed action's public observation.
+            feedback_owner = getattr(continuation, 'trade_feedback', None)
+            if feedback_owner is not None and feedback_owner.events:
+                feedback = continuation.flush_trade_feedback()
+                if feedback:
+                    backend.emit('xp2_bbg_trade_gameplay_delivered', feedback=feedback)
+                receipt['bbg_feedback_flushed'] = True
             after_state = _read_state(prefix, pid, turn, prompt['defending_player'])
             if after_state['at_war'] is not True:
                 raise RuntimeError('Minor war request has no observed native war effect')

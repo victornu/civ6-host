@@ -86,7 +86,8 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
         from .xp2_initial_choice_source import source_dependencies as selected
         return selected(execution_image=execution_image)
     if execution_image is not None:
-        raise ValueError('Selected execution image requires the XP2 status source ABI')
+        from .xp1_session_inputs import current_session_join
+        current_session_join(execution_image)
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown status source engine")
     """Exact private source join; ordinary runtime source files are pinned separately."""
     from civ6_host.runtime.paths import resource_root
@@ -186,7 +187,7 @@ def bind_owner(owner, core, read):
                 or existing.core_sha256 != core_sha):
             raise ValueError('XP1 status source receipt belongs to another lifetime')
         return existing
-    image=getattr(core,'_civ6_host_execution_image',None)
+    image = getattr(core, '_civ6_host_execution_image', None) if core_sha == XP2_CORE_SHA256 else None
     spans = verify_live(core._handle,read,core_sha256=core_sha,
                        **({'execution_image':image} if image is not None else {}))
     result = VerifiedStatusSource(owner,core,core._handle,selected_source[1],core_sha,spans)

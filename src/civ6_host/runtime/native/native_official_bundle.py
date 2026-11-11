@@ -89,6 +89,43 @@ def _manifest(reference):
     require(m.get('schema') == SCHEMA and m.get('status') == 'correlated_capture_unqualified' and (m.get('training_eligible') is False) and (m.get('atomic_snapshot') is False), 'Expected an unmodified correlated capture994 manifest')
     return (reference, m)
 
+def _stock_response_source_archive(manifest, current, verified):
+    """Authenticate the historical writer files shared by two exact stock captures."""
+    from civ6_host.runtime.xp2_bundle_inputs import REFERENCE
+    from civ6_host.runtime.native.native_source_cache import load_pinned_json
+    _, retained = _manifest(REFERENCE)
+    if manifest != retained:
+        from civ6_host.runtime.xp1_saved_load import REFERENCE as xp1_reference
+        _, xp1 = _manifest(xp1_reference)
+        require(manifest == xp1, 'Response transport retained closure differs')
+    proof = load_pinned_json(
+        ROOT / 'evidence/host-xp2-stock-trade-response-provenance-frontier.json',
+        '69fe9974bf99b9be2d0af94f8d8fda59d07576237c5d652a8fa73b98d0626aec',
+    )
+    origin = proof['exact_capture']
+    require((origin['path'], origin['sha256']) == REFERENCE, 'Response archive belongs to another capture')
+    changed = proof['changed_fields']
+    index, key = changed['builder_dependency_index'], changed['writer_source_key']
+    old_builder, old_writer = dict(changed['builder_record']), dict(changed['historical_writer'])
+    archived_builder, archived_writer = map(dict, proof['archived_historical_sources'])
+    require(current['dependencies'][index] == old_builder
+            and current['implementation_sources'][key] == old_writer
+            and verified['dependencies'][index] == dict(archived_builder, path=str(ROOT / archived_builder['path']))
+            and verified['implementation_sources'][key] == dict(changed['current_writer']),
+            'Response transport writer archive identity differs')
+    replacements = {old_builder['path']: archived_builder, old_writer['path']: archived_writer}
+    for recorded in (old_builder, old_writer):
+        archived = replacements[recorded['path']]
+        require(all(archived[k] == recorded[k] for k in ('bytes', 'sha256')),
+                'Archived response source bytes differ from the capture')
+    writer_sources = dict(verified['implementation_sources'], **{key: old_writer})
+    writer_dependencies = list(verified['dependencies'])
+    writer_dependencies[index] = old_builder
+    require(current == dict(verified, dependencies=writer_dependencies, implementation_sources=writer_sources),
+            'Response transport retained closure differs')
+    return replacements
+
+
 def _response_transport(manifest, dependencies):
     """Retain an explicit direct writer's full closure; absent means legacy."""
     continuation_options = {}
@@ -101,13 +138,16 @@ def _response_transport(manifest, dependencies):
     if current.get('predecessor') is not None:
         continuation_options['predecessor'] = current['predecessor']
     verified = capture._response_file_provenance(current['installation'], manifest['preflight']['process'], time.monotonic() + 30, **continuation_options)
-    require(current == verified, 'Response transport retained closure differs')
+    archived = {} if current == verified else _stock_response_source_archive(manifest, current, verified)
     require(manifest.get('bridge_session') == current['prepared']['session_id'], 'Response transport session differs from capture')
     for side in ('before', 'after'):
         observation = json.loads(_file(manifest['artifacts']['observation-' + side + '.json'], dependencies, maximum=16 * 1024 ** 2))
         require(observation.get('player_id') == current['player_id'] and observation.get('turn') == current['turn'], 'Response transport belongs to another player/turn boundary')
     for item in current['dependencies'] + list(current['implementation_sources'].values()):
-        _file(item, dependencies, workspace=False, maximum=4 * 1024 ** 2)
+        if item['path'] in archived:
+            _file(archived[item['path']], dependencies, maximum=4 * 1024 ** 2)
+        else:
+            _file(item, dependencies, workspace=False, maximum=4 * 1024 ** 2)
     if current.get('predecessor') is not None:
         for item in current['predecessor_dependencies']:
             _file(item, dependencies, workspace=False, maximum=64 * 1024 * 1024)

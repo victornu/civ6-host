@@ -77,10 +77,13 @@ def xp2_saved_load_source_dependencies(*,postload160=False,observe_player=False,
     if observe_player:
         from civ6_host.runtime.xp1_ui_binding import source_dependencies as ui_dependencies
         for path,expected in ui_dependencies(core_sha256=XP2_CORE_SHA256).items():add(path,expected)
-        from civ6_host.runtime.source_build_identity import verify_source_build, xp2_component_requirements
+        from civ6_host.runtime.source_build_identity import (
+            verify_source_build, xp2_component_requirements, CURRENT_UNSIGNED_LOG_HOST_REFERENCE)
         from civ6_host.runtime.xp2_ui_binding_source import UI_COMPONENT_SHA
-        host = (bbg.selected_ui_host(execution_image)
-                if bbg_capture or stock_current else XP2_UI_HOST)
+        if stock_current:
+            host = CURRENT_UNSIGNED_LOG_HOST_REFERENCE
+        else:
+            host = bbg.selected_ui_host(execution_image) if bbg_capture else XP2_UI_HOST
         executable=resource_root()/host[0]
         if file_sha256(executable)!=host[1]:raise ValueError('XP2 UI host changed')
         build=verify_source_build(executable,required_components=xp2_component_requirements(executable, {

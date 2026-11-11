@@ -16,7 +16,8 @@ def enable(owner,backend):
         raise ValueError('Improvement/route callbacks require the original idle prepared saved owner')
     from .improvement_change_profile import bind_owner,event_profile
     from .native.native_deferred_empty_profile import validate_empty_profile_record
-    execution_image=getattr(backend.core,'_civ6_host_execution_image',None)
+    execution_image = (getattr(backend.core, '_civ6_host_execution_image', None)
+                       if backend.load_abi.core_sha256 == XP2_CORE_SHA256 else None)
     bind_owner(backend,backend.core,owner.read,execution_image=execution_image)
     profile=event_profile(core_sha256=backend.load_abi.core_sha256,execution_image=execution_image)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):

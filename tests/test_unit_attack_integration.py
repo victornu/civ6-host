@@ -1,5 +1,7 @@
 """Shared attack readback/reviewer and public exploration fixtures; no engine."""
 from copy import deepcopy
+from hashlib import sha256
+from struct import pack
 from unittest.mock import patch
 import unittest
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
@@ -47,6 +49,51 @@ def fixture():
 
 
 class AttackIntegration(unittest.TestCase):
+    def test_current_xp2_no_effect_requires_a_complete_cycle_and_matching_live_code(self):
+        from civ6_host.runtime import xp2_unit_attack_source as source
+        from civ6_host.runtime.native import native_event_15c35863 as added
+        from civ6_host.runtime.native import native_event_383669f1 as cleared
+        from civ6_host.runtime.native import native_event_a60328c5 as deactivated
+        from civ6_host.runtime.native.native_operation_lifecycle import DeliveryWindow
+
+        player, unit, operation, index = 0, 17, 0x580f2f68, 19
+        descriptor = pack('<HHI', player, 1, unit)
+        first = added.EventFields(0, index, 1, descriptor)
+        records = (added.encode_queue_record(1, added.encode_fields(first),
+                       blob_contents=descriptor, padding_policy='headless-zero-initialization'), *(
+            codec.encode_record(sequence, deactivated.EventFields(0, value, flag, player, unit),
+                normalizer_transform_present=False, per_thread_hook_present=False,
+                writer_metadata_callback_present=False, padding_policy='headless-zero-uninitialized-stack')
+            for codec, sequence, value, flag in ((deactivated, 2, operation, 1), (cleared, 3, 0, 0))))
+        archive = pack('<IHHII8x', 0x8c0f3f36, player, 1, unit, index)
+        window = DeliveryWindow(archive, records, 0, 3)
+        image = SimpleNamespace(image_sha256=source.CURRENT_XP2_IMAGE_SHA)
+        core = SimpleNamespace(_handle=0x180000000, _civ6_host_execution_image=image)
+        native_body = b'fixture'
+        spans = {name: dict(rva=rva, bytes=len(native_body), sha256=sha256(native_body).hexdigest())
+                 for rva, name in enumerate(('archive_type', 'added', 'deactivated', 'cleared', 'request_operation'))}
+        proof = dict(schema='civ6-host.xp2-attack-no-effect-boundary.v1',
+                     image=dict(image_sha256=image.image_sha256), body_spans=spans,
+                     command_contract=dict(message_type=0x8c0f3f36, operation_hash=operation, lifecycle_kinds=(67, 70, 71)))
+        action = dict(unit_id=unit, operation='MOVE_TO')
+        queue = dict(unit_present=True, plot_id=None)
+        options = dict(core_sha256=source.XP2_CORE_SHA256, state_unchanged=True,
+                       live_core=core, live_read=lambda address, size: native_body)
+        with (patch.object(source, 'current_lifecycle_image', return_value=True),
+              patch.object(source, '_source', return_value=proof)):
+            cycle = source.attack_cycle(window, action, player, queue, queue, **options)
+            self.assertEqual(cycle['current_xp2_source_sha256'], source.CURRENT_XP2_LIFECYCLE[1])
+            self.assertIsNone(cycle['operation_success'])
+            self.assertFalse(cycle['combat_resolution_inferred'])
+            incomplete = DeliveryWindow(archive, records[:2], 0, 2)
+            self.assertIsNone(source.attack_cycle(incomplete, action, player, queue, queue, **options))
+            with self.assertRaisesRegex(ValueError, 'Live XP2 operation lifecycle body changed'):
+                source.attack_cycle(window, action, player, queue, queue,
+                                    **dict(options, live_read=lambda address, size: bytes(size)))
+            with self.assertRaisesRegex(RuntimeError, 'lifecycle-only no-change readback is unqualified'):
+                source.attack_cycle(window, action, player, queue, queue,
+                                    **dict(options, state_unchanged=False))
+
     def test_preparation_uses_native_deadline_instead_of_parent_load_duration(self):
         backend=SimpleNamespace(_session=SimpleNamespace(lifetime_seconds=300,started=200.0))
         with patch('unit_attack_preparation.time.perf_counter',return_value=330.0):

@@ -9,6 +9,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
+import pefile
+
 HERE=Path(__file__).resolve()
 STAGED=HERE.parents[2].name=='congress-achievement-staging'
 if STAGED:
@@ -49,6 +51,21 @@ def memory():
         raw=((legacy.BASE+int(row['target_rva'],16)).to_bytes(8,'little')
              if 'target_rva' in row else bytes.fromhex(row['raw_hex']))
         result.update((at+i,b) for i,b in enumerate(raw))
+    raf35 = source.raf35_source(image())
+    pe = pefile.PE(str(image().path), fast_load=True)
+    try:
+        capture = source.city_capture_listener_source(image())
+        for row in (*raf35['spans'].values(), *capture['spans'].values()):
+            rva = int(row['rva'], 16)
+            result.update((legacy.BASE+rva+i,b) for i,b in enumerate(pe.get_data(rva,row['bytes'])))
+        rva = int(raf35['literal']['rva'], 16)
+        literal = raf35['literal']['text'].encode('ascii') + b'\0'
+        result.update((legacy.BASE+rva+i,b) for i,b in enumerate(literal))
+    finally:
+        pe.close()
+    rva = int(raf35['listener_vtable_slot']['rva'], 16)
+    pointer = (legacy.BASE+int(raf35['listener_vtable_slot']['target_rva'], 16)).to_bytes(8,'little')
+    result.update((legacy.BASE+rva+i,b) for i,b in enumerate(pointer))
     return result
 
 
@@ -99,6 +116,38 @@ class CongressAchievementServiceTests(unittest.TestCase):
                 data[legacy.BASE+rva]^=1
         with self.assertRaises(ValueError):
             source.verify_live(legacy.BASE,read,host_pointer=legacy.HOST+8,execution_image=image())
+
+    def test_raf35_admits_only_exact_current_chain_and_rejects_changed_live_listener(self):
+        stack = [dict(module=source.CORE_MODULE, rva=rva) for rva in source.RAF35_PREFIX]
+        self.assertEqual(source.select_contract(stack, execution_image=image()), source.RAF35_SOURCE[1])
+        for rejected, profile in ((stack[:-1], image()), (stack, None)):
+            with self.assertRaisesRegex(ValueError, 'Unproved'):
+                source.select_contract(rejected, execution_image=profile)
+        data = memory()
+        read = legacy.reader_for(data)
+        receipt = source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=image())
+        self.assertEqual(receipt['raf35_source_sha256'], source.RAF35_SOURCE[1])
+        data[legacy.BASE + 0x17fd22] ^= 1
+        with self.assertRaisesRegex(ValueError, 'RAF35 achievement live source'):
+            source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=image())
+
+    def test_city_capture_platform_listener_uses_its_exact_null_route(self):
+        frames = [dict(module=source.CORE_MODULE, rva=rva)
+                  for rva in source.CITY_CAPTURE_LISTENER_PREFIX]
+        self.assertEqual(source.select_contract(frames, execution_image=image()),
+                         source.CITY_CAPTURE_LISTENER_SOURCE[1])
+        with self.assertRaisesRegex(ValueError, 'Unproved'):
+            source.select_contract(frames[:-1], execution_image=image())
+        with self.assertRaisesRegex(ValueError, 'Unproved'):
+            source.select_contract(frames)
+        data = memory()
+        read = legacy.reader_for(data)
+        receipt = source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=image())
+        self.assertEqual(receipt['city_capture_listener_source_sha256'],
+                         source.CITY_CAPTURE_LISTENER_SOURCE[1])
+        data[legacy.BASE + 0x144325] ^= 1
+        with self.assertRaisesRegex(ValueError, 'city capture achievement live source'):
+            source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=image())
 
     def test_existing_owner_fifo_calls_only_null_sink_and_preserves_queue_delivery(self):
         f=self.fixture();b=f.backend

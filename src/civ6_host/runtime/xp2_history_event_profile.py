@@ -61,6 +61,10 @@ DESCRIPTOR_EVENTS = MappingProxyType({
                              TURN26_DESCRIPTOR_SOURCES,
                              ('xp2:259bf1', 'xp2:259713', 'xp2:2de6fe')),
 })
+DESCRIPTOR_E4_KIND = 0xfcfe6900
+DESCRIPTOR_E4_SPEC = (0xe4, 0, 0x147e30, 0x13b5b0, 0xd27a0, 0xdad30)
+DESCRIPTOR_E4_SOURCE = ('evidence/host-xp2-city-assault-e4-source.json',
+                        '18bfad8079007d3b0b314dd00cadc8cb35e0684644566fd186ced164c9b95b98')
 EXE_SHA256 = 'e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
 EMITTER_RVA = 0x5fc5a0
 SCORE_ALTERNATE_EMITTER_RVA = 0x5fc4f0
@@ -346,7 +350,57 @@ def descriptor_sources(kind):
     return producer, receiver
 
 
+@lru_cache(maxsize=1)
+def descriptor_e4_source():
+    from .execution_images import _PROFILE
+    from .native.native_host_event_registry import EXE_EVENT_CALLBACKS
+
+    proof = _source(DESCRIPTOR_E4_SOURCE)
+    core, exe = (proof['spans'][name] for name in ('core', 'exe'))
+    record, flag, callback, writer, setup, handler = DESCRIPTOR_E4_SPEC
+    registration = {int(row['rva'], 16): row for row in _rows(exe['registry'])}
+    receiver = proof['receiver']
+    if (proof['schema'] != 'civ6-host.xp2-city-assault-e4-source.v1'
+            or proof['core']['sha256'] != _PROFILE.image_sha256
+            or EXE_EVENT_CALLBACKS.get(DESCRIPTOR_E4_KIND) != 0x148740
+            or proof['native_event']['dispatch_kind'] != hex(DESCRIPTOR_E4_KIND)
+            or registration[0x1502aa]['bytes'] != 'c745100069fefc'
+            or registration[0x1502bf]['text'] != 'call 0x14013e350'
+            or registration[0x1502c4]['rip_target_rva'] != callback
+            or registration[0x1502d2]['bytes'] != '488908'
+            or proof['writer'] != dict(record_type=record, record_size=112, flag=flag,
+                value_offsets=(88, 92), descriptor_offset=96, undefined_ranges=((84, 88),),
+                zero_initialized_tail=((104, 112),))
+            or receiver['row_rva'] - receiver['table_rva'] != record * 48
+            or (receiver['setup_rva'], receiver['handler_rva']) != (setup, handler)
+            or receiver['empty'] != dict(pre_hook=None, post_hook=None, subscriber_count=0, flags_mask3=0)
+            or receiver['metadata_and_producer_observer_absent'] is not True
+            or receiver['lock_release_import'] != dict(module='KERNEL32.dll', symbol='LeaveCriticalSection')):
+        raise ValueError('XP2 current descriptor record 0xe4 source changed')
+    for span in (*core.values(), *exe.values()):
+        _check_body(span)
+    callback_text = {row['text'] for row in _rows(exe['callback'])}
+    writer_text = {row['text'] for row in _rows(exe['writer'])}
+    if (not {f'call {0x140000000 + writer:#x}', 'mov dword ptr [rsp + 0x28], eax',
+             'mov dword ptr [rsp + 0x2c], eax', 'mov word ptr [rsp + 0x30], ax',
+             'mov word ptr [rsp + 0x32], ax', 'mov dword ptr [rsp + 0x34], eax'} <= callback_text
+            or not {'mov dword ptr [rbx], 0x70', 'mov dword ptr [rbx + 4], 0xe4',
+                    'lea rax, [rbx + 0x50]'} <= writer_text):
+        raise ValueError('XP2 current descriptor 0xe4 payload differs')
+    return proof
+
+
+def descriptor_e4_core_fragments():
+    for body in descriptor_e4_source()['spans']['core'].values():
+        yield int(body['fragments'][0]['start_rva'], 16), _check_body(body)
+
+
 def descriptor_receiver_row(record):
+    if record == DESCRIPTOR_E4_SPEC[0]:
+        proof = descriptor_e4_source()
+        return dict(event_name='Unknown', handler_va=hex(0x140000000 + DESCRIPTOR_E4_SPEC[-1]),
+                    record_sizes={112}, source_sha256=DESCRIPTOR_E4_SOURCE[1],
+                    handler_body_sha256=proof['spans']['exe']['handler']['sha256'])
     kind, = (kind for kind, (spec, _, _) in DESCRIPTOR_EVENTS.items() if spec[0] == record)
     spec, refs, _ = DESCRIPTOR_EVENTS[kind]
     _, receiver = descriptor_sources(kind)
@@ -443,8 +497,7 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256, execution_image=None):
             return {}
         raise ValueError('Unknown history event source engine')
     from .a0_family_source import _path, verify_pinned_files
-    from .paths import resource_root
-    from .resource_resolution import resolve_path
+    from .execution_images import _PROFILE
     p = source()
     property_source()
     turn21_source()
@@ -463,6 +516,11 @@ def source_dependencies(*, core_sha256=XP2_CORE_SHA256, execution_image=None):
     refs.append(dict(path=normalizer, sha256=primary['references'][normalizer.replace('/', '\\')]))
     refs.extend((p['extractor'], p['capture_helper']))
     pins = {}
+    if execution_image is _PROFILE:
+        from pathlib import Path
+        proof = descriptor_e4_source()
+        refs.append(dict(zip(('path', 'sha256'), DESCRIPTOR_E4_SOURCE)))
+        pins[str(Path(proof['exe']['path']).resolve())] = proof['exe']['sha256']
     for ref in refs:
         path = str(_path(ref['path']).resolve())
         if path in pins and pins[path] != ref['sha256']:
@@ -491,6 +549,7 @@ def event_profile(*, core_sha256, execution_image=None):
     p = source()
     source_dependencies(core_sha256=core_sha256,execution_image=execution_image)
     from .a0_family_source import A0FamilyProfile
+    from .execution_images import _PROFILE
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     from . import game_history_event_profile as history
     from . import game_era_score_event_profile as score
@@ -517,6 +576,11 @@ def event_profile(*, core_sha256, execution_image=None):
     for kind, (spec, _, _) in DESCRIPTOR_EVENTS.items():
         record = spec[0]
         mapping[kind] = frozenset((record,))
+        sizes[record] = 112
+        common_rows[record] = descriptor_receiver_row(record)
+    if execution_image is _PROFILE:
+        record = DESCRIPTOR_E4_SPEC[0]
+        mapping[DESCRIPTOR_E4_KIND] = frozenset((record,))
         sizes[record] = 112
         common_rows[record] = descriptor_receiver_row(record)
     for record, size in sizes.items():
@@ -564,4 +628,9 @@ def bind_owner(backend, core, read):
     for rva, raw in property_core_fragments():
         if read(core._handle + rva, len(raw)) != raw:
             raise ValueError('XP2 property notification producer live bytes changed')
+    from .execution_images import _PROFILE
+    if getattr(core, '_civ6_host_execution_image', None) is _PROFILE:
+        for rva, raw in descriptor_e4_core_fragments():
+            if read(core._handle + rva, len(raw)) != raw:
+                raise ValueError('XP2 descriptor 0xe4 producer live bytes changed')
     return SOURCE[1]

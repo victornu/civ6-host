@@ -66,18 +66,31 @@ if core_sha256 != {DEFAULT}:
     selected_source(core_sha256)
 ''').body
         if name==MODULES[1] and target=='effect':
+            for argument in ('live_core','live_read'):
+                fn.args.kwonlyargs.append(ast.arg(arg=argument))
+                fn.args.kw_defaults.append(ast.Constant(None))
             calls=[n for n in ast.walk(fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
                    and n.func.id=='completed_cycle']
             if len(calls)!=1:raise ValueError('Attack lifecycle fallback seam changed')
             seam=next(n for n in ast.walk(fn) if isinstance(n,ast.If) and calls[0] in list(ast.walk(n)))
             if ast.unparse(seam.test)!='not changed and delivery_window is not None':
                 raise ValueError('Attack lifecycle fallback guard changed')
-            seam.body[:0]=ast.parse(f'''
-if core_sha256 != {DEFAULT}:
-    raise RuntimeError('Expansion attack lifecycle-only no-change readback is unqualified')
+            seam.body[:]=ast.parse('''
+from civ6_host.runtime.xp2_unit_attack_source import attack_cycle
+lifecycle = attack_cycle(delivery_window, selected, pid, queued_before, queued_after,
+    core_sha256=core_sha256, state_unchanged=before == after and units_before == units_after and cities_before == cities_after,
+    live_core=live_core, live_read=live_read)
 ''').body
         if name==MODULES[1] and target=='apply':
+            for argument in ('live_core','live_read'):
+                fn.args.kwonlyargs.append(ast.arg(arg=argument))
+                fn.args.kw_defaults.append(ast.Constant(None))
             fn.body[index:index]=ast.parse('from civ6_host.runtime.xp1_unit_attack_profile import selected_proof, selected_queued_proof').body
+            calls=[n for n in ast.walk(fn) if isinstance(n,ast.Call) and ast.unparse(n.func)=='effect']
+            if len(calls)!=1:raise ValueError('Attack effect call seam changed')
+            calls[0].keywords.extend(ast.parse(
+                "f(live_core=live_core, live_read=live_read)"
+            ).body[0].value.keywords)
             found=[]
             for keyword in (n for n in ast.walk(fn) if isinstance(n,ast.keyword)):
                 expected={'queued_source_sha256':'QUEUED_SOURCE_SHA','source_proof_sha256':'native._PROOF_SHA256',

@@ -10,6 +10,8 @@ from time import perf_counter
 from .callback_timing import measure
 from .configuration_profiles import BASE_CORE_SHA256, XP2_CORE_SHA256
 
+_NO_CURRENT_SEGMENT = 0xffffffff
+
 
 class BaseTurnBoundary:
     """Owner-specific checks around the one shared native turn algorithm."""
@@ -52,7 +54,10 @@ class BaseTurnBoundary:
     def turn_segment(self, owner, player_id, turn):
         return None
 
-    def unchanged_request(self, owner, action, before, after):
+    def reactivation_owner(self, owner):
+        return None
+
+    def unchanged_request(self, owner, action, before, after, *, reactivated=False):
         raise RuntimeError('Native turn request was delivered but its effect is unresolved')
 
 
@@ -168,6 +173,8 @@ def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
     if refusal is not None:
         return dict(status='refused',reason=refusal,requested_action=action)
     before_segment = boundary.turn_segment(owner, player_id, before['turn'])
+    controller = (None if action['kind']=='unready_turn' else boundary.reactivation_owner(owner))
+    reactivation_count = None if controller is None else controller.reactivation_count
     if action['kind'] == 'unready_turn':
         emitted = p.actions.request_unready_turn(player_id,
             player_ids=owner.network_reference['major_player_ids'])
@@ -188,15 +195,25 @@ def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
     after_segment = boundary.turn_segment(owner, player_id, after['turn'])
     if (before_segment is None) != (after_segment is None):
         raise RuntimeError('Turn-segment observation scope changed during request')
-    segment_changed = before_segment is not None and before_segment != after_segment
+    # The XP2 getter returns -1 outside a named segment. Its presence or
+    # disappearance alone does not prove that this command changed readiness.
+    segment_changed = (before_segment not in (None, _NO_CURRENT_SEGMENT)
+                       and after_segment not in (None, _NO_CURRENT_SEGMENT)
+                       and before_segment != after_segment)
     unchanged = same_readiness(before, after) and not segment_changed
-    receipt = (boundary.unchanged_request(owner, action, before, after) if unchanged
-               else dict(status='completed', reason=('endturn_segment_changed' if segment_changed else None),
-                         requested_action=action))
-    boundary.retain(owner)
-    boundary.control(owner)
     segment_trace = ({} if before_segment is None else dict(before_turn_segment=before_segment,
         after_turn_segment=after_segment, turn_segment_changed=segment_changed))
+    if unchanged and before_segment is not None:
+        owner.emit('official_lan_turn_request_readback_unchanged', player_id=player_id,
+            action=action, before=before, after=after, **segment_trace)
+    if unchanged:
+        reactivated = controller is not None and controller.reactivated_since(reactivation_count,player_id)
+        receipt = boundary.unchanged_request(owner,action,before,after,reactivated=reactivated)
+    else:
+        receipt = dict(status='completed', reason=('endturn_segment_changed' if segment_changed else None),
+                       requested_action=action)
+    boundary.retain(owner)
+    boundary.control(owner)
     owner.emit('official_lan_turn_request_submitted' if unchanged else 'official_lan_turn_request_effect', player_id=player_id,
         action=action, before=before, after=after,
         network_ack_inferred=False, turn_advanced=after['turn'] > before['turn'],

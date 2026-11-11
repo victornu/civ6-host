@@ -26,10 +26,20 @@ def open_official_backend(closure, emit, win):
     candidate = closure.get('input_profile') in ('xp1-lan', 'xp2-lan')
     execution_image = None
     if 'execution_image' in closure:
-        if closure.get('input_profile') != 'xp2-lan':
-            raise ValueError('Execution image compatibility requires the explicit XP2 owner')
-        from civ6_host.runtime.execution_images import from_identity
+        from civ6_host.runtime.execution_images import _XP1_PROFILE, from_identity
         execution_image = from_identity(closure['execution_image'])
+        expected_family = 'xp1-lan' if execution_image is _XP1_PROFILE else 'xp2-lan'
+        if closure.get('input_profile') != expected_family:
+            raise ValueError('Execution image compatibility requires its exact expansion owner')
+        if execution_image is _XP1_PROFILE:
+            from civ6_host.runtime.network_protocol import CLOSURE_SCHEMA
+            private = closure.get('schema') == 'civ6-host.xp1-saved-load-candidate.v1'
+            network = closure.get('schema') == CLOSURE_SCHEMA
+            if ((not private and not network)
+                    or closure.get('unit_commands_candidate', False) is not network
+                    or private and (closure.get('checkpoint_on_close', False) is not False
+                                    or closure.get('network_checkpoint') is not None)):
+                raise ValueError('Current XP1 requires a bounded private Load or LAN session')
     if candidate:
         from civ6_host.runtime.captured_saved_load import select_load_closure
         candidate_contract = select_load_closure(closure)

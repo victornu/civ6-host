@@ -50,14 +50,20 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
         base_verify(source_path)
         return BASE_SOURCE[1]
     from .xp2_bbg_inputs import UI_HOSTS
-    bbg_host = next((host for host in UI_HOSTS if host[1] == host_sha256), None)
-    if core_sha256 == XP2_CORE_SHA256 and (host_sha256 == XP2_HOST or bbg_host is not None):
+    from .source_build_identity import CURRENT_UNSIGNED_LOG_HOST_REFERENCE
+    ui_hosts = (*UI_HOSTS, CURRENT_UNSIGNED_LOG_HOST_REFERENCE)
+    selected_host = next((host for host in ui_hosts if host[1] == host_sha256), None)
+    if core_sha256 == XP2_CORE_SHA256 and (host_sha256 == XP2_HOST or selected_host is not None):
         verify_xp2()
-        if bbg_host is not None:
-            _verify_bbg_ui_host(bbg_host)
+        if selected_host is not None:
+            _verify_xp2_ui_host(selected_host)
         selected = XP2_SOURCE
-    elif (core_sha256,host_sha256)==(XP1_CORE_SHA256,XP1_HOST):
-        verify_xp1();selected=XP1_SOURCE
+    elif core_sha256 == XP1_CORE_SHA256:
+        if host_sha256 == XP1_HOST:
+            verify_xp1()
+        else:
+            _verify_installed_xp1_host(host_sha256)
+        selected = XP1_SOURCE
     else:
         raise ValueError('No qualified stdout source for this exact Core/host pair')
     if source_path is not None:
@@ -68,8 +74,23 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
     return selected[1]
 
 
+def _verify_installed_xp1_host(host_sha256):
+    from .execution_images import _XP1_PROFILE, _verify_native_host_build
+    from .xp1_session_inputs import current_session_join
+    if host_sha256 != _XP1_PROFILE.native_host_build.executable_sha256:
+        raise ValueError('No qualified stdout source for this exact Core/host pair')
+    source = verify_xp1()
+    row = current_session_join(_XP1_PROFILE)['stdout']
+    if (tuple(row['source']) != XP1_SOURCE or row['host_sha256'] != host_sha256
+            or row['producer_instruction_spans'] != source['verification']['instructions_rechecked']
+            or row['literal_matches'] is not True or row['iat_imports_matched'] != len(source['imports'])
+            or row['wait_source_matches'] is not True or row['wait_source_sha256'] != _WAIT_SOURCE):
+        raise ValueError('Installed XP1 stdout grammar differs from the reviewed source')
+    _verify_native_host_build(_XP1_PROFILE)
+
+
 @lru_cache(maxsize=3)
-def _verify_bbg_ui_host(host):
+def _verify_xp2_ui_host(host):
     from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA, xp2_component_requirements
     executable = resolve_path(resource_root() / host[0])
     verify_source_build(executable, required_components=xp2_component_requirements(

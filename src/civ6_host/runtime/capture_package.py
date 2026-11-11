@@ -687,6 +687,33 @@ def _check_registered_current_engine(origin, candidate, engine, content_profile,
         raise CapturePackageError("selected current BBG engine bytes differ from the registered image")
 
 
+def _check_xp1_current_engine(reference, origin, candidate, engine, content_profile,
+                              engine_path, execution_image):
+    """Keep the XP1 capture identity pinned while selecting the installed DLL."""
+    from .execution_images import _XP1_PROFILE, verify
+    from .paths import resource_root
+    from .xp1_prepared_reader_transition import PACKAGE_RELATIVE, PACKAGE_SHA256
+    from .xp1_saved_load import REFERENCE
+
+    expected_package = (resource_root() / PACKAGE_RELATIVE).resolve(strict=True)
+    if (execution_image is not _XP1_PROFILE or candidate.family != "xp1-lan"
+            or candidate.reference != REFERENCE
+            or origin != {"path": REFERENCE[0], "sha256": REFERENCE[1]}
+            or Path(reference["path"]).resolve(strict=True) != expected_package
+            or reference["sha256"] != PACKAGE_SHA256):
+        raise CapturePackageError("current XP1 image requires the exact retained Rise and Fall package")
+    if (engine_path != Path(execution_image.path)
+            or engine["sha256"] != execution_image.reference_core_sha256
+            or content_profile["engine"].get("gamecore_sha256") != execution_image.reference_core_sha256):
+        raise CapturePackageError("XP1 capture engine provenance differs from the selected image")
+    try:
+        verify(execution_image)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        raise CapturePackageError("selected current XP1 image failed its pinned verification") from exc
+    if _hash_file(engine_path)[0] != execution_image.image_sha256:
+        raise CapturePackageError("selected current XP1 engine bytes differ from the registered image")
+
+
 def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None,
                  execution_image=None) -> tuple[dict, Path, dict[str, Path]]:
     """Verify the package manifest, every local file and its external engine."""
@@ -791,6 +818,9 @@ def read_package(reference, *, _xp1_candidate=False, _candidate_profile=None,
     elif execution_image is None:
         if _hash_file(engine_path)[0] != engine_sha:
             raise CapturePackageError("external engine changed since package export")
+    elif candidate is not None and candidate.family == "xp1-lan":
+        _check_xp1_current_engine(reference, origin, candidate, engine,
+                                  manifest["content_profile"], engine_path, execution_image)
     else:
         _check_stock_current_engine(reference, origin, candidate, engine,
                                     manifest["content_profile"], engine_path,

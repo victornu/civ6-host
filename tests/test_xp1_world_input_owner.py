@@ -61,6 +61,8 @@ class Fixture(existing.Fixture):
         t.owner=b;t.prefix=p;t.sequence=0;t.publication_count=0;t.publishing=False
         t.observation=dict(player_id=0,turn=8,width=8,height=8,units=[dict(id=17,x=0,y=0)])
         self.observation=deepcopy(t.observation);self.goal=None;self.route='request'
+        self.move_on_drain = True
+        self.goal_on_drain = 10
         for obj in (t.view,t.publication,t.lease,t.lease.attempt):obj.owner=b
         t.lease.prefix=p;t.lease.inputs=b.inputs
         self.host._saved_load_services=p;self.owner._foundation_backend=b
@@ -208,7 +210,9 @@ class Fixture(existing.Fixture):
                 fields=event.encode_fields(event.EventFields(0,19,0x78002000))
                 self.memory.put(0x78002000,struct.pack('<HHI',0,1,17))
                 self.owner.dispatch(event.KIND,fields,0)
-                self.goal=10;self.observation['units'][0].update(x=2,y=1)
+                self.goal = self.goal_on_drain
+                if self.move_on_drain:
+                    self.observation['units'][0].update(x=2,y=1)
             return drain
         if rva==cache.service_ensure_rva:return lambda service:self.machine.append(('ensure',))
         if rva==cache.service_owner_rva:return lambda service:0x33000000
@@ -261,6 +265,26 @@ class WorldOwnerTests(unittest.TestCase):
                 self.assertEqual(f.token.transport.pending,[]);self.assertEqual(f.deferred.pending,[])
                 self.assertEqual(result['observation'],f.token.observation)
                 self.assertFalse(result['receipt']['archive_delivered'])
+                f.close()
+
+    def test_delivered_move_without_effect_requires_the_matching_native_queue(self):
+        for goal, status in ((None, 'refused'), (9, 'refused'), (10, 'completed')):
+            with self.subTest(goal=goal):
+                f = self.fixture()
+                self.select(f)
+                adapter.read(f.saved, f.token.observation)
+                f.move_on_drain = False
+                f.goal_on_drain = goal
+                f.set_active(True)
+                action = dict(kind='world_plot_click', unit_id=17, plot_id=10, x=2, y=1)
+                result = adapter.apply(f.saved, action, f.token.observation)
+                self.assertEqual(result['status'], status)
+                self.assertEqual(result['refusal_code'],
+                                 'native_world_move_effect_unobserved' if status == 'refused' else None)
+                self.assertTrue(result['receipt']['archive_delivered'])
+                self.assertEqual(result['receipt']['queued_destination_after'], dict(unit_present=True, plot_id=goal))
+                self.assertEqual(result['observation'], f.token.observation)
+                self.assertEqual(f.token.publication_count, 1)
                 f.close()
 
     def test_stale_episode_sequence_owner_and_cached_action_refused_before_native(self):

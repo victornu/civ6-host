@@ -4,6 +4,7 @@ import hashlib
 import struct
 from types import SimpleNamespace as NS
 import unittest
+from unittest.mock import patch
 
 import pefile
 from lupa.lua51 import LuaRuntime
@@ -105,7 +106,9 @@ class Fixture(SpySession):
         self.lua.globals().segment = self.next_segment
 
     def submit(self):
-        return network_turns.submit(self.saved, {'kind':'force_end_turn'}, 0, boundary=XP2_BOUNDARY)
+        # The segment fixture delivers no host reactivation callback.
+        with patch.object(XP2_BOUNDARY, 'reactivation_owner', return_value=None):
+            return network_turns.submit(self.saved, {'kind':'force_end_turn'}, 0, boundary=XP2_BOUNDARY)
 
 
 class TurnSegmentTests(unittest.TestCase):
@@ -150,29 +153,66 @@ class TurnSegmentTests(unittest.TestCase):
         self.assertIsNone(BOUNDARY.turn_segment(object(),0,61))
         self.assertIsNone(network_turns.BASE_BOUNDARY.turn_segment(object(),0,61))
 
+    def test_stock_era_choice_profile_pins_and_reads_segment_before_unresolved_turn(self):
+        f = self.fixture()
+        f.saved.world_congress_diagnostic = False
+        f.saved.stock_dedications = True
+        f.next_segment = 1278700307
+        with self.assertRaisesRegex(RuntimeError, 'effect is unresolved'):
+            f.submit()
+        self.assertEqual(f.calls.count('@xp2_turn_segment'), 2)
+        stage, event = f.emitted[-1]
+        self.assertEqual(stage, 'official_lan_turn_request_readback_unchanged')
+        self.assertEqual(event['before_turn_segment'], event['after_turn_segment'])
+        self.assertFalse(event['turn_segment_changed'])
+        self.assertEqual(f.delivered, [f.archive])
+
     def test_source_corruption_and_unavailable_segment_refuse_before_enqueue(self):
-        for corruption in ('source','sentinel','nonintegral','foreign_observer'):
+        for corruption in ('source','nonintegral','foreign_observer'):
             with self.subTest(corruption=corruption):
                 f = self.fixture()
                 if corruption=='source':
                     f.configuration.put(f.configuration.base+0x69b030,b'\xcc')
-                elif corruption=='sentinel': f.lua.globals().segment=-1
                 elif corruption=='nonintegral': f.lua.globals().segment=1.5
                 else: f.lua.globals().observer=1
-                message = {'source':'Live turn-segment getter differs','sentinel':'segment unavailable',
-                           'nonintegral':'segment unavailable','foreign_observer':'identity or observer changed'}[corruption]
+                message = {'source':'Live turn-segment getter differs',
+                           'nonintegral':'invalid native turn segment',
+                           'foreign_observer':'identity or observer changed'}[corruption]
                 with self.assertRaisesRegex(Exception,message):
                     f.submit()
                 self.assertNotIn('request',f.calls)
                 self.assertFalse(f.delivered)
 
-    def test_malformed_after_marker_never_becomes_success(self):
+    def test_absent_marker_requires_independent_readiness_effect(self):
+        for before, after in ((1278700307, -1), (-1, -1), (-1, 1278700307)):
+            with self.subTest(before=before, after=after):
+                f = self.fixture()
+                f.lua.globals().segment = before
+                f.next_segment = after
+                with self.assertRaisesRegex(RuntimeError, 'effect is unresolved'):
+                    f.submit()
+                self.assertEqual(f.delivered, [f.archive])
+                self.assertFalse(any(name == 'official_lan_turn_request_effect'
+                                     for name, _ in f.emitted))
+
+    def test_readiness_effect_is_preserved_when_native_segment_disappears(self):
         f = self.fixture()
         f.next_segment = -1
-        with self.assertRaisesRegex(Exception,'segment unavailable'):
-            f.submit()
-        self.assertEqual(f.delivered,[f.archive])
-        self.assertFalse(any(name=='official_lan_turn_request_effect' for name,_ in f.emitted))
+
+        def deliver_and_wait():
+            f.deliver()
+            f.lua.execute('Players[0].IsTurnActive=function()return false end')
+
+        f.prefix.actions.deliver_one = deliver_and_wait
+        self.assertEqual(f.submit(), dict(status='completed', reason=None,
+                                         requested_action={'kind': 'force_end_turn'}))
+        self.assertEqual(f.delivered, [f.archive])
+        stage, event = f.emitted[-1]
+        self.assertEqual(stage, 'official_lan_turn_request_effect')
+        self.assertTrue(event['before']['active'])
+        self.assertFalse(event['after']['active'])
+        self.assertEqual(event['after_turn_segment'], 0xffffffff)
+        self.assertFalse(event['turn_segment_changed'])
 
     def test_getter_checks_owner_revision_and_canonical_payload(self):
         for mutation in ('revision','payload'):

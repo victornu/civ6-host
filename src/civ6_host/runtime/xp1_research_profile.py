@@ -187,7 +187,7 @@ def bind_owner(owner,core,read):
                 or existing.source_sha256!=selected_source[1] or existing.core_sha256!=core_sha):
             raise ValueError('XP1 research source receipt belongs to another lifetime')
         return existing
-    image=getattr(core,'_civ6_host_execution_image',None)
+    image = getattr(core, '_civ6_host_execution_image', None) if core_sha == XP2_CORE_SHA256 else None
     verify_live(core._handle,read,core_sha256=core_sha,
                 **({'execution_image':image} if image is not None else {}))
     result=VerifiedResearchSource(owner,core,core._handle,selected_source[1],core_sha)

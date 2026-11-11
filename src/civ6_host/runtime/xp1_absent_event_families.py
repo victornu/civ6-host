@@ -97,16 +97,23 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_absent_event_source import source_dependencies as selected
         return selected(execution_image=execution_image)
-    if execution_image is not None:
-        raise ValueError('Selected execution image requires the XP2 absent-event source')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unqualified absent descriptor engine')
+    if execution_image is not None:
+        from .execution_images import _XP1_PROFILE
+        if execution_image is not _XP1_PROFILE:
+            raise ValueError('Selected image has no XP1 absent-event source')
     from .paths import resource_root
     from .resource_resolution import resolve_path
     p=verify_source()
     two=verify_two_field_source()
     refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),*p['images'].values(),*p['references'].values(),
           dict(path=TWO_SOURCE[0],sha256=TWO_SOURCE[1]),*two['references'].values()]
-    return {str(resolve_path(resource_root()/ref['path']).resolve()):ref['sha256'] for ref in refs}
+    pins = {str(resolve_path(resource_root()/ref['path']).resolve()):ref['sha256'] for ref in refs}
+    if execution_image is None:
+        return pins
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    return materialize_runtime_source_pins(pins, execution_image=execution_image,
+                                           provenance_images=p['images'].values())
 
 
 def has_shape(fields):

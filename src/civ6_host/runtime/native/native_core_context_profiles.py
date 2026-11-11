@@ -128,6 +128,8 @@ def profile_for_core(gamecore_path: str | os.PathLike[str], *, mode: str, shared
     retained_execution_image = execution_image
     execution_image = None
     reference_sha = None
+    if selected is not None and retained_execution_image is not None:
+        raise ValueError('Selected execution image hash differs from installed GameCore')
     if selected is None:
         if retained_execution_image is None:
             raise ValueError(f'unrecognized GameCore SHA-256 without retained execution identity: {requested_sha}')
@@ -142,11 +144,11 @@ def profile_for_core(gamecore_path: str | os.PathLike[str], *, mode: str, shared
         if execution_image.image_sha256 != requested_sha:
             raise ValueError('Selected execution image hash differs from installed GameCore')
         reference_sha = execution_image.reference_core_sha256
-        context, constructors = _validate_proofs()
-        selected = ('xp2', context['images']['xp2'])
+        selected = next(((ruleset, entry) for ruleset, entry in context['images'].items()
+                         if entry['sha256'] == reference_sha), None)
+        if selected is None or selected[0] not in ('xp1', 'xp2'):
+            raise ValueError('Selected execution image has no matching expansion context ABI')
     ruleset, image = selected
-    if execution_image is not None and ruleset != 'xp2':
-        raise ValueError('Execution image identity cannot be attached to a different ruleset')
     if _normalized(requested_core) != _normalized(image['path']):
         raise ValueError('GameCore path does not match the path pinned for this image')
     if ruleset != 'base' and mode not in _XP_CONTEXT_MODES:

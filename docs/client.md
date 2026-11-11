@@ -330,6 +330,12 @@ non-MOVE_TO and war-confirmation branches return `refused`, reason
 `native_world_input_branch_unqualified`, and no applied action. This is a host
 coverage limit, not native illegality or a strategic decision.
 
+For expansion LAN sessions, a delivered `MOVE_TO` with unchanged player
+observations and no matching native queued destination returns `refused`
+with reason `native_world_move_effect_unobserved`. The delivery archive
+remains in the administrative receipt. UI-only no-ops retain their
+existing completion status.
+
 The captured native group moved unit 131073 from (42,29) to (42,28), with movement
 points changing from 2 to 1. Clicking its current plot produced an official
 no-op with no archive. Selection/deselection, refreshed own queue information,
@@ -701,6 +707,118 @@ used its attack and movement, and the offer disappeared. The host saved the
 public result and closed normally. The new checkpoint has not been reloaded.
 Evidence: `evidence/host-xp2-ranged-unit-attack.json` in the private lab.
 Other attack routes and complete combat remain unqualified.
+
+On the current Gathering Storm image, the dedicated ranged route can return
+`command_result.status == 'submitted'` with reason
+`native_ranged_attack_order_added`. The native archive and the isolated
+`UnitOperationAdded` event identify the selected order. The immediate public
+observation has no verified combat effect and `applied_action` is null.
+The client can continue with the new catalogue. Use later observations to
+track the unit and target.
+
+On the installed Gathering Storm + BBG 7.5.1 profile, an offered
+`unit_attack` with `operation='RANGE_ATTACK'` and
+`input_route='dedicated_ranged'` hit a visible, unwalled city at turn 42.
+The public `unit_attacks.cities` row for the same target gained 18 garrison
+damage. The Archer stayed on its tile and spent its remaining attack.
+The subsequent close with checkpoint enabled was refused while BBG trade
+feedback was pending. The attack receipt and the save outcome are separate.
+Evidence: `evidence/host-xp2-bbg-city-ranged-hit-native.json` in the private lab.
+
+In the recorded continuation, an explicit end turn and native polls advanced
+to turn 43. BBG removed the ended city-state trade route from its gameplay
+property before the next checkpoint. Save and close succeeded, and a fresh
+client loaded the same public observation and choices. The city had already
+healed during the turn transition, so this witness covers saving and loading
+the next turn. Evidence: `evidence/host-xp2-bbg-city-hit-post-turn-save-reload.json`.
+
+From that turn-43 checkpoint, the separate `input_route='world_plot'`
+ranged offer also executed against the same city. This time the checkpoint
+was written before ending the turn. A fresh process restored all 18 points
+of garrison damage and the Archer's spent attack in the public combat view,
+with the same observation and choices. Evidence:
+`evidence/host-xp2-bbg-world-plot-city-hit-save-reload.json`.
+
+In the same profile, an offered `MOVE_TO` attack via `world_plot` against
+the city added 16 garrison damage at turn 45. The Warrior took 55 damage
+in the same command. A second melee attack at turn 46 added 12 damage and
+removed the Warrior from the own-unit roster. The private native
+`UnitKilledInCombat` record independently identifies the Warrior and
+defending district. City ownership stayed unchanged in both attacks.
+Evidence: `evidence/host-xp2-bbg-city-melee-retaliation-native.json`.
+
+The current GS + BBG 7.5.1 v42 catalogue adds `captured_city` and the
+`resolve_captured_city` family. An available query can report no pending
+city. An unavailable query returns null. Choose an offered directive with
+`act()` using its normal decision and candidate IDs. The query carries
+only the city and recipients of offered liberation choices. The host
+checks the same native pending city and directive again before issuing
+the original city command. A completed receipt means the decision left
+the native pending selector. KEEP also requires the city in the player's
+own-city observation. RAZE requires the native Gameplay lookup to find
+the selected city before delivery and an empty tile after it. Both
+liberation directives require native readback of the offered recipient as
+owner of the selected city tile. The readback checks the action's target
+without exposing other gameplay state.
+
+All four captured-city directives have native witnesses on this profile.
+The RAZE witness confirmed a visible tile without a city and identical
+public state after Save and reload. The liberation witness returned a
+visible city to its founder, saved the resulting native state, and
+restored the same visible city and player decisions in a second process.
+The previous-owner witness starts from a captured city in a private
+scenario prepared with native occupation and peace services. The stock
+menu offered player 2 as the recipient. The common client selected that
+candidate and GameCore transferred the city. An independent reload
+restored the same visible city and complete public catalogue with no
+occupation decision pending. The assailant was placed for these tests.
+The founder scenario used the official Free Cities test operation.
+
+On the registered current Gathering Storm capture without BBG, the
+`standard_trade=True` session exposes the same captured-city fields and
+candidate selection under the `standard-trade-captured-city.v1` through
+`.v4` catalogue schemas. Each schema preserves the groups of its
+corresponding `standard-trade` version. An earlier checkpoint can migrate
+when the engine reports no pending capture and its existing decisions
+compare exactly. A pending capture requires a checkpoint that already
+records that choice.
+
+The standard v4 witness restored the original turn-72 observation and all
+135 previous choices, queried an empty pending-capture list in GameCore,
+and saved the extended catalogue. A separate worker restored that new
+checkpoint with the same observation and decisions. This witness has no
+pending city to resolve.
+Evidence: `evidence/host-xp2-stock-captured-city-catalogue-native.json`
+and `evidence/host-xp2-stock-capture-checkpoint-reload-native.json`.
+
+A second standard v4 witness used three offered `MOVE_TO` assaults via
+`world_plot` to capture an existing city at turn 72. GameCore offered
+KEEP and RAZE. The client chose KEEP, the pending choice cleared, and
+the city stayed in the own-city observation. A fresh worker reloaded
+the new checkpoint with the same city, observation, and 186 choices.
+The private fixture placed the assailants. The assaults and occupation
+choice went through the ordinary client.
+Evidence: `evidence/host-xp2-stock-city-keep-save-reload-native.json`.
+
+The alternative RAZE branch confirmed an empty target tile in GameCore
+and in the player's view. A fresh worker restored the empty visible
+tile, the same observation, and all 135 choices.
+Evidence: `evidence/host-xp2-stock-city-raze-save-reload-native.json`.
+
+The stock founder branch used the official Free Cities test operation
+to prepare the city history. The client captured the city and selected
+LIBERATE_FOUNDER with player 3 as the offered recipient. GameCore
+confirmed the transfer and a fresh worker restored the same visible
+city, observation, and 133 choices. Stock LIBERATE_PREVIOUS_OWNER
+execution remains to be verified.
+Evidence: `evidence/host-xp2-stock-city-founder-save-reload-native.json`.
+Local evidence:
+
+- evidence/host-xp2-bbg-city-keep-save-reload-native.json
+- evidence/host-xp2-capture-registered-callbacks-native.json
+- evidence/host-xp2-bbg-liberation-founder-native.json
+- evidence/host-xp2-bbg-liberation-founder-save-reload-native.json
+- evidence/host-xp2-bbg-liberation-previous-owner-save-reload-native.json
 
 The Rise and Fall backend selects v12 when explicitly configured with
 `city_focus_diagnostic=True` and `city_management_diagnostic=True`.
@@ -1538,8 +1656,240 @@ city-state and reads back both the active route and the official BBG
 `CS_TRADERS` change before saving and closing. The BBG property readback
 is kept in the host receipt. The public client receives the trade catalogue.
 A fresh process reloads the same observation and both catalogues with the route active.
-Expiry, reissuing an expired route, Amani's modifier and visibility across
-other target and map conditions remain separate qualification cases.
+The retained route then expires natively at T63. At T64 the active route is
+absent and the BBG script has removed the city-state from `CS_TRADERS`. The
+client chooses the offered route with the same Trader and confirms both the
+new active route and the restored BBG property. Save, Unload and Destroy
+complete normally. The renewed checkpoint is available for the next reload.
+The witness covers one route and one human LAN seat. Other route-ending cases
+remain open.
+Private lab receipt: `evidence/host-xp2-bbg-route-expiry-renewal-native.json`.
+
+The v41 contract adds `client.information("trade_overview")` for the two
+source-selected GS + BBG 7.5.1 captures. It carries the active count and capacity,
+outgoing and incoming routes, and city pairs visible in Available Routes, with both
+displayed yield quotes. Incoming rows omit foreign Trader IDs. The v40 choices
+and candidate IDs are preserved. A disabled view or an unproven unlock state
+returns an explicit unavailable status. At T9 the native reader reports an
+unproven unlock. At T16 the client reads capacity 1 and one slot to produce a
+Trader, then reloads that observation and its decisions exactly. The continuation
+buys a Trader, sees Washington → Rapa Nui in Available Routes and submits the
+offered route. At T19 the same pair and Trader appear in the active tab, with
+the displayed origin yield of 3 gold. Save, Unload and Destroy complete normally.
+Private lab receipt: `evidence/host-xp2-bbg-world-a-positive-trade-native.json`.
+
+World A now selects the same BBG yield helper in the chooser's catalogue,
+request freshness check and post-command readback. The software fixture checks
+both displayed directions for the local established Amani and the unchanged
+result for a foreign governor. A native T19 reload with this helper preserves the
+public observation and v41 decision catalogue. Early Empire grants a title, and
+the client appoints and assigns Amani to Rapa Nui at T24. At T29 the engine
+establishes Amani and the Washington–Rapa Nui route displays 2 extra food and
+2 extra production at both ends. The 3 gold at Washington remains part of the
+displayed quote. The native Save completes and the supervisor verifies Unload
+and Destroy. The run consumes FeatureAddedToMap, FeatureChanged and
+FeatureVisibilityChanged in the same ordered queue.
+See the private lab receipt `evidence/host-xp2-bbg-world-a-amani-trade-native.json`.
+
+The T29 checkpoint reloads with identical public observations and decisions.
+At T35 the original Trader is idle and both views show the offered route with
+the trading post, the same yield tooltips and 2 food and 2 production at both
+ends. Washington also shows 4 gold, including the 1 gold path bonus. The client
+submits the offered repeat route. The native operation restores the active
+row, BBG's city property records the destination again, and the engine saves
+the T35 checkpoint before Unload and Destroy. This witness contains no incoming
+route. See `evidence/host-xp2-bbg-world-a-amani-renewal-native.json` in the lab.
+
+The Boston T62 checkpoint reloads with its observation and all v40 decision
+fields intact. The v41 player frame includes Hattusa → Boston with both
+display quotes and omits the foreign Trader ID. The supervisor verifies Save,
+Unload and Destroy. The source-selected display preserves signed values from
+the official helper. The trade hook now also keeps an already-unlocked panel
+available if capacity falls to zero within the same session. That edge case is
+covered by a fixture.
+Private lab receipt: `evidence/host-xp2-bbg-incoming-trade-native.json`.
+
+On the current World A capture, the ordered `CivicCompleted` notification
+for the local player checks outgoing capacity while handling Foreign Trade
+at T16. The native read returns 1 and opens the panel before the first
+public T16 decision. The preceding T15 decision has the panel locked.
+Save, Unload and Destroy complete normally. A civic completion between
+two decisions in one turn and a reload of the new checkpoint still
+require separate witnesses.
+Private lab receipt: `evidence/host-xp2-bbg-trade-civic-hook-native.json`.
+
+The new v41 checkpoint also reloads with the same observations and choices.
+The incoming route remains visible at T63 and T64. At T65 the GameCore logs
+`Route Ended (Expired)` for Hattusa → Boston and the matching row disappears
+from the player's Python frame. The reciprocal outgoing route had expired
+separately. The session saves at T65 and verifies Unload and Destroy.
+Private lab receipt: `evidence/host-xp2-bbg-incoming-trade-expiry-native.json`.
+
+### Gathering Storm without BBG
+
+The exact retained stock Gathering Storm LAN profile accepts
+`standard_trade=True` with its current engine and official capture. The
+decision schema is `civ6-host.network-capability-decisions.standard-trade.v1`.
+The `trade` and `trade_overview` groups refer to the same native decision.
+The stock adapter uses the stock yield helper and keeps foreign Trader IDs
+out of incoming rows. Unsupported reader states are reported explicitly.
+
+The T44 witness restores Rome's public observation, reads capacity 1 and
+executes the offered 90-gold Trader purchase. Native readback and the new
+checkpoint contain the Trader and the new balance of 86 gold. Unload and
+Destroy complete normally. A fresh process reloads the same schema,
+observations and decisions. The T49 checkpoint retains the Trader, the
+Settler and its prospective escort. Private lab receipt
+`evidence/host-xp2-standard-trade-panel-purchase-native.json`.
+
+For this stock capture, `unit_formations=True` adds the v2 decision schema
+and `client.information("unit_formations")`. The public group lists each
+owned unit's formation count and movement values. The engine supplies the
+partner choices. The caller chooses a `unit_formation` candidate with
+`command` equal to `enter` or `exit`. Exit has a null `partner_id`.
+The native formation identity stays inside the host and is used to verify
+that the chosen pair joined the same formation. The v1 stock checkpoint
+can resume into this opt-in schema with its existing choices unchanged.
+
+The retained native witness joins a Warrior and a Settler, separates them,
+joins them again, and moves both units with one command on each of two
+turns. A second run saves at T50 with both units still linked at (37, 13)
+and completes native Unload and Destroy. A fresh process restores the v2
+observation and decision catalogue exactly, including the formation.
+The continued session uses the offered defensive attacks and founds Ostia
+at T52. See the private lab receipts
+`evidence/host-xp2-stock-unit-formations-save-native.json`,
+`evidence/host-xp2-stock-formations-v2-resume-defence-native.json` and
+`evidence/host-xp2-stock-ostia-foundation-native.json`.
+
+In this capture the Trader chooser offers Rome → Ostia while the available
+routes tab lists two departures from Ostia. The stock panel queries city
+pairs and the chooser checks the selected Trader's native operation. Use
+the exact candidate in the decision catalogue to request a route. The
+available routes tab is a separate public view.
+
+The T52 settlement checkpoint restores the same observation and decision
+catalogue. The offered `make_trade_route` command starts Rome → Ostia.
+Both public groups read the same active route and the native route count
+increases from zero to one. The stock quote and active row display one
+food, one production and one gold for Rome. The T52 checkpoint includes
+the active route and native Unload and Destroy complete normally.
+Private lab receipt `evidence/host-xp2-stock-rome-ostia-native.json`.
+
+Reloading the active-route checkpoint preserves the public observation
+and catalogue. Both groups retain Rome → Ostia through T56. At T57
+the route disappears from both groups and the Trader leaves Rome's
+roster. The native trade log records `Route Ended (Plundered)` for
+that city pair. Its reason remains in private diagnostics. The
+session saves at T57 and completes native Unload and Destroy.
+Private lab receipt `evidence/host-xp2-stock-rome-ostia-lifecycle-native.json`.
+
+From the checkpoint before departure, the offered `change_trade_origin`
+command moves the same Trader from Rome to Ostia and uses its movement
+on T52. On T53 the public chooser offers Ostia → Kabul. The requested
+route is active in both public views through T61. After resolving the
+policy notification and the optional achievement service, the GameCore
+consumed the named obsolescence record and published T61. It delivered
+the subsequent forced turn request without an observable transition.
+The recorded primary blocker at that checkpoint was a dedication.
+Private lab receipt
+`evidence/host-xp2-stock-ostia-kabul-continuation-native.json`.
+
+### Era dedications in the stock XP2 session
+
+The opt-in `stock_dedications=True` extends the existing stock formation
+profile with a public `dedications` group. The group contains the acting
+player’s era, age, remaining selection count, offered type indices and
+active dedications. The decision carries one `confirm_dedications`
+candidate when the popup offers selections. Pass `{'indices': [...]}`
+to `SessionClient.act` with exactly the required number of distinct,
+offered indices in the desired order. The command reports completion
+after the native archives are delivered and the player cache confirms
+the active dedications and the consumed selection count. This profile
+currently targets the pinned stock Gathering Storm capture and engine.
+On the retained T52 checkpoint the client read four Dark Age offers,
+confirmed `COMMEMORATION_SCIENTIFIC` through one native operation
+archive, and observed it active with zero selections remaining. The
+session saved at T52 and completed native Unload and Destroy. A new
+process reloaded the checkpoint with the same public observation and
+catalogue. It opened Ostia → Kabul at T53 and confirmed the next era
+dedication at T61. The T61 save retains the active route and dedication.
+Multi-selection ages still need native qualification. Private lab receipts
+`evidence/host-xp2-stock-dedications-confirmation-native.json` and
+`evidence/host-xp2-stock-dedications-reload-trade-native.json`.
+
+With `world_congress_diagnostic=True` and
+`world_congress_review_diagnostic=True`, the stock dedication profile
+adds the Congress catalogue, public review, active resolutions and
+native command permissions under `standard-trade.v4`. A v3 stock
+checkpoint can load through this profile when its observation and
+previously recorded decision fields still match.
+
+On the retained stock world, choosing Military Tradition and issuing
+the offered forced turn request opened regular Congress at T61. The
+native strategic and tactical command permissions were both false.
+The shared client transmitted two B/1 votes and the native submission.
+Play resumed at T62, both permissions were true and the review contained
+both exact own votes. The native record leaves vote origin indeterminate
+and carries no completion echo. The active resolutions were public and
+Ostia → Kabul remained active. The host saved and closed at T62. Other
+stock Congress forms still require qualification. Private lab receipt
+`evidence/host-xp2-stock-congress-integration-native.json`.
+
+A new native process reloaded the T62 checkpoint with the same public
+observation and v4 catalogue. The GameCore trade log records Ostia →
+Kabul expiring at the close of T68. On T69 both public trade views
+agree that the route has ended and the Trader is idle. The native
+catalogue offers a domestic route to Rome. A renewed route to Kabul
+was unavailable on that decision. Trade Treaty B sets the
+`InternationalMajors` flag. The current native start predicate checks
+the corresponding counter when either end of an international route
+is a full civilization. Its existing-route removal instead visits
+other full civilizations. A route to a city-state can therefore
+survive activation and be blocked when the Trader tries to start it
+again. The live counter and first failing predicate for the T69
+offer still require direct evidence. The host saves and closes at
+T69. Private lab receipts
+`evidence/host-xp2-stock-post-congress-trade-expiry-native.json` and
+`evidence/host-xp2-stock-trade-treaty-major-minor-source.json`.
+
+An alternate branch from the same T61 checkpoint changes only the
+Trade Treaty vote in the ballot. The native review and active-effects
+views confirm option A. The existing route expires at the close of
+T68. On T69 the client sees the idle Trader and the offered repeat
+route to Kabul, then selects it. Both public views and the native
+trade log confirm the new route with the same Trader. The worker
+saves and closes at T69. The new checkpoint has yet to be reloaded.
+The earlier B branch was saved and reloaded at T62. Private lab
+receipt `evidence/host-xp2-stock-trade-treaty-a-native.json`.
+
+Reloading the earlier T69 checkpoint from the B branch preserves the domestic offer. The
+common client starts Ostia → Rome and both public views publish
+the route. On T72 the native log records plunder. Both views lose
+the route and the public unit roster loses the Trader. The catalogue
+offers a replacement at either city for 90 gold. The worker saves
+and closes at T72. This witness exercises loss after native combat.
+Private lab receipt `evidence/host-xp2-stock-ostia-rome-plunder-native.json`.
+
+The same T72 checkpoint reloads with identical player observations
+and choices. Two attacks damage the visible enemy. The third is a
+`MOVE_TO` attack that the current Gathering Storm image consumes
+without an observable change. The command result is `refused` with
+reason `native_attack_consumed_without_observable_effect`. The
+following purchase creates an idle Trader at Ostia and costs 90 gold.
+Both trade views have no active route. The worker saves and closes
+at T72. The new checkpoint has yet to be reloaded. Private lab
+receipt `evidence/host-xp2-stock-plunder-recovery-native.json`.
+
+The native XP2 archive omits the per-turn envoy consideration flag.
+On the installed current XP2 image, resume restores an outstanding
+consideration from the authenticated checkpoint through the original
+influence setter. GameCore recomputes the blocker. The host then compares
+the entire observation and catalogue, including the restored
+`retain_envoys` candidate. The previously refused stock T51 checkpoint and
+the GS + BBG 7.5.1 T57 checkpoint both pass this exact comparison. The stock
+client can select the restored candidate and keep its tokens.
+See the private lab receipt `evidence/host-xp2-envoy-checkpoint-restore-native.json`.
 
 ## Espionage information and orders
 

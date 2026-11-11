@@ -51,8 +51,10 @@ class A0FamilyServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.profile=family_profile()
 
-    def fixture(self, core_sha256=XP1_CORE_SHA256):
+    def fixture(self, core_sha256=XP1_CORE_SHA256, *, execution_image=None):
         h=Host();core=NS(_handle=1000);before=list(h.vtable);bindings=dict(h._slot_bindings)
+        if execution_image is not None:
+            core._civ6_host_execution_image = execution_image
         for target in ('cache_update_profiles.verify_dispatch_live','cache_update_profiles.verify_notification_live',
                        'event_argument_source.verify_host_live'):
             p=patch('civ6_host.runtime.'+target,return_value={});p.start();self.addCleanup(p.stop)
@@ -93,6 +95,29 @@ class A0FamilyServiceTests(unittest.TestCase):
         d.host_notification_counter = d.host_metadata_counter = 0
         self.assertEqual(d.drain(), 2)
         self.assertEqual(d.pending, [])
+
+    def test_current_xp2_war_and_peace_keep_distinct_native_receiver_rows(self):
+        import pefile
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import resolve_empty_receiver_row
+
+        h, d, a, _, reader, _, _ = self.fixture(XP2_CORE_SHA256, execution_image=_PROFILE)
+        core = pefile.PE(str(_PROFILE.path), fast_load=True)
+        self.addCleanup(core.close)
+        reader.read.side_effect = lambda address, size: core.get_data(address - d.core._handle, size)
+        cases = ((0x7dddaff1, 126, 'GameCoreEvent::DiplomacyDeclareWar'),
+                 (0x41d2c9c0, 127, 'GameCoreEvent::DiplomacyMakePeace'))
+        for sequence, (kind, record_type, name) in enumerate(cases, 1):
+            self.assertEqual(self.send(h, a, reader, kind, (0, 2)), 0)
+            record = d.pending[-1]
+            self.assertEqual(struct.unpack_from('<III', record), (112, record_type, sequence))
+            self.assertEqual(struct.unpack_from('<I4xII', record, 80), (sequence, 0, 2))
+            self.assertEqual(resolve_empty_receiver_row(record_type, execution_image=_PROFILE)['event_name'], name)
+        self.assertEqual(d.drain(), 2)
+        self.assertEqual(d.pending, [])
+        self.assertEqual(resolve_empty_receiver_row(127)['event_name'], cases[0][2])
+        a.close()
+        d.close()
 
     def test_scalar_families_through_service_preserve_bits_sequence_and_cleanup(self):
         from qualify_xp1_configuration import a0_scalar_cases

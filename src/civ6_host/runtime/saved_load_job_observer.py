@@ -149,9 +149,16 @@ class SavedLoadJobObserver:
         self.core=_verify_core(backend)
         from .source_build_identity import xp2_component_requirements
         required = {'gamecore_python_host.c':self.core['host_component_sha']}
-        if self.core.get('reference_core_sha256', self.core['sha256']) == XP2_CORE_SHA256:
-            required = xp2_component_requirements(path, required)
-        self.build=verify_source_build(path,required_components=required)
+        from .execution_images import _XP1_PROFILE, _verify_native_host_build
+        if getattr(backend.profile, 'execution_image', None) is _XP1_PROFILE:
+            from .paths import resource_root
+            if path != (resource_root()/_XP1_PROFILE.native_host_build.executable_path).resolve():
+                raise ValueError('Current XP1 scheduler requires its exact registered host build')
+            self.build = _verify_native_host_build(_XP1_PROFILE)
+        else:
+            if self.core.get('reference_core_sha256', self.core['sha256']) == XP2_CORE_SHA256:
+                required = xp2_component_requirements(path, required)
+            self.build = verify_source_build(path, required_components=required)
         self.bind=self.host.LAB_BindJobCore
         self.bind.argtypes,self.bind.restype=[C.c_uint32,C.c_size_t],C.c_int
         self.layout=self.host.LAB_GetJobRegistryLayout

@@ -261,7 +261,8 @@ def _apply(saved, action, before, *, automatic):
         if cycle_entry is not None:
             cycles.record_delivery(saved, cycle_entry, archive_index)
         p.deferred_events.drain_empty_receivers()
-        feedback.append(deepcopy(c.flush_trade_feedback()))
+        if c.trade_feedback is not None:
+            feedback.append(deepcopy(c.flush_trade_feedback()))
         if p.deferred_events.pending:
             raise RuntimeError('Congress feedback left native events pending')
     # The retained bulletin witness emits this generic completion immediately
@@ -274,7 +275,8 @@ def _apply(saved, action, before, *, automatic):
         p.actions.deliver_completed_round_echo(before['player_id'],
             player_ids=saved.network_reference['major_player_ids'])
         p.deferred_events.drain_empty_receivers()
-        feedback.append(deepcopy(c.flush_trade_feedback()))
+        if c.trade_feedback is not None:
+            feedback.append(deepcopy(c.flush_trade_feedback()))
         if p.actions.pending or p.deferred_events.pending:
             raise RuntimeError('Congress completion echo left pending native work')
     p.view_publisher.publish()

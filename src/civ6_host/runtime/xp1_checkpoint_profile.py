@@ -166,8 +166,6 @@ def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256 == XP2_CORE_SHA256:
         from .xp2_checkpoint_source import source_dependencies as selected
         return selected(execution_image=execution_image)
-    if execution_image is not None:
-        raise ValueError('Selected execution image requires the XP2 checkpoint ABI')
     if core_sha256 != XP1_CORE_SHA256:
         raise ValueError('Unknown checkpoint dependency engine')
     from .paths import resource_root
@@ -183,4 +181,7 @@ def source_dependencies(*, core_sha256=XP1_CORE_SHA256, execution_image=None):
         if path in result and result[path] != sha:
             raise ValueError('Conflicting checkpoint source pins')
         result[path] = sha
+    if execution_image is not None:
+        from .xp1_session_inputs import materialize_xp1_session_pins
+        return materialize_xp1_session_pins(result, execution_image)
     return result

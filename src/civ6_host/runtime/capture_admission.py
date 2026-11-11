@@ -22,6 +22,36 @@ XP2_LAUNCH_FIELD='xp2_prepared_launch'
 _SETTING=object()
 _UNSET=_SETTING
 _STOCK_XP2_EXECUTION_ASSOCIATION=None
+STOCK_XP2_READER_REVALIDATION=(
+    'work/official-capture/bbg751-world-A-trade-ui-association/stock-prepared-reader-revalidation.json',
+    '3902e018dcdfb8b622007071c2f049035a270441ee3ba9b2c9786308e1589650',
+)
+_STOCK_XP2_PRODUCER='fb8f64fccfaab86e947eb3f9263a149854bf0a2e7f50cc52fc5ecc6f218993bd'
+_OFFICIAL_BUNDLE_READER='runtime/native/native_official_bundle.py'
+_STOCK_RESPONSE_ARCHIVE_READER_TRANSITION=(
+    '7eb90487b13b23e2bdc2def6a8862c985e083a3d5d27ea1afc150c01864294bd',
+    'd4ec5e226a75957a23f37e23f3aa88e92fc79471f8f177ebdb4dd43fb72a822c',
+)
+_XP1_PACKAGE_READER_DELTA=(
+    'c4d00df12acd6b420d55b661b85afff360afa6b41416144d11e2e1a35fb52145',
+    '06a6933c0e032f3a15c1d252fca4c6b3f9b9bd04b67e07b7aa559d36e91d34be',
+)
+_XP1_CURRENT_READER_PINS=(
+    'work/trade-common-client/xp1-installed-prepared-reader-with-response-pins.json',
+    '390b500d1f1c0fe51b1f822ee021a722f8be6517e68f9723edeb08eb59905f9d',
+)
+_XP1_HANDOFF_CANDIDATE_DELTA=(
+    '7a8cb86925f740aadb49e47e68ed4c0cb09811183024dd9265347da643e1ef75',
+    'f7c0a56af6edfa32c8e5ed8327e249c55447eebba7ae78a43b1946a961d2cdf4',
+)
+_XP1_HANDOFF_ORCHESTRATION_DELTA={
+    '_load':('d8bc3bed34d57d9570b7e9d02c9c893108c619dca57d3b9adb31e3878a1cb894',
+             '53d421fdd37f4e468513bb3ae74c93208f9ae362518d8e9826cd1493c059558e'),
+    'try_bundle':('849910fa484c7dce9018104168d583576a973c01ef1919bf3c69da212b1d77e8',
+                  '6abcdf4160ed61063c07a50f0a0a2c60f0209d440a20cc7602b064537907c934'),
+    'consume_prepared_closure':('767220c66ff80207e86e41502dee4df95f18b47fe0a89cf10f5ffb69a71c3571',
+                                '7f60c413a1e90369a39d0dbb1e913cc10e9408edbf27ca16fef193773b5f344e'),
+}
 
 # Explicit artifact-reader compatibility, not a rewrite of producer identity.
 # Each entry binds one exact producer identity to its scoped evidence and
@@ -95,9 +125,7 @@ _CURRENT_BBG_UNCHANGED_READER_FUNCTIONS=(
     '_check_localization', '_verify_content_profile',
 )
 _CURRENT_BBG_REVIEWED_ORCHESTRATION_AST_SHA256={
-    '_load':'d8bc3bed34d57d9570b7e9d02c9c893108c619dca57d3b9adb31e3878a1cb894',
-    'try_bundle':'849910fa484c7dce9018104168d583576a973c01ef1919bf3c69da212b1d77e8',
-    'consume_prepared_closure':'767220c66ff80207e86e41502dee4df95f18b47fe0a89cf10f5ffb69a71c3571',
+    name:pair[1] for name,pair in _XP1_HANDOFF_ORCHESTRATION_DELTA.items()
 }
 
 
@@ -182,6 +210,46 @@ def _prepared_xp2_execution(execution_image, reference=None, origin=None):
     return True
 
 
+def _prepared_current_execution(execution_image, reference, origin):
+    from .execution_images import _XP1_PROFILE
+    if execution_image is not _XP1_PROFILE:
+        return _prepared_xp2_execution(execution_image, reference=reference, origin=origin)
+    from .paths import resource_root
+    from .xp1_prepared_reader_transition import PACKAGE_RELATIVE, PACKAGE_SHA256
+    from .xp1_saved_load import REFERENCE
+    expected=dict(path=str((resource_root()/PACKAGE_RELATIVE).resolve()),sha256=PACKAGE_SHA256)
+    if reference!=expected or configured_reference()!=expected or origin!=REFERENCE:
+        raise ValueError('Current XP1 execution requires its exact prepared package and origin')
+    return True
+
+
+def _review_xp1_current_reader(producer,consumer,manifest,execution_image):
+    """Check the reader identity before the full current input revalidation."""
+    from .execution_images import identity
+    from .native.native_source_cache import load_pinned_json
+    from .paths import resource_root
+    from .xp1_prepared_reader_transition import PACKAGE_SHA256, PRODUCER_IDENTITY_SHA256
+    path=(resource_root()/_XP1_CURRENT_READER_PINS[0]).resolve(strict=True)
+    proof=load_pinned_json(path,_XP1_CURRENT_READER_PINS[1])
+    digest=_sha(json.dumps(producer,sort_keys=True,separators=(',',':')).encode())
+    if (proof['schema']!='civ6-host.xp1-installed-prepared-reader-pins.v1'
+            or proof['producer_identity_sha256']!=digest or digest!=PRODUCER_IDENTITY_SHA256
+            or manifest['input_profile']!='xp1-lan' or manifest['origin']!=proof['origin']
+            or proof['package']['sha256']!=PACKAGE_SHA256
+            or proof['execution_image']!=identity(execution_image)
+            or producer['schema']!=consumer['schema']):
+        raise ValueError('Current XP1 prepared reader has a different capture or producer')
+    tools=proof['original_tool_pairs']
+    if (producer['original_validator_sources']!={name:pair[0] for name,pair in tools.items()}
+            or consumer['original_validator_sources']!={name:pair[1] for name,pair in tools.items()}):
+        raise ValueError('Current XP1 original input tool differs from its reviewed identity')
+    for name,pair in proof['input_reader_pairs'].items():
+        if (producer['runtime_sources'].get(name),consumer['runtime_sources'].get(name))!=tuple(pair):
+            raise ValueError('Current XP1 input reader differs from its reviewed identity: '+name)
+    return dict(mode='exact_xp1_current_input_revalidation',producer_identity_sha256=digest,
+                reader_pins_sha256=_XP1_CURRENT_READER_PINS[1],producer_identity_substituted=False)
+
+
 def _stock_xp2_association(capture,reference=None):
     association=_STOCK_XP2_EXECUTION_ASSOCIATION
     if association is None:return None
@@ -213,14 +281,68 @@ def admit_producer(producer,consumer):
     digest=_sha(json.dumps(producer,sort_keys=True,separators=(',',':')).encode())
     if producer==consumer:
         return dict(mode='same_runtime',producer_identity_sha256=digest)
-    if (digest not in _COMPATIBLE_PRODUCERS or producer.get('schema')!=consumer.get('schema')
-            or producer.get('original_validator_sources')!=consumer.get('original_validator_sources')):
+    if digest not in _COMPATIBLE_PRODUCERS or producer.get('schema')!=consumer.get('schema'):
         raise ValueError('Prepared capture producer is not compatible with this reader')
+    extra={}
+    if producer.get('original_validator_sources')!=consumer.get('original_validator_sources'):
+        if digest!=_STOCK_XP2_PRODUCER:
+            raise ValueError('Prepared capture producer is not compatible with this reader')
+        _check_stock_xp2_prepared_reader(producer,consumer)
+        extra['stock_reader_revalidation_sha256']=STOCK_XP2_READER_REVALIDATION[1]
     mode=('retained_preparation_producer' if
           _COMPATIBLE_PRODUCERS[digest].get('native_session_qualified') is False
           else 'retained_qualified_producer')
     return dict(mode=mode,producer_identity_sha256=digest,
-        **_COMPATIBLE_PRODUCERS[digest])
+        **_COMPATIBLE_PRODUCERS[digest],**extra)
+
+
+def _check_stock_xp2_prepared_reader(producer,consumer):
+    """Allow the exact stock producer only after scoped current-reader review."""
+    from .paths import resource_root
+    from .native.native_source_cache import load_pinned_json
+    root=resource_root()
+    path,digest=STOCK_XP2_READER_REVALIDATION
+    proof=load_pinned_json(root/path,digest)
+    scope=_COMPATIBLE_PRODUCERS[_STOCK_XP2_PRODUCER]
+    package=proof['package']
+    if (proof['schema']!='civ6-host.stock-xp2-retained-reader-revalidation.v1'
+            or proof['producer_identity_sha256']!=_STOCK_XP2_PRODUCER
+            or package['sha256']!=scope['package_sha256']
+            or proof['origin']['path']!=scope['origin_path']
+            or proof['origin']['sha256']!=scope['origin_sha256']
+            or configured_reference()!=dict(path=str((root/package['path']).resolve()),sha256=package['sha256'])):
+        raise ValueError('Stock XP2 reader requires its exact retained package and origin')
+    before=producer['original_validator_sources']
+    expected=dict(before)
+    for key,(previous,current) in proof['changed_original_capture_tools'].items():
+        if before.get(key)!=previous:
+            raise ValueError('Stock XP2 capture producer input identity changed')
+        expected[key]=current
+    readers=dict(proof['current_reader_sha256'])
+    previous,current=_STOCK_RESPONSE_ARCHIVE_READER_TRANSITION
+    if readers[_OFFICIAL_BUNDLE_READER]!=previous:
+        raise ValueError('Stock XP2 response archive reader has no reviewed predecessor')
+    readers[_OFFICIAL_BUNDLE_READER]=current
+    # The retained AST comparisons remove only the guarded XP1 branches.
+    for module,(previous,current) in (
+            ('runtime/capture_package.py',_XP1_PACKAGE_READER_DELTA),
+            ('runtime/capture_candidates.py',_XP1_HANDOFF_CANDIDATE_DELTA)):
+        if readers[module]!=previous:
+            raise ValueError('Stock XP2 package reader has no exact XP1-only transition')
+        readers[module]=current
+    if expected!=consumer['original_validator_sources'] or any(
+            consumer['runtime_sources'].get(key)!=expected_hash
+            for key,expected_hash in readers.items()):
+        raise ValueError('Stock XP2 current input reader changed')
+    functions=_current_bbg_functions(Path(__file__).read_bytes())
+    orchestration=dict(proof['current_reader_ast_sha256'])
+    for name,(previous,current) in _XP1_HANDOFF_ORCHESTRATION_DELTA.items():
+        if orchestration[name]!=previous:
+            raise ValueError('Stock XP2 orchestration has no exact XP1-only transition')
+        orchestration[name]=current
+    if any(_sha(ast.dump(functions[name],include_attributes=False).encode('utf-8'))!=expected_hash
+            for name,expected_hash in orchestration.items()):
+        raise ValueError('Stock XP2 input reader orchestration changed')
 
 
 def _check_xp1_prepared_reader(producer,consumer,admission,manifest,package_reference=None):
@@ -326,6 +448,14 @@ def _check_xp2_prepared_reader(producer,consumer,admission,manifest,reference,*,
             raise ValueError('Prepared XP2 current input validator changed: '+key)
         previous=producer['runtime_sources'].get(key)
         if previous==digest:continue
+        if (native_session_qualified
+                and key==_OFFICIAL_BUNDLE_READER
+                and (previous,digest)==_STOCK_RESPONSE_ARCHIVE_READER_TRANSITION):
+            reader_transitions.append(dict(module=key, producer_sha256=previous, consumer_sha256=digest,
+                transition='exact_stock_xp2_response_source_archive',
+                changed_functions=['_stock_response_source_archive','_response_transport'],
+                bbg_reader_branch_unchanged=True, producer_identity_substituted=False))
+            continue
         if (native_session_qualified and (key, previous, digest) == (
                 'runtime/capture_script_paths.py',
                 'b7b4f2f753ce59787507341bc4591a34844b6cab5f763d5282a174c7fabeabac',
@@ -391,6 +521,22 @@ def _check_xp2_prepared_reader(producer,consumer,admission,manifest,reference,*,
             reader_transitions.append(dict(module=key, producer_sha256=previous, consumer_sha256=digest,
                 transition='parent_scoped_static_proof_reuse', original_stock_validator_unchanged=True,
                 producer_identity_substituted=False))
+            continue
+        if native_session_qualified and (key,previous,digest) in (
+                ('runtime/capture_package.py',*_XP1_PACKAGE_READER_DELTA),
+                ('runtime/capture_candidates.py',*_XP1_HANDOFF_CANDIDATE_DELTA)):
+            reader_transitions.append(dict(module=key, producer_sha256=previous, consumer_sha256=digest,
+                transition='exact_xp1_engine_gate_in_shared_package_reader',
+                original_input_parsers_unchanged=True, producer_identity_substituted=False))
+            continue
+        if (native_session_qualified and (key, previous, digest) == (
+                'runtime/xp2_bbg_inputs.py',
+                'fd2cc4a9779fb17c136c0da6209ffef4f936652ae39c5da487f69129bd33238a',
+                'bb7b2171e24a8a7dd8228e6cfa72dfcfabeb1d8e3de681e0cb9de3739fff0617')):
+            reader_transitions.append(dict(module=key, producer_sha256=previous, consumer_sha256=digest,
+                transition='world_a_current_strings_host_selection',
+                source_review_sha256='64dea572a7e4162989ab0182c152c8a47921d588e8601fc4bdeb45c0b81757f8',
+                original_input_parsers_unchanged=True, producer_identity_substituted=False))
             continue
         # This exact source pair retains the original capture branch, all
         # component/map/mode/content/script validators and all other module
@@ -547,20 +693,24 @@ def _check_current_bbg_prepared_reader(producer,consumer,manifest,reference):
 
 def _load(*, _xp1_candidate=False, _candidate_profile=None,execution_image=None):
     from .capture_candidates import select_private_candidate
+    from .execution_images import _XP1_PROFILE
     candidate=select_private_candidate(xp1_candidate=_xp1_candidate,
                                        candidate_profile=_candidate_profile)
     reference=configured_reference()
     if reference is None:return None
-    current_stock=_prepared_xp2_execution(execution_image,reference=reference,
+    current_stock=_prepared_current_execution(execution_image,reference=reference,
         origin=(candidate.reference if candidate is not None else None))
     from .capture_package import read_package
     manifest,folder,files=read_package(reference, _xp1_candidate=_xp1_candidate,
                                       _candidate_profile=_candidate_profile,
                                       **({'execution_image':execution_image} if current_stock else {}))
     producer,consumer=manifest['validation_identity'],validation_identity()
-    admission=admit_producer(producer,consumer)
-    if candidate is not None and candidate.family=='xp1-lan' and producer != consumer:
-        _check_xp1_prepared_reader(producer,consumer,admission,manifest,reference)
+    if execution_image is _XP1_PROFILE:
+        _review_xp1_current_reader(producer,consumer,manifest,execution_image)
+    else:
+        admission=admit_producer(producer,consumer)
+        if candidate is not None and candidate.family=='xp1-lan' and producer != consumer:
+            _check_xp1_prepared_reader(producer,consumer,admission,manifest,reference)
     if candidate is not None and candidate.family=='xp2-lan':
         from . import xp2_bbg_inputs as bbg
         if (current_stock and producer!=consumer
@@ -619,6 +769,7 @@ def _check_localization(manifest,folder,capture,dependencies):
 
 def try_bundle(reference,*,input_profile,_xp1_candidate=False,_candidate_profile=None,
                execution_image=None):
+    from .execution_images import _XP1_PROFILE
     from .capture_candidates import select_private_candidate
     from . import xp2_bbg_inputs as bbg
     candidate=select_private_candidate(xp1_candidate=_xp1_candidate,
@@ -677,8 +828,9 @@ def try_bundle(reference,*,input_profile,_xp1_candidate=False,_candidate_profile
     dependencies={str((folder/r['path']).resolve()):r['sha256'] for r in manifest['files'].values()}
     dependencies.update({package_ref['path']:package_ref['sha256'],str((original.ROOT/origin[0]).resolve()):origin[1],str(Path(engine['path']).resolve()):engine['sha256']})
     if execution_image is not None:
-        if not (candidate is not None and candidate.family=='xp2-lan'
-                and _prepared_xp2_execution(execution_image,reference=package_ref,origin=origin)):
+        if not (candidate is not None
+                and (candidate.family=='xp2-lan' or (candidate.family=='xp1-lan' and execution_image is _XP1_PROFILE))
+                and _prepared_current_execution(execution_image,reference=package_ref,origin=origin)):
             raise ValueError('Selected execution image is not admitted for this prepared capture')
         from .execution_images import runtime_source_pins
         if complete_bbg:
@@ -690,8 +842,12 @@ def try_bundle(reference,*,input_profile,_xp1_candidate=False,_candidate_profile
             selected_dependencies=runtime_source_pins(dependencies,execution_image=execution_image)
             if (selected_dependencies.get(execution_image.path)!=execution_image.image_sha256
                     or dependencies.get(execution_image.path)!=execution_image.reference_core_sha256):
-                raise ValueError('Stock XP2 package does not pin the exact reference Core dependency')
+                raise ValueError('Stock package does not pin the exact reference Core dependency')
             dependencies=selected_dependencies
+        if execution_image is _XP1_PROFILE:
+            from .paths import resource_root
+            pin_path,pin_hash=_XP1_CURRENT_READER_PINS
+            dependencies[str((resource_root()/pin_path).resolve(strict=True))]=pin_hash
     if complete_bbg:
         bbg.verify_original_streams(inputs, capture, dependencies)
     runtimes=[]
@@ -741,7 +897,9 @@ def try_bundle(reference,*,input_profile,_xp1_candidate=False,_candidate_profile
         candidate.validate_inputs(inputs,bundle)
     admitted=original._remember_prepared_bundle(bundle,input_profile,original._prepared_bundle_validator_digests(),_token=original._PARENT_ADMISSION_TOKEN,_input_only=candidate is not None)
     if execution_image is not None:
-        producer_admission=admit_producer(manifest['validation_identity'],validation_identity())
+        producer,consumer=manifest['validation_identity'],validation_identity()
+        producer_admission=(_review_xp1_current_reader(producer,consumer,manifest,execution_image)
+                            if execution_image is _XP1_PROFILE else admit_producer(producer,consumer))
         if input_parser_transitions:
             producer_admission['input_parser_transitions']=copy.deepcopy(input_parser_transitions)
         _register_stock_xp2_execution(package_ref,origin,execution_image,producer_admission)
@@ -868,7 +1026,25 @@ def consume_prepared_closure(closure,*,environment=None,_xp1_candidate=False,_ca
             authority='exact_bbg751_recovered_capture_revalidation', runtime_bytes_revalidated=True,
             actor_input=False, strategic_training_ready=False, **{XP2_LAUNCH_FIELD: binding})
     if 'execution_image' in closure:
-        from .execution_images import from_identity
+        from .execution_images import _XP1_PROFILE, from_identity
+        selected=closure['execution_image']
+        if type(selected) is dict and selected.get('profile_id')==_XP1_PROFILE.id:
+            execution_image=from_identity(selected)
+            if (candidate is None or candidate.family!='xp1-lan'
+                    or closure.get('input_profile')!='xp1-lan'
+                    or closure.get('official_bundle')!=dict(path=candidate.reference[0],sha256=candidate.reference[1])
+                    or XP2_LAUNCH_FIELD in closure):
+                raise ValueError('Selected XP1 image requires the retained Rise and Fall worker closure')
+            bundle=try_bundle(candidate.reference,input_profile=candidate.family,
+                _xp1_candidate=_xp1_candidate,_candidate_profile=_candidate_profile,
+                execution_image=execution_image)
+            association=_STOCK_XP2_EXECUTION_ASSOCIATION
+            if (bundle is None or association is None or association[2]!=closure['execution_image']
+                    or any(closure['pins'].get(path)!=digest for path,digest in bundle.dependencies.items())):
+                raise ValueError('XP1 worker pins differ from the fully revalidated capture')
+            return dict(schema='civ6-host.prepared-capture-admission.v1',package=reference,
+                authority='exact_current_xp1_full_input_revalidation',runtime_bytes_revalidated=True,
+                producer=copy.deepcopy(association[4]),actor_input=False,strategic_training_ready=False)
         if (candidate is None or candidate.family!='xp2-lan'
                 or closure.get('input_profile')!='xp2-lan'):
             raise ValueError('Selected current image requires the exact stock XP2 candidate')

@@ -209,7 +209,7 @@ def compose_saved_load_services(backend):
         return services
     services.install_status_messages(receiver_state=dict(EMPTY_RECEIVER_STATE),
         writer_metadata_service=None, per_thread_hook=None)
-    services.install_cache_facades()
+    cache = services.install_cache_facades()
     queries = services.install_player_queries(core_lock=lock)
     consumer.enable_player_queries(queries)
     services.install_postload_aux90_null()
@@ -218,6 +218,9 @@ def compose_saved_load_services(backend):
             postload_160=True,cache_publication=True,commands=False,
             application_mirror=True,public_session_admitted=False)
     if getattr(backend,'_xp1_commands_requested',False):
+        from .control_input_source import reactivation_profile
+        if reactivation_profile(backend.core) is not None:
+            controller.install_reactivation(cache,backend.runtime.read)
         from .a0_found_unit_event import enable
         enable(consumer)
         from .a0_foundation_events import enable as enable_foundation
@@ -225,6 +228,8 @@ def compose_saved_load_services(backend):
         from .a0_foundation_events import enable_turn_units
         enable_turn_units(consumer, backend)
         if xp2:
+            if getattr(backend.core, '_civ6_host_execution_image', None) is not None:
+                consumer.enable_district_events()
             from .xp2_world_unit_event_source import bind_owner as bind_input_event_sources
             bind_input_event_sources(backend,backend.core,backend.runtime.read)
             from .xp2_production_queue_event_source import bind_owner as bind_queue_event_sources

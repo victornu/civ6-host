@@ -89,11 +89,12 @@ def verify_source(project_root) -> dict:
     return {'schema': 'civ6rl.native_xp1_archive_registration_source.v1', 'project_root': str(root), 'source_sha256': source_hashes, 'descriptor_proof_sha256': DESCRIPTOR_PROOF_SHA256, 'getter_remove_audit_sha256': AUDIT843_SHA256, 'registration_proof_sha256': REGISTRATION_PROOF_SHA256, 'archive_host_proof_sha256': HOST_PROOF_SHA256, 'xp1_core_sha256': XP1_CORE_SHA256, 'registration': {'interface_slot': '0x00', 'abi': 'bool(interface, descriptor)', 'return': 'preserve actual AL result', 'active_byte_writer': 'GameCore descriptor+0x48'}, 'eligible_for_training': False}
 
 def _check_teardown_receipt(receipt, host, core_base):
+    from civ6_host.runtime.xp1_saved_load import teardown_core_identity
     if type(receipt) is not dict or receipt.get('schema') != 'civ6rl.native_xp1_teardown_adapter_installation.v1':
         raise ValueError('XP1 archive registration requires the retained 821 teardown receipt')
     if getattr(host, '_xp1_teardown_binding', None) is not receipt:
         raise ValueError('XP1 teardown receipt is not retained by this host')
-    if receipt.get('installed') is not True or receipt.get('core_sha256') != XP1_CORE_SHA256 or receipt.get('core_module_base') != hex(core_base) or (receipt.get('host_pointer') != hex(host.pointer)) or (receipt.get('initialized_getter_observed') is not True) or (receipt.get('destroy_called') is not False) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('eligible_for_training') is not False) or (receipt.get('callback_references_retained') is not True):
+    if receipt.get('installed') is not True or receipt.get('core_sha256') != teardown_core_identity(host) or receipt.get('core_module_base') != hex(core_base) or (receipt.get('host_pointer') != hex(host.pointer)) or (receipt.get('initialized_getter_observed') is not True) or (receipt.get('destroy_called') is not False) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('eligible_for_training') is not False) or (receipt.get('callback_references_retained') is not True):
         raise ValueError('XP1 teardown receipt is mismatched, failed, or out of scope')
     globals_verified = receipt.get('host_globals_verified')
     expected_globals = {'0x9f2640': hex(host.pointer), '0x9f2648': hex(C.addressof(host.aux_object)), '0x9f2650': hex(C.addressof(host.logger_object))}

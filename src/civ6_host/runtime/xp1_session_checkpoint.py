@@ -44,7 +44,8 @@ def admit_resumed_bundle(original, resumed, manifest, *, compatibility=None):
     _reuse_prepared_bundle(original, REFERENCE, selected.family, _input_only=True)
     from . import network_checkpoint
     network_checkpoint._require_checkpoint_runtime(
-        manifest, getattr(original, 'execution_image', None), compatibility)
+        manifest, getattr(original, 'execution_image', None), compatibility,
+        reference=resumed.inputs.checkpoint)
     if (resumed.execution_image is not original.execution_image
             or resumed.reference != original.reference
             or resumed.inputs.profile is not original.inputs.profile

@@ -5,7 +5,7 @@ from .configuration_profiles import _source
 from .profile_script_binding import _current_executable
 from .source_build_identity import (XP2_HOST_COMPONENT_SHA, verify_source_build,
     xp2_component_requirements, xp2_source_component, CURRENT_HAVOK_BUILD_PROFILE,
-    CURRENT_STRINGS_BUILD_PROFILE)
+    CURRENT_STRINGS_BUILD_PROFILE, CURRENT_STRINGS_BUILD_PROFILES)
 from .saved_load_profiles import XP2_CORE_SHA256
 from . import xp2_bbg_inputs
 
@@ -31,7 +31,7 @@ def dispatch_wrapper_sha256(build):
 
 
 def property_component_sha256(build):
-    if build['profile'] in (CURRENT_HAVOK_BUILD_PROFILE, CURRENT_STRINGS_BUILD_PROFILE):
+    if build['profile'] in (CURRENT_HAVOK_BUILD_PROFILE, *CURRENT_STRINGS_BUILD_PROFILES):
         return xp2_source_component(build, 'script_aux_b8.inc', SCALAR_COMPONENT_SHA256)
     if build['host_sha256'] == xp2_bbg_inputs.UI_HOST[1]:
         return SCALAR_COMPONENT_SHA256

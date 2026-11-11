@@ -62,8 +62,8 @@ def prepare(core, context, host, profile, emit, *, null_tuner_diagnostic=False):
     from .native.native_localization import initialize_localization
     from .native.native_xp1_prepare_dispatch import prepare_xp1_context
 
-    actual = profile_for_core(core._name, mode='context',
-                              shared_dependency_directory=host.dll_directory)
+    from .xp1_saved_load import select_context
+    actual = select_context(core, getattr(host, '_xp1_saved_load_bundle', None), profile_for_core)
     if profile != actual or (profile.ruleset, profile.mode) != ('xp1', 'context'):
         raise ValueError('XP1 Prepare requires the exact initialized context profile')
     if getattr(host, '_xp1_prepare_entered', False):
@@ -79,7 +79,11 @@ def prepare(core, context, host, profile, emit, *, null_tuner_diagnostic=False):
     access = install_xp1_archive_access(host, core._handle, teardown, project_root=root, emit=emit)
     registration = install_xp1_archive_registration(
         host, core._handle, teardown, project_root=root, emit=emit)
-    initialize_localization(host, host.dll_directory)
+    shared = getattr(host, '_civ6_host_shared_dependencies', None)
+    if shared is None:
+        initialize_localization(host, host.dll_directory)
+    else:
+        initialize_localization(host, host.dll_directory, shared_dependency_profile=shared)
     receipt = prepare_xp1_context(core, context, host, project_root=root,
         module_paths=Windows().modules(), emit=emit,
         null_tuner_diagnostic=null_tuner_diagnostic)

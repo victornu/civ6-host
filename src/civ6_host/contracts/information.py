@@ -15,7 +15,7 @@ from civ6_host.contracts import unit_work_info, unit_work_state
 from . import network_turn
 
 
-PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources', 'diplomacy', 'trade', 'espionage', 'spy_completion', 'world_congress', 'world_congress_review', 'native_command_permissions', 'world_congress_active_effects')
+PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources', 'diplomacy', 'trade', 'trade_overview', 'unit_formations', 'dedications', 'espionage', 'spy_completion', 'world_congress', 'world_congress_review', 'native_command_permissions', 'world_congress_active_effects')
 COMBAT_GROUP_SCHEMA='civ6-host.combat-inputs.v1'
 PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v1'
 CURRENT_PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v2'
@@ -31,6 +31,9 @@ _REQUIRED_FIELDS = {
     'strategic_resources': ('strategic_resources',),
     'diplomacy': ('diplomacy_overview',),
     'trade': ('trade_routes', 'trade_origins'),
+    'trade_overview': ('trade_overview_status',),
+    'unit_formations': ('unit_formations',),
+    'dedications': ('dedications',),
     'espionage': ('espionage',),
     'spy_completion': ('spy_completion',),
     'world_congress': ('world_congress',),
@@ -124,6 +127,32 @@ def project(group: str, observation, decisions) -> dict:
         return {'schema': trade.GROUP_SCHEMA, 'player_id': player_id, 'turn': turn,
                 'routes': copy.deepcopy(decisions['trade_routes']),
                 'origins': copy.deepcopy(decisions['trade_origins'])}
+
+    if group == 'trade_overview':
+        from . import trade_overview
+        if decisions.get('schema') not in network_turn.TRADE_OVERVIEW_CAPABILITY_SCHEMAS:
+            raise ValueError('Trade overview requires its explicit capability revision')
+        profile = (trade_overview.STOCK_PROFILE
+                   if decisions['schema'] in network_turn.STOCK_TRADE_CAPABILITY_SCHEMAS
+                   else trade_overview.PROFILE)
+        trade_overview.validate_group(
+            decisions['trade_overview'], decisions['trade_overview_status'], decisions, observation, profile=profile)
+        if decisions['trade_overview'] is None:
+            raise ValueError('Public trade overview is unavailable: ' + decisions['trade_overview_status'])
+        return copy.deepcopy(decisions['trade_overview'])
+
+    if group == 'unit_formations':
+        from . import unit_formations
+        if decisions['schema'] not in network_turn.STOCK_FORMATION_SCHEMAS:
+            raise ValueError('Unit formation information requires its explicit capability revision')
+        return copy.deepcopy(unit_formations.validate(decisions['unit_formations'], player_id, turn,
+                                                       observation=observation))
+
+    if group == 'dedications':
+        from . import dedications
+        if decisions['schema'] not in network_turn.STOCK_DEDICATION_SCHEMAS:
+            raise ValueError('Dedication information requires its explicit capability revision')
+        return copy.deepcopy(dedications.validate_state(decisions['dedications'], player_id, turn))
 
     if group == 'espionage':
         from . import espionage

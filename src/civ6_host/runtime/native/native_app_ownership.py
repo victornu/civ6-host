@@ -43,17 +43,20 @@ CURRENT_XP2_CHANGED_BLP_FILES = frozenset(path for path, _index in CURRENT_XP2_C
 
 
 def _execution_image_for_ownership(candidate_backend):
-    """Return only the canonical selected XP2 runtime identity, or legacy None."""
+    """Select the shared installation inventory for an exact captured runtime."""
     if candidate_backend is None:
         return None
     image = getattr(getattr(candidate_backend, 'core', None),
                     '_civ6_host_execution_image', None)
     if image is None:
         return None
-    from civ6_host.runtime.execution_images import identity
+    from civ6_host.runtime.execution_images import _XP1_PROFILE, identity
     selected = identity(image)
-    if selected != CURRENT_XP2_IMAGE_IDENTITY:
-        raise ValueError('AppOwnership current inventory requires the canonical XP2 execution image')
+    if image is _XP1_PROFILE:
+        from civ6_host.runtime.xp1_saved_load import validate_context_identity
+        validate_context_identity(candidate_backend.profile, candidate_backend.captured_bundle)
+    elif selected != CURRENT_XP2_IMAGE_IDENTITY:
+        raise ValueError('AppOwnership current inventory requires a registered expansion image')
     return selected
 
 
@@ -65,10 +68,11 @@ def _validate_current_xp2_inventory_receipt(receipt, original_rows, selected_ima
     original_rows = plain(original_rows)
     host_proof = plain(host_proof)
     producer_proof = plain(producer_proof)
+    from civ6_host.runtime.execution_images import _XP1_PROFILE, identity
     if (type(receipt) is not dict
             or receipt.get('schema') != 'civ6-host.app-ownership.current-inventory-transition.v1'
             or receipt.get('execution_image') != CURRENT_XP2_IMAGE_IDENTITY
-            or selected_image != CURRENT_XP2_IMAGE_IDENTITY):
+            or selected_image not in (CURRENT_XP2_IMAGE_IDENTITY, identity(_XP1_PROFILE))):
         raise ValueError('AppOwnership current inventory receipt or image identity differs')
     source_proofs = [
         {'path': 'evidence/native-host-capability-status/77ed09ed4c69e5f23c83e72e45bad0d0ee5aec62bcebc66dfe3d4dff526ba620.json',
@@ -203,6 +207,9 @@ def _read_current_xp2_fixed_inventory(root, original_rows, candidate_backend,
     selected_image = _execution_image_for_ownership(candidate_backend)
     if selected_image is None:
         return read_fixed_inventory(root, original_rows)
+    if (selected_image != CURRENT_XP2_IMAGE_IDENTITY
+            and Path(root).resolve() != Path(selected_image['path']).resolve().parents[4]):
+        raise ValueError('AppOwnership inventory and selected Core use different installations')
     receipt = load_pinned_json(abi.ROOT / CURRENT_XP2_INVENTORY_PATH,
                                CURRENT_XP2_INVENTORY_SHA256)
     current_rows = _validate_current_xp2_inventory_receipt(

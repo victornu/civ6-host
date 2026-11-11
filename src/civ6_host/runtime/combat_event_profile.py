@@ -47,7 +47,7 @@ def event_profile(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
 def bind_owner(backend,core,read,*,execution_image=None):
     from .xp1_world_text_profile import bind_owner as bind_world
     core_sha256=backend.load_abi.core_sha256
-    if execution_image is None:
+    if execution_image is None and core_sha256 == XP2_CORE_SHA256:
         execution_image=getattr(core,'_civ6_host_execution_image',None)
     source.bind_owner(backend,core,read,execution_image=execution_image)
     bind_world(backend,core,read,execution_image=execution_image)

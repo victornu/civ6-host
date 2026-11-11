@@ -25,6 +25,8 @@ class XP2CommandEventSourcePinsTests(unittest.TestCase):
         cls.execution_image = select(PROFILE_ID, core_path=known_path(PROFILE_ID))
 
     def test_all_five_actual_providers_pin_selected_core_and_skip_capture_images(self):
+        from civ6_host.runtime.a0_policy_unlock_current import CURRENT_EXE_SHA256
+
         providers = (
             xp1_log_event_profile,
             found_unit_event_profiles,
@@ -39,8 +41,8 @@ class XP2CommandEventSourcePinsTests(unittest.TestCase):
                     execution_image=self.execution_image)
                 self.assertEqual(pins[self.execution_image.path],
                                  self.execution_image.image_sha256)
-                self.assertFalse(any(path.endswith('CivilizationVI.exe')
-                                     for path in pins))
+                self.assertTrue(all(sha == CURRENT_EXE_SHA256 for path, sha in pins.items()
+                                    if path.endswith('CivilizationVI.exe')))
                 self.assertFalse(any(path.endswith('GameCore_XP2_FinalRelease.dll')
                                      and path != self.execution_image.path
                                      for path in pins))
@@ -62,6 +64,15 @@ class XP2CommandEventSourcePinsTests(unittest.TestCase):
             execution_image=self.execution_image)
         self.assertTrue(foundation.record_types_by_kind)
         self.assertTrue(history.record_types_by_kind)
+
+    def test_occupation_consumer_and_statement_presentation_join_the_same_session_closure(self):
+        from civ6_host.runtime import xp1_session_view, xp2_city_occupation_event, xp2_statement_source
+        view_pins = xp1_session_view.source_dependencies(
+            core_sha256=XP2_CORE_SHA256, execution_image=self.execution_image)
+        command_pins = foundation_event_profile.source_dependencies(
+            core_sha256=XP2_CORE_SHA256, execution_image=self.execution_image)
+        self.assertIn(xp2_statement_source.PRESENTATION[1], view_pins.values())
+        self.assertIn(xp2_city_occupation_event.SOURCE[1], command_pins.values())
 
     def test_current_building_pillage_preserves_image_at_dispatch_and_encode(self):
         codec = native_event_e660_building_pillaged

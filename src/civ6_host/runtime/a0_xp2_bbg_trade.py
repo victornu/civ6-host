@@ -245,7 +245,7 @@ def enable(owner, backend, receiver, *, on_local_turn_begin, on_governor=None, o
                         amani.PLAYER_PROPERTY: frozenset(),
                         amani.PLOT_PROPERTY: frozenset({amani.PLOT_RECORD})})
         sizes.update({amani.ASSIGNED_RECORD: 112, amani.CHANGED_RECORD: 96, amani.PLOT_RECORD: 96})
-        source_hash += amani.SOURCE[1]
+        source_hash += amani.SOURCE[1] + amani.PLOT_SOURCE[1]
     if on_promotion is not None:
         if (owner.profile.record_types_by_kind.get(promotion.KIND) != frozenset({promotion.RECORD_TYPE})
                 or owner.profile.record_sizes.get(promotion.RECORD_TYPE) != promotion.RECORD_SIZE):

@@ -280,6 +280,10 @@ class SessionClient:
                     chosen, request['selection'].get('parameters'))
                 if _digest(requested_action) != _digest(selected):
                     raise ProtocolError('Congress choice was substituted')
+            elif chosen.get('kind') == 'confirm_dedications':
+                selected = network_turn.select_capability(prior_view['decisions'], request['selection'])
+                if _digest(requested_action) != _digest(selected):
+                    raise ProtocolError('Dedication choice was substituted')
             elif _digest(requested_action) != _digest(chosen):
                 raise ProtocolError('Requested action differs from the selected actor choice')
 
@@ -428,6 +432,8 @@ class SessionClient:
         if group=='combat':
             if decisions.get('schema') not in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
                 raise InformationUnavailable('This historical catalogue lacks the qualified combat projection')
+        if group == 'trade_overview' and decisions['trade_overview'] is None:
+            raise InformationUnavailable('Public trade overview is unavailable: ' + decisions['trade_overview_status'])
         if group == 'production':
             from .contracts.production_inputs import CURRENT_SCHEMA
             if (decisions.get('schema') in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS
@@ -473,6 +479,9 @@ class SessionClient:
             'strategic_resources': ('strategic_resources',),
             'diplomacy': ('diplomacy_overview',),
             'trade': ('trade_routes', 'trade_origins'),
+            'trade_overview': ('trade_overview', 'trade_routes'),
+            'unit_formations': ('unit_formations',),
+            'dedications': ('dedications',),
             'espionage': ('espionage',),
             'spy_completion': ('spy_completion',),
             'world_congress': ('world_congress',),
@@ -573,6 +582,12 @@ class SessionClient:
             from .contracts import world_congress
             try:
                 world_congress.choose(decisions['world_congress'], action, parameters)
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+        elif action.get('kind') == 'confirm_dedications':
+            from .contracts import dedications
+            try:
+                dedications.choose(decisions['dedications'], action, parameters)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
         elif parameters is not None:

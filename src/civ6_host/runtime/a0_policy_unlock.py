@@ -118,10 +118,12 @@ def dispatch(owner, kind, fields):
     expected_sha = SOURCE[1]
     image_id = getattr(owner, '_policy_unlock_current_image_id', None)
     if image_id is not None:
-        from .a0_policy_unlock_current import CURRENT_PROFILE_ID, PROFILE_SHA256
+        from .a0_policy_unlock_current import CURRENT_PROFILE_ID, OBSOLETE_KIND, PROFILE_SHA256, dispatch_obsolescence
         image = getattr(owner.deferred.core, '_civ6_host_execution_image', None)
         if image_id != CURRENT_PROFILE_ID or getattr(image, 'id', None) != image_id:
             raise ValueError('Current policy unlock lost its execution image')
+        if kind == OBSOLETE_KIND:
+            return dispatch_obsolescence(owner, fields)
         expected_sha = PROFILE_SHA256
     if (kind != KIND or owner.active_kind != KIND or profile is None
             or profile is not owner._policy_unlock_event_profile

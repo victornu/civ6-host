@@ -1,7 +1,7 @@
 """Reproduce only the source-qualified shared player-operation request changes.
 
 The measured extractor output omitted two already-installed adaptations. Restore
-those exact bytes first, then add the separately qualified Congress permit. Each
+those exact bytes first, then add the source-bound Congress and dedication permits. Each
 stage is pinned; no historical source, ABI proof or arbitrary caller is admitted.
 """
 from hashlib import sha256
@@ -11,7 +11,9 @@ LABEL = 'source-pinned reproduction of existing XP2 UNLOCK_POLICIES empty-map an
 HISTORICAL_SOURCE_SHA256 = 'c2df4e4764ee708f6161267c3711ddef6b7f9ee39683384f08bdeb7b7e0dabcc'
 EXTRACTED_SHA256 = '036334282cdd7d234647442ac54e7d897aca91462b6eb30a04170447a7966d84'
 INSTALLED_LEGACY_SHA256 = 'd333b38f3e2e6b53a83957205b0a6b64fed5c3d642530488424f4eefe93cbbd7'
-DESTINATION_SHA256 = 'd26cba66939589a7afdb0b62b547d65260b0ab845904c53534f4863aea8f3fd9'
+CONGRESS_SHA256 = 'd26cba66939589a7afdb0b62b547d65260b0ab845904c53534f4863aea8f3fd9'
+DESTINATION_SHA256 = '9183423d0da7e95c409591fc9eb7c66ba5d3553909f52950e88f00dd336ba84c'
+DEDICATION_LABEL = 'sealed stock XP2 dedication confirmation preserves the official direct request and keeps native readback separate'
 
 _LEGACY_EDITS = (('\n'
   'def request_player_operation(core, context, player, operation, parameters, *, read=None, '
@@ -106,6 +108,36 @@ _CONGRESS_EDITS = (('\n'
   '        return receipt\n'))
 
 
+_DEDICATION_EDITS = (('def request_player_operation(core, context, player, operation, parameters, *, read=None, '
+  'native_api=None, submit=True, '
+  "core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3', allow_empty=False, "
+  'congress_permit=None):\n',
+  'def request_player_operation(core, context, player, operation, parameters, *, read=None, '
+  'native_api=None, submit=True, '
+  "core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3', allow_empty=False, "
+  'congress_permit=None, dedication_permit=None):\n'),
+ ('    Congress permit additionally admits its exact source-described empty maps\n'
+  '    and direct requests without CanStart. Other callers retain their contract.\n',
+  '    Congress permit additionally admits its exact source-described empty maps.\n'
+  '    Sealed Congress and dedication permits admit their exact direct requests\n'
+  '    without CanStart. Other callers retain their contract.\n'),
+ ('    congress_name = None\n',
+  '    if congress_permit is not None and dedication_permit is not None:\n'
+  "        raise ValueError('One exact player-operation request permit is required')\n"
+  '    direct_name = None\n'),
+ ('        congress_name = authorize_request(congress_permit, core, context, player, operation,\n',
+  '        direct_name = authorize_request(congress_permit, core, context, player, operation,\n'
+  '            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)\n'
+  '    elif dedication_permit is not None:\n'
+  '        from civ6_host.runtime.xp2_dedications import authorize_request\n'
+  '        direct_name = authorize_request(dedication_permit, core, context, player, operation,\n'),
+ ('        allowed = (True if congress_name is not None else\n',
+  '        allowed = (True if direct_name is not None else\n'),
+ ('        if congress_name is not None:\n', '        if direct_name is not None:\n'),
+ ('                           source_qualified_request_only=congress_name)\n',
+  '                           source_qualified_request_only=direct_name)\n'))
+
+
 def _digest(text):
     return sha256(text.encode('utf-8')).hexdigest()
 
@@ -126,4 +158,5 @@ def parameterize(name, text):
     if _digest(text) != EXTRACTED_SHA256:
         raise ValueError('Player-operation extraction input changed; rebase source explicitly')
     text = _apply(text, _LEGACY_EDITS, INSTALLED_LEGACY_SHA256)
-    return _apply(text, _CONGRESS_EDITS, DESTINATION_SHA256)
+    text = _apply(text, _CONGRESS_EDITS, CONGRESS_SHA256)
+    return _apply(text, _DEDICATION_EDITS, DESTINATION_SHA256)

@@ -172,10 +172,21 @@ class BBGTradeReceiverTests(unittest.TestCase):
         self.assertEqual(deferred.drain(), 1)
         self.assertEqual(seen[-1], (4, 0, 12))
         self.assertEqual((deferred.consumed_count, deferred.pending), (4, []))
-        reader.fields.return_value = {0xa1e5a149: selector, 0xd6fcf3e4: shared.scalar(2, 0x4c608a17),
-                                      0x8c468e3c: struct.pack('<H6xQII', 0, 0x1000, 8, 0x21000001)}
-        with self.assertRaisesRegex(ValueError, 'outside the exact property operation'):
-            arguments.dispatch(host.pointer, amani.PLOT_PROPERTY, 0x9000)
+        position = struct.pack('<H6xQII', 0, 0x1000, 8, 0x21000001)
+        reader.read.return_value = struct.pack('<ii', 22, 12)
+        reader.fields.return_value = {0xa1e5a149: selector, 0xd6fcf3e4: shared.scalar(2, 0xd77b5fdb),
+                                      0x8c468e3c: position}
+        self.assertEqual(arguments.dispatch(host.pointer, amani.PLOT_PROPERTY, 0x9000), 0)
+        self.assertEqual(struct.unpack_from('<IIII', deferred.pending[0]), (96, 184, 5, 0))
+        self.assertEqual(struct.unpack_from('<Iii', deferred.pending[0], 80), (5, 22, 12))
+        self.assertEqual(deferred.drain(), 1)
+        self.assertEqual((deferred.consumed_count, deferred.pending), (5, []))
+
+        with amani.expect_properties(owner, player=0, plots=((4, 9),), allow_player=True):
+            reader.fields.return_value[0xd6fcf3e4] = shared.scalar(2, 0x4c608a17)
+            with self.assertRaisesRegex(ValueError, 'outside the owned city locations'):
+                arguments.dispatch(host.pointer, amani.PLOT_PROPERTY, 0x9000)
+        self.assertEqual(deferred.pending, [])
 
     def test_spy_source_and_selector_match_the_current_producer(self):
         from civ6_host.runtime.execution_images import known_path, select

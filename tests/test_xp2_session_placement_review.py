@@ -95,7 +95,9 @@ class XP2PlacementReview(unittest.TestCase):
             with self.subTest(seconds=seconds):
                 self.assertEqual(review.review_lifetime_seconds(closure,report,placement_preparation=prep),seconds)
                 q.saved_load_validate_supervision(report,self.closure['pins'],lifetime_seconds=seconds,session=True,placement_preparation=True)
-                with self.assertRaises(ValueError):review.review_lifetime_seconds(closure,report)
+                # Ordinary XP2 sessions already admit these exact budgets;
+                # the extra preparation selection still has its own guards.
+                self.assertEqual(review.review_lifetime_seconds(closure,report),seconds)
                 with self.assertRaises(ValueError):q.saved_load_validate_supervision(report,self.closure['pins'],lifetime_seconds=seconds,session=True)
                 closure['input_profile']='xp1-lan'
                 with self.assertRaises(ValueError):review.review_lifetime_seconds(closure,report,placement_preparation=prep)

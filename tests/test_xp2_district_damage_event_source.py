@@ -48,11 +48,15 @@ def fields(g,kind):
 
 class DistrictSourceTests(unittest.TestCase):
     def test_exact_source_and_independent_exe_slot_authority(self):
+        from civ6_host.runtime.execution_images import _PROFILE
+
         p=source.source()
         self.assertEqual(len(p['functions']),32)
         self.assertFalse(p['contract']['omission_admitted'])
         self.assertEqual(set(source.event_profile().record_types_by_kind),{0xf74afc79,0x47261a7d})
-        self.assertIn(source.SOURCE[1],source.source_dependencies().values())
+        pins=source.source_dependencies(execution_image=_PROFILE)
+        self.assertIn(source.SOURCE[1],pins.values())
+        self.assertEqual(pins[_PROFILE.path],_PROFILE.image_sha256)
         self.assertEqual(p['query_operations']['district_hash']['slot'],0x58)
         self.assertEqual(p['query_operations']['district_position']['slot'],0x38)
         self.assertEqual(p['families']['0x754cbd1b']['normalized_second_unit'],(65535,1,4294967295))
@@ -63,7 +67,7 @@ class DistrictSourceTests(unittest.TestCase):
             lambda p:p['families']['0x754cbd1b'].__setitem__('normalized_second_unit',[0,1,0]),
             lambda p:p['contract'].__setitem__('omission_admitted',True),
         ):
-            doc=json.loads((resource_root()/source.SOURCE[0]).read_text());mutation(doc)
+            doc=json.loads((resource_root()/source.SOURCE[0]).read_text(encoding='utf-8'));mutation(doc)
             with self.assertRaises(ValueError):source._verify(doc)
 
     def test_typed_field_decoding_retains_actual_scalar_and_descriptor_domains(self):

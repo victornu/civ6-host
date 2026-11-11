@@ -66,17 +66,39 @@ class SavedTurnBoundary:
             raise ValueError('XP1 update transport profile changed')
 
     def turn_segment(self,saved,player_id,turn):
-        # Historical Base/XP1/v36 paths perform no additional read.
+        # Historical paths keep their existing readback unless the current
+        # Congress or stock era-choice profile pins the native getter.
         if (self.core_sha256 != XP2_CORE_SHA256
-                or getattr(saved, 'world_congress_diagnostic', False) is not True):
+                or (getattr(saved, 'world_congress_diagnostic', False) is not True
+                    and getattr(saved, 'stock_dedications', False) is not True)):
             return None
         self._check(saved)
         from .xp2_turn_segment import read
         return read(saved, player_id, turn)
 
-    def unchanged_request(self,saved,action,before,after):
+    def reactivation_owner(self,saved):
+        from .control_input_service import ControlInputService
+        from .control_input_source import reactivation_profile
+
+        backend=getattr(saved,'backend',None)
+        if reactivation_profile(getattr(backend,'core',None)) is None:
+            return None
+        self._check(saved)
+        controller=getattr(backend.host,'_control_input_owner',None)
+        if (type(controller) is not ControlInputService or controller.core is not backend.core
+                or controller.context!=backend.context or controller._reactivation_cache is None):
+            raise RuntimeError('Installed expansion lost its shared reactivation owner')
+        controller._check()
+        return controller
+
+    def unchanged_request(self,saved,action,before,after,*,reactivated=False):
         saved._check_active()
         from .network_turns import same_readiness
+        if (reactivated
+                and action['kind'] in ('end_turn','force_end_turn')
+                and before['active'] is True and same_readiness(before,after)):
+            return dict(status='submitted',reason='native_turn_reactivated_same_turn',
+                        requested_action=action)
         # Shift+Enter can submit while this player is already waiting. Delivery
         # through the real Core queue is evidence of submission only. Equality
         # of these public controls proves neither a global no-op nor acceptance.

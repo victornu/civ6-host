@@ -181,6 +181,7 @@ class DistrictTests(unittest.TestCase):
 
     def test_admission_pending_duplicate_profile_and_failure_quarantine(self):
         h, d, a, c, r, _, _ = self.service()
+        r.fields.return_value = {}
         with patch.object(event, 'verify_live', return_value={}):
             c.enable_district_events()
         with self.assertRaisesRegex(ValueError, 'idle'):
@@ -194,6 +195,7 @@ class DistrictTests(unittest.TestCase):
 
     def test_nonzero_counter_does_not_silently_reset_or_skip_native_event(self):
         h, d, a, c, r, _, _ = self.service()
+        r.fields.return_value = {}
         with patch.object(event, 'verify_live', return_value={}):
             c.enable_district_events()
         d.host_notification_counter = 1

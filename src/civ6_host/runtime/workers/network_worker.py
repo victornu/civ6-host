@@ -43,19 +43,32 @@ def _open_xp1(closure, path, emit, win):
     governors_diagnostic = closure.get('governors_diagnostic', False)
     initial_diplomacy = closure.get('diplomacy_overview_diagnostic', False)
     trade_diagnostic = closure.get('trade_diagnostic', False)
+    standard_trade = closure.get('standard_trade', False)
+    unit_formations = closure.get('unit_formations', False)
+    stock_dedications = closure.get('stock_dedications', False)
     espionage_diagnostic = closure.get('espionage_diagnostic', False)
     world_congress_diagnostic = closure.get('world_congress_diagnostic', False)
     world_congress_review_diagnostic = closure.get('world_congress_review_diagnostic', False)
+    trade_overview_ui_selected = closure.get('trade_overview_ui_selected', False)
     if (type(initial_diplomacy) is not bool or initial_diplomacy and (
             selected.family != 'xp2-lan' or governors_diagnostic is not True
             or war_source_sha256 is None or 'execution_image' not in closure)):
         raise ValueError('Initial diplomacy requires the exact current XP2 v33 closure')
     if type(trade_diagnostic) is not bool or trade_diagnostic and not initial_diplomacy:
         raise ValueError('Trade requires the complete current XP2 v33 closure')
+    if (type(standard_trade) is not bool or standard_trade and (
+            selected.family != 'xp2-lan' or trade_diagnostic or governors_diagnostic
+            or 'execution_image' not in closure)):
+        raise ValueError('Standard trade requires the exact stock XP2 closure')
+    if type(unit_formations) is not bool or unit_formations and not standard_trade:
+        raise ValueError('Unit formations require the exact stock XP2 closure')
+    if type(stock_dedications) is not bool or stock_dedications and not unit_formations:
+        raise ValueError('Dedications require the exact stock XP2 v2 closure')
     if type(espionage_diagnostic) is not bool or espionage_diagnostic and not trade_diagnostic:
         raise ValueError('Espionage requires the complete current XP2 trade closure')
-    if type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not espionage_diagnostic:
-        raise ValueError('World Congress requires the complete current XP2 espionage closure')
+    if (type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not (
+            espionage_diagnostic or stock_dedications and world_congress_review_diagnostic is True)):
+        raise ValueError('World Congress requires the complete XP2 BBG or stock review closure')
     if (type(world_congress_review_diagnostic) is not bool
             or world_congress_review_diagnostic and world_congress_diagnostic is not True):
         raise ValueError('Congress review requires its exact Boolean Congress closure')
@@ -100,6 +113,26 @@ def _open_xp1(closure, path, emit, win):
             for source, expected in module.source_dependencies(**execution_options).items():
                 if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
                     raise ValueError('Trade source is outside the worker closure')
+    if standard_trade:
+        from civ6_host.runtime import xp2_trade
+        from civ6_host.runtime.resource_resolution import resolve_path
+        dependencies = xp2_trade.standard_source_dependencies(selected.reference,
+            core_sha256=selected.core_sha256, **execution_options)
+        for source, expected in dependencies.items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Standard trade source is outside the worker closure')
+    if unit_formations:
+        from civ6_host.runtime import xp2_unit_formations
+        dependencies = xp2_unit_formations.source_dependencies(selected.reference, **execution_options)
+        for source, expected in dependencies.items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Unit formation source is outside the worker closure')
+    if stock_dedications:
+        from civ6_host.runtime import xp2_dedications
+        dependencies = xp2_dedications.source_dependencies(selected.reference, **execution_options)
+        for source, expected in dependencies.items():
+            if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
+                raise ValueError('Dedication source is outside the worker closure')
     if espionage_diagnostic:
         from civ6_host.runtime import xp2_espionage
         from civ6_host.runtime.resource_resolution import resolve_path
@@ -118,6 +151,23 @@ def _open_xp1(closure, path, emit, win):
         for source, expected in source_dependencies(**execution_options).items():
             if closure['pins'].get(str(resolve_path(_Path(source)).resolve())) != expected:
                 raise ValueError('Congress review source is outside the worker closure')
+    if type(trade_overview_ui_selected) is not bool or trade_overview_ui_selected and not world_congress_review_diagnostic:
+        raise ValueError('Trade overview requires the exact complete XP2 public decision closure')
+    if trade_overview_ui_selected:
+        from civ6_host.runtime import xp2_trade_overview
+        for source, expected in xp2_trade_overview.source_dependencies(
+                selected.reference, execution_options.get('execution_image')).items():
+            if closure['pins'].get(str(_Path(source).resolve())) != expected:
+                raise ValueError('Trade overview source is outside the worker closure')
+    from civ6_host.runtime import xp2_captured_city
+    stock_captured_city = standard_trade and xp2_captured_city.supports_stock(
+        selected.reference, execution_options.get('execution_image'))
+    captured_city_enabled = stock_captured_city or (trade_diagnostic and trade_overview_ui_selected)
+    if captured_city_enabled:
+        for source, expected in xp2_captured_city.source_dependencies(
+                **execution_options, stock=stock_captured_city).items():
+            if closure['pins'].get(str(_Path(source).resolve())) != expected:
+                raise ValueError('Captured-city source is outside the worker closure')
     if _Path(sys.executable).resolve() != saved_load_build_pins({}, ui=True,
             core_sha256=selected.core_sha256, official_bundle=selected.reference, **execution_options):
         raise ValueError('XP1 session requires its exact native UI executable')
@@ -130,9 +180,13 @@ def _open_xp1(closure, path, emit, win):
     saved.governors_diagnostic = governors_diagnostic
     saved.diplomacy_overview_diagnostic = initial_diplomacy
     saved.trade_diagnostic = trade_diagnostic
+    saved.standard_trade = standard_trade
+    saved.unit_formations = unit_formations
+    saved.stock_dedications = stock_dedications
     saved.espionage_diagnostic = espionage_diagnostic
     saved.world_congress_diagnostic = world_congress_diagnostic
     saved.world_congress_review_diagnostic = world_congress_review_diagnostic
+    saved.trade_overview_ui_selected = trade_overview_ui_selected
     saved.war_source_sha256 = war_source_sha256
     run = _Path(path).resolve().parent
     emit('xp1_saved_raw_load_observed', receipt=_write_once(run/'raw-load-result.json', saved.raw_result))
@@ -160,6 +214,11 @@ def _open_xp1(closure, path, emit, win):
     bind(saved)
     if trade_diagnostic:
         xp2_bbg_trade_feedback.bind(saved)
+    if captured_city_enabled:
+        xp2_captured_city.bind(saved)
+    if trade_overview_ui_selected or standard_trade:
+        from civ6_host.runtime.xp2_trade_overview import bind_civic_hook
+        bind_civic_hook(saved)
     compare_initial = None
     if saved.inputs.checkpoint is not None:
         from civ6_host.runtime.network_checkpoint import prepare_owner
@@ -244,6 +303,9 @@ def _execute_xp1(saved, action, player_id, sequence, path):
                    deepcopy(saved.continuation.explicit_city_shot_defenses))
                   if shot_action else None)
     attack_action = action['kind']=='unit_attack'
+    occupation_action = action['kind'] == 'resolve_captured_city'
+    prior_occupation = (deepcopy(saved.continuation.explicit_captured_city)
+                        if occupation_action else None)
     if attack_action:
         from civ6_host.contracts.capability_unit_attacks import project_cities
         shape = saved.continuation.observation
@@ -281,6 +343,16 @@ def _execute_xp1(saved, action, player_id, sequence, path):
                     available = chosen == action['candidate']
                 except PolicyAssignmentUnavailable:
                     pass
+        elif action['kind'] == 'confirm_dedications':
+            from civ6_host.contracts import dedications, network_turn
+            try:
+                available = network_turn.select_capability(decisions, {
+                    'decision_id': decisions['decision_id'],
+                    'candidate_id': network_turn.digest(dedications.CANDIDATE),
+                    'parameters': {'indices': action['indices']},
+                }) == action
+            except ValueError:
+                available = False
         else:
             available = any(row['action'] == action for row in decisions['candidates'])
     if not available:
@@ -298,6 +370,8 @@ def _execute_xp1(saved, action, player_id, sequence, path):
     if attack_action and prior_combat != (saved.continuation.explicit_combat_units,
              project_cities(saved.continuation.explicit_combat_cities,observed['width'],observed['height'])):
         return dict(status='refused',reason='native_combat_state_changed',requested_action=action)
+    if occupation_action and prior_occupation != saved.continuation.explicit_captured_city:
+        return dict(status='refused', reason='native_captured_city_state_changed', requested_action=action)
     if shot_action and prior_shot != (saved.continuation.explicit_ranged_shots[action['kind']],
                                       saved.continuation.explicit_city_shot_defenses):
         return dict(status='refused', reason='native_ranged_shot_state_changed', requested_action=action)
@@ -389,12 +463,46 @@ def _execute_xp1(saved, action, player_id, sequence, path):
         if effect['status'] not in ('completed','refused'):
             raise RuntimeError('XP1 world-input result has an unqualified status')
         return dict(status=effect['status'],reason=effect['refusal_code'],requested_action=action)
+    if action['kind'] == 'unit_formation':
+        effect = result['effect']
+        receipt = effect['receipt']
+        if (effect['status'] not in ('completed', 'refused') or receipt['action'] != action
+                or receipt['native_archive_delivered'] is not True
+                or receipt['native_effect_readback'] is not (effect['status'] == 'completed')):
+            raise RuntimeError('Formation result lacks the requested native readback')
+        return dict(status=effect['status'], reason=effect['refusal_code'], requested_action=action)
+    if action['kind'] == 'confirm_dedications':
+        effect = result['effect']
+        receipt = effect['receipt']
+        if (effect['status'] != 'completed' or receipt['action'] != action
+                or receipt['native_archive_delivered'] is not True
+                or receipt['native_effect_readback'] is not True
+                or len(receipt['native_archive_sha256']) != len(action['indices'])):
+            raise RuntimeError('Dedication confirmation lacks exact native archive and effect readback')
+        return dict(status='completed', reason=None, requested_action=action)
     if action['kind']=='unit_order':
         effect=result['effect']
         if effect['status']!='completed' or effect['receipt']['action']!=action:
             raise RuntimeError('XP1 unit-order result has no matching native delivery')
         return dict(status='completed',reason=None,requested_action=action)
-    if queue_action or placement_action or attack_action or action['kind'] in ('city_focus','city_citizen'):
+    if attack_action:
+        from civ6_host.runtime.xp2_unit_attack_source import (
+            CURRENT_XP2_NO_EFFECT, CURRENT_XP2_RANGE_SUBMITTED,
+        )
+        effect=result['effect']
+        reason=effect.get('refusal_code')
+        if (effect['receipt']['action'] != action or
+                (effect['status'], reason) not in (
+                    ('completed', None), ('refused', CURRENT_XP2_NO_EFFECT),
+                    ('submitted', CURRENT_XP2_RANGE_SUBMITTED))):
+            raise RuntimeError('Attack result lacks the requested native disposition')
+        return dict(status=effect['status'],reason=reason,requested_action=action)
+    if occupation_action:
+        effect = result['effect']
+        if effect['status'] != 'completed' or effect['action'] != action:
+            raise RuntimeError('Captured-city choice has no matching native effect')
+        return dict(status='completed', reason=None, requested_action=action)
+    if queue_action or placement_action or action['kind'] in ('city_focus','city_citizen'):
         effect=result['effect']
         if effect['status']!='completed' or effect['receipt']['action']!=action:
             raise RuntimeError('XP1 production queue has no matching native effect')
@@ -493,9 +601,13 @@ def main(path):
                 or type(closure.get('governors_diagnostic', False)) is not bool
                 or type(closure.get('diplomacy_overview_diagnostic', False)) is not bool
                 or type(closure.get('trade_diagnostic', False)) is not bool
+                or type(closure.get('standard_trade', False)) is not bool
+                or type(closure.get('unit_formations', False)) is not bool
+                or type(closure.get('stock_dedications', False)) is not bool
                 or type(closure.get('espionage_diagnostic', False)) is not bool
                 or type(closure.get('world_congress_diagnostic', False)) is not bool
                 or type(closure.get('world_congress_review_diagnostic', False)) is not bool
+                or type(closure.get('trade_overview_ui_selected', False)) is not bool
                 or type(closure.get('command_profile_diagnostic', False)) is not bool
                 or type(closure.get('checkpoint_on_close', False)) is not bool
                 or closure.get('official_bundle') is None):
@@ -521,10 +633,15 @@ def main(path):
             raise ValueError('Initial diplomacy cannot fall back to another session profile')
         if closure.get('trade_diagnostic', False) and not closure.get('diplomacy_overview_diagnostic', False):
             raise ValueError('Trade cannot fall back to another session profile')
-        if closure.get('world_congress_diagnostic', False) and not closure.get('espionage_diagnostic', False):
-            raise ValueError('Congress requires the complete espionage chain')
+        if closure.get('world_congress_diagnostic', False) and not (
+                closure.get('espionage_diagnostic', False) or
+                closure.get('stock_dedications', False) and closure.get('world_congress_review_diagnostic', False)):
+            raise ValueError('Congress requires the complete XP2 BBG or stock review chain')
         if closure.get('world_congress_review_diagnostic', False) and closure.get('world_congress_diagnostic') is not True:
             raise ValueError('Congress review requires the explicit Congress chain')
+        if closure.get('trade_overview_ui_selected', False) and (
+                closure['input_profile'] != 'xp2-lan' or closure.get('world_congress_review_diagnostic') is not True):
+            raise ValueError('Trade overview requires the explicit current XP2 public query chain')
         if closure.get('espionage_diagnostic', False) and not closure.get('trade_diagnostic', False):
             raise ValueError('Espionage cannot fall back to another session profile')
         if not xp1:

@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import sys
 import types
 import unittest
@@ -72,15 +73,19 @@ def state():
 
 class AttackSourceTests(unittest.TestCase):
     def test_source_closure_exact_callbacks_and_live_guards(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.xp1_session_inputs import materialize_xp1_session_pins
+
         p=profile.verify_source();self.assertEqual(len(p['bindings']),53)
         self.assertEqual(p['bindings']['Unit.GetType']['callback_rva'],p['bindings']['Unit.GetUnitType']['callback_rva'])
         self.assertEqual(p['ui_resolution']['qualified_attack_handlers_overridden'],False)
-        for path,sha in profile.source_dependencies().items():
+        pins = materialize_xp1_session_pins(profile.source_dependencies(), _XP1_PROFILE)
+        for path,sha in pins.items():
             with Path(path).open('rb') as stream:
                 self.assertEqual(hashlib.file_digest(stream,'sha256').hexdigest(),sha,path)
         sys.path.insert(0,str(LAB/'tools'))
         from extract_phase31_next_export import pefile
-        image=pefile.PE(p['image']['path'],fast_load=True);self.addCleanup(image.close)
+        image=pefile.PE(_XP1_PROFILE.path,fast_load=True);self.addCleanup(image.close)
         base=0x190000000
         read=lambda address,size:image.get_data(address-base,size)
         self.assertGreater(profile.verify_live(base,read),0)
@@ -187,6 +192,44 @@ class AttackSourceTests(unittest.TestCase):
             self.assertEqual(profile.selected_proof('old',XP1),profile.SOURCE[1])
             from civ6_host.runtime.xp1_world_input_profile import SOURCE as queued
             self.assertEqual(profile.selected_queued_proof('old',XP1),queued[1])
+
+
+class RangedSubmissionTests(unittest.TestCase):
+    def test_native_addition_must_match_the_single_selected_ranged_archive(self):
+        from civ6_host.runtime import xp2_unit_attack_source as xp2
+        from civ6_host.runtime.native.native_operation_lifecycle import DeliveryWindow
+        from civ6_host.runtime.native.native_event_15c35863 import (
+            EventFields, encode_fields, encode_queue_record,
+        )
+
+        action = dict(kind='unit_attack', unit_id=19, operation='RANGE_ATTACK',
+                      input_route='dedicated_ranged', plot_id=8, x=2, y=3)
+        descriptor = struct.pack('<HHI', 0, 1, 19)
+        archive = struct.pack('<IHH9I', 0x8c0f3f36, 0, 1, 19, 26, 0xffffffff, 0, 1, 2, 3, 0, 0)
+        added = encode_queue_record(11, encode_fields(EventFields(0, 26, 1, descriptor)),
+                                    blob_contents=descriptor, padding_policy='headless-zero-initialization')
+        prefix = types.SimpleNamespace(ui_child=object(), runtime=types.SimpleNamespace(
+            evaluate_text=lambda *args, **kwargs: b'26'))
+        source = xp2._source(xp2.CURRENT_XP2_RANGE_ADDED)
+        span = b'test live code'
+        source = dict(source, body_spans={'fixture': dict(rva=8, bytes=len(span),
+            sha256=hashlib.sha256(span).hexdigest())})
+        core = types.SimpleNamespace(_handle=100)
+        with patch.object(xp2, '_source', return_value=source):
+            def read(window, selected=action):
+                return xp2._ranged_submission(window, selected, 0, core, lambda *_: span, prefix)
+
+            window = DeliveryWindow(archive, (added,), 10, 11)
+            result = read(window)
+            self.assertEqual(result['status'], 'RANGE_ATTACK_added')
+            self.assertIsNone(result['operation_success'])
+            self.assertFalse(result['combat_resolution_inferred'])
+            self.assertIsNone(read(window, dict(action, x=4)))
+            self.assertIsNone(read(DeliveryWindow(archive, (), 10, 10)))
+            self.assertIsNone(read(DeliveryWindow(archive, (added,), 10, 12)))
+            prefix.runtime.evaluate_text = lambda *args, **kwargs: b'27'
+            with self.assertRaisesRegex(ValueError, 'selected native operation'):
+                read(window)
 
 
 if __name__=='__main__':unittest.main()

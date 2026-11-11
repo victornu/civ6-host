@@ -71,10 +71,10 @@ def verify_source(project_root):
         hashes[relative] = actual
     return {'schema': 'civ6rl.native_xp1_teardown_adapter_source.v1', 'project_root': str(root), 'source_sha256': hashes, **_verify_teardown_proof(root)}
 
-def _check_init_receipt(receipt, host, *, candidate_bundle=None):
+def _check_init_receipt(receipt, host, *, candidate_bundle=None, core_sha256=XP1_CORE_SHA256):
     if type(receipt) is not dict or receipt.get('schema') != 'civ6rl.native_xp1_context_init_receipt.v1':
         raise ValueError('XP1 Destroy binding requires the official Init receipt')
-    if receipt.get('status') != 'xp1_context_initialized_diagnostic_only' or receipt.get('core_sha256') != XP1_CORE_SHA256 or receipt.get('init_called') is not True or (receipt.get('init_returned') is not True) or (receipt.get('initialized_after') is not True) or (receipt.get('host_setter_called') is not True) or (receipt.get('context_may_require_destroy') is not True) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('prepare_called') is not False) or (receipt.get('simulation_ready') is not False) or (receipt.get('eligible_for_training') is not False):
+    if receipt.get('status') != 'xp1_context_initialized_diagnostic_only' or receipt.get('core_sha256') != core_sha256 or receipt.get('init_called') is not True or (receipt.get('init_returned') is not True) or (receipt.get('initialized_after') is not True) or (receipt.get('host_setter_called') is not True) or (receipt.get('context_may_require_destroy') is not True) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('prepare_called') is not False) or (receipt.get('simulation_ready') is not False) or (receipt.get('eligible_for_training') is not False):
         raise ValueError('XP1 Destroy binding refuses failed or expanded-scope Init')
     configuration_sha, gameplay_sha = (XP1_CONFIG_SHA256, XP1_GAMEPLAY_SHA256)
     if candidate_bundle is not None:
@@ -156,7 +156,6 @@ def install_xp1_teardown_callbacks(core, context, host, init_receipt, *, project
     from civ6_host.runtime.native.native_core_context_profiles import validate_loaded_context
     from civ6_host.runtime.native.native_core_context_profiles import validate_loaded_modules
     source = verify_source(project_root)
-    _check_init_receipt(init_receipt, host, candidate_bundle=candidate_bundle)
     _check_host(host)
     if type(context) is not int or context <= 0:
         raise ValueError('Missing retained XP1 context address')
@@ -165,9 +164,10 @@ def install_xp1_teardown_callbacks(core, context, host, init_receipt, *, project
     context_validator = context_validator or validate_loaded_context
     owner_verifier = owner_verifier or _default_owner_verifier
     aligned_free_factory = aligned_free_factory or _aligned_free_callable
-    profile = profile_loader(core._name, mode='context')
-    if profile.ruleset != 'xp1' or profile.mode != 'context' or profile.core_sha256 != XP1_CORE_SHA256:
-        raise ValueError('XP1 Destroy adapter refuses non-XP1 profile')
+    from civ6_host.runtime.xp1_saved_load import select_context
+    profile = select_context(core, candidate_bundle, profile_loader)
+    _check_init_receipt(init_receipt, host, candidate_bundle=candidate_bundle,
+                        core_sha256=profile.core_sha256)
     base = getattr(core, '_handle', None)
     if type(base) is not int or base <= 0:
         raise ValueError('Missing actual loaded XP1 GameCore base')

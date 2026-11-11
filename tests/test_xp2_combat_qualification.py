@@ -120,7 +120,8 @@ class TransitionTests(unittest.TestCase):
             backend=NS(load_abi=NS(core_sha256=XP2)),emit=lambda stage,**row:events.append((stage,row)))
         with patch.object(checkpoint,'manifest',return_value=m):
             checkpoint.compare_decisions(owner,m['observation'],current)
-            self.assertEqual(len(events),1);event=events[-1][1]
+            reloaded=lambda:[row for stage,row in events if stage=='official_lan_checkpoint_reloaded']
+            self.assertEqual(len(reloaded()),1);event=reloaded()[0]
             self.assertFalse(event['public_decisions_equal']);self.assertTrue(event['saved_decision_fields_equal'])
             self.assertFalse(event['complete_state_compared']);self.assertFalse(event['strategic_training_ready'])
             for mode in ('live_engine','saved_engine','gold','queue','unit','family'):
@@ -136,7 +137,7 @@ class TransitionTests(unittest.TestCase):
                     with self.subTest(mode=mode),patch.object(checkpoint,'manifest',return_value=saved),self.assertRaises(ValueError):
                         checkpoint.compare_decisions(owner,obs,changed)
                 finally:owner.backend.load_abi.core_sha256=XP2
-            self.assertEqual(len(events),1)
+            self.assertEqual(len(reloaded()),1)
 
 class InformationTests(unittest.TestCase):
     def test_actual_client_public_admin_rounding_and_offer_selection(self):
@@ -219,6 +220,26 @@ class ReviewerTests(unittest.TestCase):
             lifetime_seconds=900,session=True,core_sha256=XP1)
         self.assertEqual(reviewer.review_lifetime_seconds(dict(input_profile='xp2-lan',lifetime_seconds=900),report),900)
         with self.assertRaises(ValueError):reviewer.review_lifetime_seconds(dict(input_profile='xp1-lan',lifetime_seconds=900),report)
+
+    def test_explicit_1800_second_continuation_preserves_other_supervision_guards(self):
+        report=dict(exit_code=90,normal_destroy_called=True,reaped=True,job_assigned=True,
+            error=None,timed_out=False,timeout_seconds=1800,memory_limit_bytes=512*1024*1024,
+            stdout_limit_bytes=64*1024*1024,source_unchanged={'source':True})
+        closure=dict(input_profile='xp2-lan',lifetime_seconds=1800)
+        qualification.saved_load_validate_supervision(report,{'source':'pin'},lifetime_seconds=1800,
+            session=True,core_sha256=XP2)
+        self.assertEqual(reviewer.review_lifetime_seconds(closure,report),1800)
+        for changed in (dict(report,timeout_seconds=900),dict(report,memory_limit_bytes=768*1024*1024),
+                        dict(report,reaped=False),dict(report,source_unchanged={'source':False})):
+            with self.subTest(changed=changed),self.assertRaises(ValueError):
+                qualification.saved_load_validate_supervision(changed,{'source':'pin'},lifetime_seconds=1800,
+                    session=True,core_sha256=XP2)
+        for engine,placement in ((XP1,False),(XP2,True)):
+            with self.subTest(engine=engine,placement=placement),self.assertRaises(ValueError):
+                qualification.saved_load_validate_supervision(report,{'source':'pin'},lifetime_seconds=1800,
+                    session=True,core_sha256=engine,placement_preparation=placement)
+        with self.assertRaises(ValueError):
+            reviewer.review_lifetime_seconds(closure,dict(report,timeout_seconds=900))
 
     def test_native_attack_effect_transport_and_job_review_use_actual_xp2_sources(self):
         result,interval,jobs=review_fixtures.fixture()

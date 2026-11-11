@@ -21,9 +21,11 @@ def _prepare_runtime(resources, prepared_capture, private_resources):
     existing = os.environ.get('CIV6_HOST_RESOURCE_ROOT')
     if existing is not None and Path(existing).resolve() != root:
         raise ValueError('Use a separate process for a different private resource root')
-    if 'civ6_host.runtime.paths' in sys.modules and existing is None:
-        raise RuntimeError('Resource paths were imported without configuration; restart required')
-    os.environ['CIV6_HOST_RESOURCE_ROOT'] = str(root)
+    # The paths module pins the configured spelling at import time.
+    if existing is None:
+        if 'civ6_host.runtime.paths' in sys.modules:
+            raise RuntimeError('Resource paths were imported without configuration; restart required')
+        os.environ['CIV6_HOST_RESOURCE_ROOT'] = str(root)
     from .resource_resolution import configure as configure_resources
     configure_resources(private_resources)
     if private_resources is not None and prepared_capture is None:

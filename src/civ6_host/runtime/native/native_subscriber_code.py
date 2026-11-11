@@ -29,10 +29,10 @@ def _verify_captured_exe_identity(source, execution_image):
     if execution_image is None:
         return False
     from civ6_host.runtime.execution_images import identity
-    from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+    from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
     selected = identity(execution_image)
-    if selected['reference_core_sha256'] != XP2_CORE_SHA256:
-        raise ValueError('Subscriber capture requires the canonical XP2 execution profile')
+    if selected['reference_core_sha256'] not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
+        raise ValueError('Subscriber capture requires a registered expansion execution profile')
     if (source.get('image', {}).get('path') != _CAPTURED_EXE_PATH
             or source.get('image', {}).get('sha256') != EXE_SHA):
         raise ValueError('Pinned subscriber capture executable identity differs')

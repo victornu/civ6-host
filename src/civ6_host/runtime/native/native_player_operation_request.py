@@ -36,13 +36,14 @@ class _GuardedStorage:
         if C.string_at(self.address - 16, 16) != b'\xa5' * 16 or C.string_at(self.address + self.size, 16) != b'\xa5' * 16:
             raise RuntimeError(f'Native {self.name} exceeded source-sized storage')
 
-def request_player_operation(core, context, player, operation, parameters, *, read=None, native_api=None, submit=True, core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3', allow_empty=False, congress_permit=None):
+def request_player_operation(core, context, player, operation, parameters, *, read=None, native_api=None, submit=True, core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3', allow_empty=False, congress_permit=None, dedication_permit=None):
     """Run native CanStart and, when true, submit the identical scalar map.
 
     ``allow_empty`` is restricted to the source-qualified XP2 UNLOCK_POLICIES
     operation, whose official UI submits an empty table. An internal sealed
-    Congress permit additionally admits its exact source-described empty maps
-    and direct requests without CanStart. Other callers retain their contract.
+    Congress permit additionally admits its exact source-described empty maps.
+    Sealed Congress and dedication permits admit their exact direct requests
+    without CanStart. Other callers retain their contract.
 
     ``parameters`` is an insertion-ordered dictionary of one to eight uint32
     keys and values obtained by the caller from the intended native Lua API.
@@ -65,10 +66,16 @@ def request_player_operation(core, context, player, operation, parameters, *, re
         raise ValueError('Player operation must be a uint32 native value')
     if type(allow_empty) is not bool:
         raise ValueError('Empty player-operation parameters require explicit qualification')
-    congress_name = None
+    if congress_permit is not None and dedication_permit is not None:
+        raise ValueError('One exact player-operation request permit is required')
+    direct_name = None
     if congress_permit is not None:
         from civ6_host.runtime.xp2_world_congress_source import authorize_request
-        congress_name = authorize_request(congress_permit, core, context, player, operation,
+        direct_name = authorize_request(congress_permit, core, context, player, operation,
+            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
+    elif dedication_permit is not None:
+        from civ6_host.runtime.xp2_dedications import authorize_request
+        direct_name = authorize_request(dedication_permit, core, context, player, operation,
             parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
     elif allow_empty:
         from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
@@ -144,7 +151,7 @@ def request_player_operation(core, context, player, operation, parameters, *, re
             raise RuntimeError('Native reason-map constructor identity differs')
         # These source-bound UI requests do not call CanStart. The native
         # request still applies its own requested-player active-state guard.
-        allowed = (True if congress_name is not None else
+        allowed = (True if direct_name is not None else
                    native_api['can_start'](context, player, operation, params.address, False, reasons.address))
         check()
         if type(allowed) not in (bool, int) or allowed not in (0, 1):
@@ -154,9 +161,9 @@ def request_player_operation(core, context, player, operation, parameters, *, re
             native_api['request'](context, player, operation, params.address)
             check()
         receipt = {'player_id': player, 'operation': operation, 'can_start': bool(allowed), 'request_invoked': bool(allowed and submit), 'request_return_interpreted': False, 'parameter_count': len(parameters), 'native_parameter_vtable_rva': hex(abi.parameters), 'test_visible': False, 'native_reason_map': True, 'archive_fabricated': False, 'gameplay_outcome_verified': False, 'eligible_for_training': False, 'source_sha256': abi.source_sha256}
-        if congress_name is not None:
+        if direct_name is not None:
             receipt.update(can_start=None, native_can_start_called=False,
-                           source_qualified_request_only=congress_name)
+                           source_qualified_request_only=direct_name)
         return receipt
     finally:
         try:

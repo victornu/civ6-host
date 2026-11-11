@@ -31,12 +31,14 @@ def _reverse(text, edits):
 class PlayerOperationExtractionTests(unittest.TestCase):
     def setUp(self):
         self.proposed = _target().read_text(encoding='utf-8')
-        self.legacy = _reverse(self.proposed, transform._CONGRESS_EDITS)
+        self.congress = _reverse(self.proposed, transform._DEDICATION_EDITS)
+        self.legacy = _reverse(self.congress, transform._CONGRESS_EDITS)
         self.extracted = _reverse(self.legacy, transform._LEGACY_EDITS)
 
     def test_actual_measured_pipeline_input_and_installed_intermediate_are_pinned(self):
         self.assertEqual(transform._digest(self.extracted), transform.EXTRACTED_SHA256)
         self.assertEqual(transform._digest(self.legacy), transform.INSTALLED_LEGACY_SHA256)
+        self.assertEqual(transform._digest(self.congress), transform.CONGRESS_SHA256)
         self.assertEqual(transform._digest(self.proposed), transform.DESTINATION_SHA256)
         self.assertNotIn('allow_empty', self.extracted)
         self.assertIn('allow_empty=False', self.legacy)
@@ -57,7 +59,7 @@ class PlayerOperationExtractionTests(unittest.TestCase):
                              transform.HISTORICAL_SOURCE_SHA256)
 
     def test_unknown_input_and_accidental_second_application_are_rejected(self):
-        for raw in (self.extracted + '# changed\n', self.legacy, self.proposed):
+        for raw in (self.extracted + '# changed\n', self.legacy, self.congress, self.proposed):
             with self.assertRaisesRegex(ValueError, 'input changed'):
                 transform.parameterize(transform.MODULE, raw)
 
@@ -76,11 +78,12 @@ class PlayerOperationExtractionTests(unittest.TestCase):
         self.assertEqual(row['source_sha256'], transform.HISTORICAL_SOURCE_SHA256)
         self.assertEqual(row['destination_sha256'], transform.DESTINATION_SHA256)
         self.assertEqual(row['transformations'].count(transform.LABEL), 1)
+        self.assertEqual(row['transformations'].count(transform.DEDICATION_LABEL), 1)
 
     def test_extractor_hook_preserves_existing_string_and_cleanup_transformations(self):
         raw = (REPO / 'tools/extract_runtime.py').read_text(encoding='utf-8')
         self.assertIn('text=player_operations(name,text)', raw)
-        self.assertIn('transformations.append(PLAYER_OPERATION_LABEL)', raw)
+        self.assertIn('transformations.extend((PLAYER_OPERATION_LABEL, PLAYER_OPERATION_DEDICATION_LABEL))', raw)
         tree = ast.parse(raw)
         prepare = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
                        and n.name == 'prepare_tree')

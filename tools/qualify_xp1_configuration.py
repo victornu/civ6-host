@@ -3634,7 +3634,9 @@ def saved_load_validate_supervision(report, expected_pins, *, lifetime_seconds, 
         return
     selected_xp2=(core_sha256 is not None and saved_load_review_profile(core_sha256)['xp2'])
     extended=placement_preparation or session and selected_xp2
-    if (type(lifetime_seconds) is not int or lifetime_seconds not in ((45,60,120,300,420,600,900) if extended else (45,60,120,300,420))
+    allowed=(45,60,120,300,420,600,900) if extended else (45,60,120,300,420)
+    if session and selected_xp2 and not placement_preparation:allowed=allowed+(1800,)
+    if (type(lifetime_seconds) is not int or lifetime_seconds not in allowed
             or report.get('reaped') is not True or report.get('job_assigned') is not True
             or report.get('exit_code') not in (78, 89, 90) or report.get('error') is not None
             or report.get('timed_out') is not False or report.get('timeout_seconds') != lifetime_seconds
@@ -3830,12 +3832,18 @@ def saved_load_worker(closure_path):
                 or closure['lifetime_seconds'] not in (45, 60, 120)
                 or closure.get('stdout_limit_bytes') != 64*1024*1024):
             raise ValueError('Unknown saved Load candidate closure')
-        verify_installation()
+        image_options = {}
+        if 'execution_image' in closure:
+            from civ6_host.runtime.execution_images import from_identity
+            image_options = dict(execution_image=from_identity(closure['execution_image']),
+                                 official_bundle=closure['official_bundle'])
+        verify_installation(**({'audit_historical': False} if image_options else {}))
         for name, expected in closure['pins'].items():
             saved_load_pin({}, name, expected)
         if digest(Path(__file__).read_bytes()) != os.environ.get(PIN_ENV):
             raise ValueError('Saved Load qualifier changed')
-        host = saved_load_build_pins({},ui=closure.get('observe_player_candidate',False))
+        host = saved_load_build_pins({}, ui=closure.get('observe_player_candidate', False),
+                                    **image_options)
         if Path(sys.executable).resolve() != host:
             raise ValueError('Saved Load requires its exact XP1 jobs executable')
         from civ6_host.runtime.xp1_saved_load_owner import SavedLoadOwner
@@ -3952,6 +3960,8 @@ def saved_load_main(argv):
     parser = argparse.ArgumentParser(description='Bounded candidate XP1 raw Load and populated caches')
     parser.add_argument('--prepared-capture', required=True)
     parser.add_argument('--prepared-sha', required=True)
+    parser.add_argument('--current-xp1', action='store_true',
+                        help='Use the registered installed XP1 image for the private saved-game boundary')
     parser.add_argument('--postload160', action='store_true',
                         help='Continue the same loaded candidate through the existing native postload sequence')
     parser.add_argument('--publish-cache', action='store_true',
@@ -3965,6 +3975,8 @@ def saved_load_main(argv):
     parser.add_argument('--lifetime-seconds', type=int, choices=(45, 60, 120), default=45,
                         help='Diagnostic worker bound; larger values isolate measured startup/Load duration, not production throughput')
     args = parser.parse_args(argv)
+    if args.current_xp1 and args.unit_command is not None:
+        parser.error('--current-xp1 currently supports the private saved-game view and teardown')
     if (args.publish_cache or args.close_loaded) and not args.postload160:
         parser.error('--publish-cache and --close-loaded require --postload160')
     if args.observe_player and not(args.publish_cache and args.close_loaded):
@@ -3978,9 +3990,9 @@ def saved_load_main(argv):
     from civ6_host.runtime.native.native_probe import Windows, prepare_init_fixture_copies
     from civ6_host.runtime.native.native_saved_session import NativeSavedSession
     from civ6_host.runtime.native.native_official_bundle import DATABASE_PROFILE, LOCALIZATION_HANDOFF_ENV
-    from civ6_host.runtime.capture_admission import ENV as PREPARED_ENV
+    from civ6_host.runtime.capture_admission import ENV as PREPARED_ENV, configure_prepared_closure
     from civ6_host.runtime.resource_resolution import configure_closure
-    verify_installation()
+    verify_installation(**({'audit_historical': False} if args.current_xp1 else {}))
     # Only reuse the shared resource/containment methods; reset() is Base-only.
     session = object.__new__(NativeSavedSession)
     session.owner_thread, session.win = threading.get_ident(), Windows()
@@ -3988,7 +4000,13 @@ def saved_load_main(argv):
     session.reset_timings_seconds, session.reset_resource_samples = {}, []
     session._check_reset_resources('before_preflight')
     package = dict(path=str(Path(args.prepared_capture).resolve()), sha256=args.prepared_sha)
-    captured = xp1_saved_load.consume_input_handoff(package)
+    if args.current_xp1:
+        from civ6_host.runtime.capture_candidates import consume_input_handoff
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        captured = consume_input_handoff('xp1-lan', package,
+            official_bundle=xp1_saved_load.REFERENCE, execution_image=_XP1_PROFILE)
+    else:
+        captured = xp1_saved_load.consume_input_handoff(package)
     run = (resource_root()/'work/xp1-configuration/saved-load'/('run-'+uuid.uuid4().hex)).resolve()
     run.mkdir(parents=True, exist_ok=False)
     from civ6_host.runtime.xp1_session_inputs import prepare_sources, prepare_private_fixture
@@ -4008,6 +4026,8 @@ def saved_load_main(argv):
                    observe_player_candidate=args.observe_player,
                    unit_commands_candidate=args.unit_command is not None, unit_command=args.unit_command,
                    lifetime_seconds=args.lifetime_seconds, stdout_limit_bytes=64*1024*1024)
+    if args.current_xp1:
+        configure_prepared_closure(closure, captured)
     configure_closure(closure)
     closure_path = run/'closure.json'
     closure_receipt = write_once(closure_path, closure)

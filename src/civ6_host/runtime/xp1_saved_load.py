@@ -71,13 +71,51 @@ deliberately not wired into public validate_profile/admission.
     return XP1_LAN_PROFILE
 
 
+def validate_context_identity(profile, bundle):
+    """Keep the captured ABI and the loaded Core identities joined explicitly."""
+    if (getattr(profile, 'ruleset', None), getattr(profile, 'mode', None)) != ('xp1', 'context'):
+        raise ValueError('XP1 candidate requires the exact context-only engine profile')
+    image = getattr(profile, 'execution_image', None)
+    if image is None:
+        if (getattr(profile, 'core_sha256', None) != XP1_CORE_SHA256
+                or getattr(bundle, 'execution_image', None) is not None):
+            raise ValueError('XP1 candidate requires the exact context-only engine profile')
+        return
+    from .execution_images import _XP1_PROFILE
+    if (image is not _XP1_PROFILE or getattr(bundle, 'execution_image', None) is not image
+            or bundle.reference != REFERENCE
+            or profile.core_sha256 != image.image_sha256
+            or profile.source_core_sha256 != XP1_CORE_SHA256
+            or profile.core_path != Path(image.path)
+            or profile.core_path != bundle.engine_path):
+        raise ValueError('XP1 current context differs from the exact captured execution pair')
+
+
+def select_context(core, bundle, profile_loader):
+    image = getattr(core, '_civ6_host_execution_image', None)
+    options = {} if image is None else {'execution_image': image}
+    profile = profile_loader(core._name, mode='context', **options)
+    if getattr(profile, 'execution_image', None) is not image:
+        raise ValueError('XP1 context differs from the retained loaded execution image')
+    validate_context_identity(profile, bundle)
+    return profile
+
+
+def teardown_core_identity(host):
+    profile = getattr(host, 'context_profile', None)
+    bundle = getattr(host, '_xp1_saved_load_bundle', None)
+    if bundle is None:
+        if getattr(profile, 'execution_image', None) is not None:
+            raise ValueError('Selected XP1 teardown requires its captured input owner')
+        return XP1_CORE_SHA256
+    validate_context_identity(profile, bundle)
+    return profile.core_sha256
+
+
 def bind_candidate(bundle, profile, fixture):
     """Reuse a registered input instance and private copies, without raw replay."""
     from .native.native_official_bundle import _reuse_prepared_bundle, validate_fixture
-    if (getattr(profile, 'core_sha256', None) != XP1_CORE_SHA256
-            or getattr(profile, 'ruleset', None) != 'xp1'
-            or getattr(profile, 'mode', None) != 'context'):
-        raise ValueError('XP1 candidate requires the exact context-only engine profile')
+    validate_context_identity(profile, bundle)
     validate_candidate_inputs(getattr(bundle, 'inputs', None), bundle)
     _reuse_prepared_bundle(bundle, REFERENCE, 'xp1-lan', _input_only=True)
     validate_fixture(bundle, fixture)

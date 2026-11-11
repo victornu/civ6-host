@@ -77,23 +77,21 @@ def verify_xp1(base,context,read):
 
 def transport_profile(core_sha256,core,context,read):
     if core_sha256==BASE_CORE_SHA256:return BASE
+    if core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
+        raise ValueError('Native action transport engine is not yet source-qualified')
+    image_path = Path(core._name).resolve()
+    selected = getattr(core, '_civ6_host_execution_image', None)
+    expected_sha256 = core_sha256
+    if selected is not None:
+        from .execution_images import runtime_source_pins
+        if str(image_path) != selected.path:
+            raise ValueError('Action transport Core path differs from its execution image')
+        expected_sha256 = runtime_source_pins({selected.path: core_sha256},
+                                             execution_image=selected)[selected.path]
+    if hashlib.sha256(image_path.read_bytes()).hexdigest() != expected_sha256:
+        raise ValueError('Expansion action transport binary changed')
     if core_sha256==XP2_CORE_SHA256:
-        image_path=Path(core._name).resolve()
-        selected=getattr(core,'_civ6_host_execution_image',None)
-        expected_sha256=core_sha256
-        if selected is not None:
-            from .execution_images import runtime_source_pins
-            if str(image_path)!=selected.path:
-                raise ValueError('XP2 action transport Core path differs from its execution image')
-            expected_sha256=runtime_source_pins({selected.path:core_sha256},
-                execution_image=selected)[selected.path]
-        if hashlib.sha256(image_path.read_bytes()).hexdigest()!=expected_sha256:
-            raise ValueError('XP2 action transport binary changed')
         from .xp2_action_transport_source import ABI,verify_live
         verify_live(core._handle,read,family='transport',context=context)
         return ABI
-    if core_sha256==XP1_CORE_SHA256:
-        if hashlib.sha256(Path(core._name).read_bytes()).hexdigest()!=core_sha256:
-            raise ValueError('XP1 action transport binary changed')
-        return verify_xp1(core._handle,context,read)
-    raise ValueError('Native action transport engine is not yet source-qualified')
+    return verify_xp1(core._handle, context, read)

@@ -1,8 +1,9 @@
 """Source-byte and composed-owner tests; no DLL invocation or native effect."""
+from contextlib import nullcontext
 from copy import deepcopy
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from civ6_host.runtime import xp2_envoys as adapter
 from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
@@ -11,14 +12,14 @@ from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
 class Xp2EnvoySourceTests(unittest.TestCase):
     def test_source_dependencies_project_captured_core_to_selected_execution_image(self):
         from civ6_host.runtime import execution_images
-        from civ6_host.runtime import xp2_envoys_source as source
         image = execution_images.select(
             'xp2-gamecore-current-092abfbb',
             core_path=execution_images._GAMECORE_PATH,
         )
-        pins = source.source_dependencies(execution_image=image)
+        pins = adapter.source_dependencies(execution_image=image)
         self.assertEqual(pins[image.path], image.image_sha256)
         self.assertNotIn(image.reference_core_sha256, pins.values())
+        self.assertIn(adapter.CHECKPOINT_SOURCE[1], pins.values())
 
     def test_compact_runtime_keeps_every_reviewed_byte_guard(self):
         import json
@@ -152,6 +153,50 @@ class Xp2EnvoyCompositionTests(unittest.TestCase):
             result=adapter.apply(saved,dict(kind='retain_envoys'),dict(player_id=0,turn=45))
         self.assertEqual(result['effect']['tokens_retained'],3)
         self.assertEqual(calls.count('active_check'),3)
+
+    def checkpoint_owner(self, before):
+        saved, calls = self.saved(before)
+        saved.core = SimpleNamespace(_handle=0x180000000,
+            _civ6_host_execution_image=SimpleNamespace(id=adapter.CURRENT_PROFILE_ID))
+        saved.backend.control = Mock()
+        saved.backend.jobs_snapshot = Mock()
+        saved.continuation.transport = SimpleNamespace(require_empty_native_queue=Mock())
+        saved._check = Mock()
+        saved._check_query = Mock()
+        saved._check_active = Mock()
+        saved._attempt = nullcontext
+        saved.prefix.runtime.evaluate_text = Mock(return_value=b'restored')
+        return saved, calls
+
+    def test_checkpoint_restores_the_omitted_flag_and_requires_real_blocker(self):
+        saved_view = self.catalogue()
+        after_load = dict(saved_view, considered=True, giving_tokens_blocker_present=False)
+        saved, calls = self.checkpoint_owner(saved_view)
+        view = dict(player_id=0, turn=45)
+        with patch.object(adapter, 'catalogue', side_effect=[after_load, saved_view]) as catalogue, \
+             patch.object(adapter, '_checkpoint_source', return_value={'live_spans': {}}), \
+             patch.object(adapter.native, '_common', return_value=b''), \
+             patch('civ6_host.runtime.saved_load_job_observer.require_quiescent'), \
+             patch('civ6_host.runtime.xp1_load_capability.capability_source_scope',
+                   return_value=nullcontext()):
+            adapter.restore_checkpoint_consideration(saved, view, saved_view)
+        self.assertIn(b'SetGivingTokensConsidered(false)',
+                      saved.prefix.runtime.evaluate_text.call_args.args[1])
+        self.assertEqual(catalogue.call_args_list[-1].kwargs, {'active': True})
+        self.assertEqual(calls[:2], ['drain', 'publish'])
+        self.assertFalse(saved.backend.busy)
+        self.assertEqual(calls[-1][1][0], 'xp2_envoy_checkpoint_consideration_restored')
+
+    def test_checkpoint_leaves_any_other_mismatch_to_the_strict_comparator(self):
+        saved_view = self.catalogue()
+        saved, _ = self.checkpoint_owner(saved_view)
+        changed_targets = dict(saved_view, considered=True,
+                               giving_tokens_blocker_present=False, targets=[])
+        with patch.object(adapter, 'catalogue', return_value=changed_targets), \
+             patch.object(adapter, '_checkpoint_source') as source:
+            adapter.restore_checkpoint_consideration(saved, dict(player_id=0, turn=45), saved_view)
+        source.assert_not_called()
+        saved.prefix.runtime.evaluate_text.assert_not_called()
 
 
 if __name__=='__main__':

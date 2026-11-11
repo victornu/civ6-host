@@ -287,12 +287,9 @@ def bind_owner(owner,core,read):
             raise ValueError('XP1 unit-attack source belongs to another lifetime')
         return old
     from .xp1_world_input_profile import bind_owner as bind_world
-    from .resource_resolution import resolve_path
+    from .xp1_session_inputs import verify_xp1_session_pins
     bind_world(owner,core,read)
-    for path,sha in source_dependencies().items():
-        with resolve_path(Path(path)).open('rb') as stream:
-            if hashlib.file_digest(stream,'sha256').hexdigest()!=sha:
-                raise ValueError('XP1 unit-attack dependency changed: '+path)
+    verify_xp1_session_pins(source_dependencies(),core,family='unit-attack')
     receipt=VerifiedAttackSource(owner,core,core._handle,SOURCE[1],verify_live(core._handle,read),
                                  PUBLIC_PRECISION_SOURCE[1],READINESS_SOURCE[1])
     owner._xp1_unit_attack_source_receipt=receipt

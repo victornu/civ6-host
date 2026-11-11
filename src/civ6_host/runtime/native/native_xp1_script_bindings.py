@@ -84,9 +84,9 @@ def bind_xp1_game_api(runtime, child, core_context, core, *, project_root, modul
     from civ6_host.runtime.native.native_core_context_profiles import validate_loaded_modules
     from civ6_host.runtime.native.native_setup import local_reader
     proof = source_profile(project_root)
-    profile = profile_for_core(core._name, mode='context')
-    if profile.ruleset != 'xp1' or profile.core_sha256 != CORE_SHA256:
-        raise ValueError('XP1 script API refuses other rulesets')
+    from civ6_host.runtime.xp1_saved_load import select_context
+    owner = getattr(runtime, 'service_owner', None)
+    profile = select_context(core, getattr(owner, '_xp1_saved_load_bundle', None), profile_for_core)
     validate_loaded_modules(profile, module_paths)
     pointer = runtime.registry.validate(child)
     if getattr(runtime, '_xp1_script_bind_entered', False) or not runtime.database_bound or (not runtime.configuration_bound) or (not runtime.locale_bound):

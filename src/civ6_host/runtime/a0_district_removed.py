@@ -59,7 +59,12 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return {str(_path(r['path'])):r['sha256'] for r in refs}
 
 
-def event_profile(core_sha256=XP1_CORE_SHA256):
+def event_profile(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
+    if execution_image is not None:
+        from .xp2_district_removed_current import event_profile as current_profile
+        if core_sha256 != XP2_CORE_SHA256:
+            raise ValueError('Current district removal requires the XP2 reference ABI')
+        return current_profile(execution_image)
     p=source(core_sha256);verify_pinned_files(source_dependencies(core_sha256));verify_extracted_sources(p['source_pins'].values())
     from .native.native_deferred_empty_profile import _ROWS
     row=_ROWS[0xa0]
@@ -121,28 +126,17 @@ def _api(base,native_api,*,entries=ENTRIES):
 
 
 @contextmanager
-def record_lease(sequence,core,context,fields,*,read,empty_receiver_state,query_diagnostic,native_api=None,core_sha256=XP1_CORE_SHA256):
-    codec._profile(sequence,fields,**PROFILE)
-    if type(query_diagnostic) is not dict:raise ValueError('District query diagnostic must be explicit')
+def district_item_lease(core, context, fields, *, read, native_api=None, core_sha256):
     base=int(core._handle)
     if base<=0:raise ValueError('Missing district query core')
-    entries,tables,ref=_binding(core_sha256)
+    entries,tables,_=_binding(core_sha256)
     _check(read,base,context,'outer',tables=tables);api=_api(base,native_api,entries=entries)
-    def encode(values):
-        record=codec.encode_record(sequence,fields,values,**PROFILE,empty_receiver_state=empty_receiver_state,
-                                   missing_item_policy='zero-unread-item-DWORD')
-        query_diagnostic.update(item_present=values.item_present,read_skipped_reason=values.read_skipped_reason,
-            native_item_queries_executed=values.item_present,native_player_query_executed=True,
-            native_null_result_observed=not values.item_present,
-            raw_dword_origin='native-query' if values.item_present else 'uninitialized-stack-zero-unread-policy',
-            source_sha256=ref[1])
-        return record
-    def missing(reason):return encode(codec.NativeValues(bytes.fromhex('ffff0000ffffffff'),0,False,reason))
     item=0;checked=False
     try:
         player=api['get_player'](context,fields.owner)
         if not player:
-            yield missing('player-null');return
+            yield None, api, 'player-null'
+            return
         _check(read,base,player,'player',tables=tables)
         try:
             collection=api['player_collection'](player)
@@ -151,23 +145,46 @@ def record_lease(sequence,core,context,fields,*,read,empty_receiver_state,query_
             finally:api['release_collection'](collection)
         finally:api['release_player'](player)
         if not item:
-            yield missing('item-null');return
+            yield None, api, 'item-null'
+            return
         _check(read,base,item,'item',tables=tables);checked=True
-        variant=codec.shared._out8(api['item_variant'],item)
-        raw=api['item_raw'](item)
-        yield encode(codec.NativeValues(variant,raw))
+        yield item, api, None
     finally:
         if checked:api['release_item'](item)
 
 
+@contextmanager
+def record_lease(sequence,core,context,fields,*,read,empty_receiver_state,query_diagnostic,native_api=None,core_sha256=XP1_CORE_SHA256):
+    codec._profile(sequence,fields,**PROFILE)
+    if type(query_diagnostic) is not dict:raise ValueError('District query diagnostic must be explicit')
+    with district_item_lease(core, context, fields, read=read, native_api=native_api,
+                             core_sha256=core_sha256) as (item, api, reason):
+        if item is None:
+            values=codec.NativeValues(bytes.fromhex('ffff0000ffffffff'),0,False,reason)
+        else:
+            values=codec.NativeValues(codec.shared._out8(api['item_variant'],item),api['item_raw'](item))
+        record=codec.encode_record(sequence,fields,values,**PROFILE,empty_receiver_state=empty_receiver_state,
+                                   missing_item_policy='zero-unread-item-DWORD')
+        query_diagnostic.update(item_present=values.item_present,read_skipped_reason=values.read_skipped_reason,
+            native_item_queries_executed=values.item_present,native_player_query_executed=True,
+            native_null_result_observed=not values.item_present,
+            raw_dword_origin='native-query' if values.item_present else 'uninitialized-stack-zero-unread-policy',
+            source_sha256=_binding(core_sha256)[2][1])
+        yield record
+
+
 def dispatch(owner,kind,raw_fields):
     if kind!=codec.EVENT_KIND:raise ValueError('Unknown DistrictRemoved event kind')
+    execution_image = getattr(owner.deferred.core, '_civ6_host_execution_image', None)
     if len(owner.pending)>=owner.limit:raise RuntimeError('Native deferred queue bound exceeded')
     fields=codec.decode_fields(raw_fields,owner.read);diagnostic={}
     with record_lease(owner._sequence+1,owner.deferred.core,owner.deferred.context,fields,
             read=owner.read,empty_receiver_state=owner.empty_receiver_state,query_diagnostic=diagnostic,
             core_sha256=owner.deferred.cache_core_sha256) as record:
         owner._enqueue(record)
+    if execution_image is not None:
+        from .xp2_district_removed_current import SOURCE
+        diagnostic['source_sha256'] = SOURCE[1]
     owner.emit('native_deferred_host_event_enqueued',dispatch_kind=hex(kind),queue_type='0xa0',
         record_hex=record.hex(),owner=fields.owner,item_id=fields.item_id,pending_count=len(owner.pending),
         **diagnostic,retained_item_released=diagnostic['item_present'],

@@ -51,7 +51,7 @@ class XP2TradeAdapterTests(unittest.TestCase):
             self.assertEqual(result['trade_routes'], routes)
             self.assertIsNone(result['trade_origins'])
             self.assertIsNone(c._xp2_trade_catalogue.origins)
-            route_read.assert_called_once_with(p, 61, player_id=0)
+            route_read.assert_called_once_with(p, 61, player_id=0, bbg_display=False)
             route_check.assert_called_once_with(routes, observation)
             origin_read.assert_not_called(); origin_check.assert_not_called()
             # A subsequent allowed query reads the origin afresh; it does not

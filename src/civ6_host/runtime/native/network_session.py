@@ -204,6 +204,7 @@ class NativeNetworkSession(NativeActionSession):
                  governors_diagnostic=False,
                  diplomacy_overview_diagnostic=False,
                  trade_diagnostic=False,
+                 standard_trade=False, unit_formations=False, stock_dedications=False,
                  espionage_diagnostic=False,
                  world_congress_diagnostic=False,
                  world_congress_review_diagnostic=False,
@@ -221,18 +222,27 @@ class NativeNetworkSession(NativeActionSession):
             raise ValueError('Unknown captured network input profile')
         self.execution_image = None
         if execution_image_profile is not None:
-            if input_profile != 'xp2-lan' or type(execution_image_profile) is not str:
-                raise ValueError('An execution image requires an explicit XP2 profile name')
-            from civ6_host.runtime.execution_images import known_path, select
+            if input_profile not in ('xp1-lan', 'xp2-lan') or type(execution_image_profile) is not str:
+                raise ValueError('An execution image requires an explicit expansion profile name')
+            from civ6_host.runtime.execution_images import _XP1_PROFILE, known_path, select
             self.execution_image = select(execution_image_profile,
                 core_path=known_path(execution_image_profile))
+            if (self.execution_image is _XP1_PROFILE) != (input_profile == 'xp1-lan'):
+                raise ValueError('Selected execution image differs from its expansion family')
+            if self.execution_image is _XP1_PROFILE and (
+                    city_focus_diagnostic is not False or city_management_diagnostic is not False):
+                raise ValueError('Installed XP1 session has no city-control admission yet')
         if (type(command_profile_diagnostic) is not bool
                 or command_profile_diagnostic and (
                     input_profile != 'xp2-lan' or self.execution_image is None)):
             raise ValueError('Command profiling requires an explicit XP2 execution image')
         self.command_profile_diagnostic = command_profile_diagnostic
         if checkpoint_compatibility is not None:
-            if (checkpoint_compatibility != 'xp2-reference-abi-to-selected-runtime.v1'
+            from civ6_host.runtime.network_checkpoint import (
+                REFERENCE_CHECKPOINT_COMPATIBILITY, XP1_COMBAT_CHECKPOINT_COMPATIBILITY)
+            expected_compatibility = (XP1_COMBAT_CHECKPOINT_COMPATIBILITY if input_profile == 'xp1-lan'
+                                      else REFERENCE_CHECKPOINT_COMPATIBILITY)
+            if (checkpoint_compatibility != expected_compatibility
                     or self.execution_image is None or checkpoint is None):
                 raise ValueError('Checkpoint compatibility requires an explicit image and checkpoint')
         self.checkpoint_compatibility = checkpoint_compatibility
@@ -285,10 +295,19 @@ class NativeNetworkSession(NativeActionSession):
             raise ValueError('Initial diplomacy requires current XP2, its receiver and the complete v32 query group')
         if type(trade_diagnostic) is not bool or trade_diagnostic and not diplomacy_overview_diagnostic:
             raise ValueError('Trade requires the complete current XP2 diplomacy query group')
+        if (type(standard_trade) is not bool or standard_trade and (
+                input_profile != 'xp2-lan' or self.execution_image is None
+                or trade_diagnostic or governors_diagnostic or foundation_legality_diagnostic)):
+            raise ValueError('Standard trade requires the current stock Gathering Storm session')
+        if type(unit_formations) is not bool or unit_formations and not standard_trade:
+            raise ValueError('Unit formations require the exact stock Gathering Storm session')
+        if type(stock_dedications) is not bool or stock_dedications and not unit_formations:
+            raise ValueError('Dedications require the exact stock Gathering Storm v2 capability')
         if type(espionage_diagnostic) is not bool or espionage_diagnostic and not trade_diagnostic:
             raise ValueError('Espionage requires the complete current XP2 trade query group')
-        if type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not espionage_diagnostic:
-            raise ValueError('World Congress requires the complete current XP2 espionage group')
+        if (type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not (
+                espionage_diagnostic or stock_dedications and world_congress_review_diagnostic is True)):
+            raise ValueError('World Congress requires the complete XP2 BBG or stock review group')
         if (type(world_congress_review_diagnostic) is not bool
                 or world_congress_review_diagnostic and not world_congress_diagnostic):
             raise ValueError('Congress review requires the explicit current XP2 Congress group')
@@ -343,6 +362,9 @@ class NativeNetworkSession(NativeActionSession):
         self.governors_diagnostic = governors_diagnostic
         self.diplomacy_overview_diagnostic = diplomacy_overview_diagnostic
         self.trade_diagnostic = trade_diagnostic
+        self.standard_trade = standard_trade
+        self.unit_formations = unit_formations
+        self.stock_dedications = stock_dedications
         self.espionage_diagnostic = espionage_diagnostic
         self.world_congress_diagnostic = world_congress_diagnostic
         self.world_congress_review_diagnostic = world_congress_review_diagnostic
@@ -355,6 +377,10 @@ class NativeNetworkSession(NativeActionSession):
             candidate = for_family(input_profile, official_bundle=self.official_bundle).candidate
             if self.official_bundle != candidate.reference:
                 raise ValueError('Expansion session requires its exact retained official capture')
+            if standard_trade:
+                from civ6_host.runtime.xp2_bundle_inputs import REFERENCE
+                if candidate.reference != REFERENCE:
+                    raise ValueError('Standard trade requires its exact stock capture')
             from civ6_host.runtime import xp2_bbg_inputs as bbg
             if privileged_critic_diagnostic and candidate.reference != bbg.REFERENCE:
                 raise ValueError('The LAN critic diagnostic requires the exact BBG XP2 capture')
@@ -662,6 +688,25 @@ class NativeNetworkSession(NativeActionSession):
                     for module in (xp2_trade, xp2_bbg_trade_feedback):
                         for path, digest in module.source_dependencies(execution_image=self.execution_image).items():
                             saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'standard_trade', False):
+                    from civ6_host.runtime import xp2_trade
+                    closure['standard_trade'] = True
+                    dependencies = xp2_trade.standard_source_dependencies(selected.candidate.reference,
+                        core_sha256=selected.candidate.core_sha256, execution_image=image)
+                    for path, digest in dependencies.items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'unit_formations', False):
+                    from civ6_host.runtime import xp2_unit_formations
+                    closure['unit_formations'] = True
+                    for path, digest in xp2_unit_formations.source_dependencies(selected.candidate.reference, image).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'stock_dedications', False):
+                    from civ6_host.runtime import xp2_dedications
+                    closure['stock_dedications'] = True
+                    dependencies = xp2_dedications.source_dependencies(
+                        selected.candidate.reference, execution_image=image)
+                    for path, digest in dependencies.items():
+                        saved_load_pin(closure['pins'], path, digest)
                 if getattr(self, 'espionage_diagnostic', False):
                     from civ6_host.runtime import xp2_espionage
                     closure['espionage_diagnostic'] = True
@@ -682,6 +727,21 @@ class NativeNetworkSession(NativeActionSession):
                     closure['world_congress_review_diagnostic'] = True
                     for path, digest in source_dependencies(execution_image=self.execution_image).items():
                         saved_load_pin(closure['pins'], path, digest)
+                    from civ6_host.runtime import xp2_trade_overview
+                    reference = selected.candidate.reference
+                    if xp2_trade_overview.supports(reference, image):
+                        closure['trade_overview_ui_selected'] = True
+                        for path, digest in xp2_trade_overview.source_dependencies(reference, image).items():
+                            saved_load_pin(closure['pins'], path, digest)
+                if closure.get('standard_trade') or (
+                        closure.get('trade_diagnostic') and closure.get('trade_overview_ui_selected')):
+                    from civ6_host.runtime import xp2_captured_city
+                    stock = bool(closure.get('standard_trade')) and xp2_captured_city.supports_stock(
+                        selected.candidate.reference, image)
+                    if stock or closure.get('trade_diagnostic'):
+                        for path, digest in xp2_captured_city.source_dependencies(
+                                execution_image=image, stock=stock).items():
+                            saved_load_pin(closure['pins'], path, digest)
                 if self.public_display_diagnostic:
                     from civ6_host.runtime.player_display_toppanel import pin_display_closure
                     pin_display_closure(closure,self.public_display_source)
@@ -709,9 +769,10 @@ class NativeNetworkSession(NativeActionSession):
             from civ6_host.runtime.network_checkpoint import configure_closure
             if self.checkpoint_on_close or self.network_checkpoint_ref is not None:
                 from civ6_host.runtime.xp1_checkpoint_profile import source_dependencies
-                for path, expected in source_dependencies().items():
+                for path, expected in source_dependencies(**execution_options).items():
                     saved_load_pin(closure['pins'], path, expected)
-            configure_closure(closure, self.network_checkpoint_ref, validate_fields=True)
+            configure_closure(closure, self.network_checkpoint_ref, validate_fields=True,
+                              **execution_options)
             return
         super()._configure_closure(closure)
         from civ6_host.runtime.network_ui import city_source_files, map_source_files

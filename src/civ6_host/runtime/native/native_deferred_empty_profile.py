@@ -715,8 +715,23 @@ def _load_rows() -> dict[int, dict[str, str]]:
     rows.update(extra)
     return rows
 
-def resolve_empty_receiver_row(record_type):
+def resolve_empty_receiver_row(record_type, *, execution_image=None):
+    if type(record_type) is int and execution_image is not None:
+        from civ6_host.runtime.execution_images import _PROFILE
+        if execution_image is _PROFILE:
+            if record_type in (126, 127):
+                from civ6_host.runtime.xp2_diplomacy_events import receiver_row
+                return receiver_row(record_type)
+            if record_type == 19:
+                from civ6_host.runtime.xp2_player_restored import receiver_row
+                return receiver_row()
+            from civ6_host.runtime.xp2_capture_notification_source import RECORD_TYPES, receiver_row
+            if record_type in RECORD_TYPES:
+                return receiver_row(record_type)
     row = _ROWS.get(record_type)
+    if row is None and type(record_type) is int and record_type == 116:
+        from civ6_host.runtime.xp2_feature_events import receiver_row
+        return receiver_row()
     if row is None and type(record_type) is int and record_type == 208:
         from civ6_host.runtime.a0_policy_unlock import receiver_row
         return receiver_row()
@@ -741,7 +756,7 @@ def resolve_empty_receiver_row(record_type):
     if row is None and type(record_type) is int and record_type == 0xe2:
         from civ6_host.runtime.xp2_history_event_profile import turn21_scalar_receiver_row
         return turn21_scalar_receiver_row(record_type)
-    if row is None and type(record_type) is int and record_type in (0xdf, 0xe3):
+    if row is None and type(record_type) is int and record_type in (0xdf, 0xe3, 0xe4):
         from civ6_host.runtime.xp2_history_event_profile import descriptor_receiver_row
         return descriptor_receiver_row(record_type)
     if row is None and type(record_type) is int and (record_type in (309, 310, 311, 312, 315, 325)):
@@ -758,7 +773,7 @@ def resolve_empty_receiver_row(record_type):
         return receiver_row()
     return row
 
-def validate_empty_profile_record(record: bytes | bytearray | memoryview, *, observer_registered: bool, state_pointer_nonnull: bool, pre_hook: int | None, post_hook: int | None, subscriber_count: int, state_flags: int) -> dict[str, int | str]:
+def validate_empty_profile_record(record: bytes | bytearray | memoryview, *, observer_registered: bool, state_pointer_nonnull: bool, pre_hook: int | None, post_hook: int | None, subscriber_count: int, state_flags: int, execution_image=None) -> dict[str, int | str]:
     """Validate that one ring record takes the proven no-observer/no-subscriber path.
 
     Ring header fields are native size at +0 and handler row index at +4. This
@@ -782,7 +797,7 @@ def validate_empty_profile_record(record: bytes | bytearray | memoryview, *, obs
     record_type = int.from_bytes(view[4:8], 'little')
     if size != len(view):
         raise ValueError('Deferred record size does not match its bounded buffer')
-    row = resolve_empty_receiver_row(record_type)
+    row = resolve_empty_receiver_row(record_type, execution_image=execution_image)
     if row is None:
         raise ValueError(f'No empty-profile handler proof for record type {record_type:#x}')
     if size not in row['record_sizes']:

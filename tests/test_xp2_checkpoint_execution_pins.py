@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
-from civ6_host.runtime.execution_images import select
+from civ6_host.runtime.execution_images import _XP1_PROFILE, select
 from civ6_host.runtime.xp1_checkpoint_profile import save_abi, source_dependencies, verify_source
 
 
@@ -27,9 +27,12 @@ class XP2CheckpointExecutionPinTests(unittest.TestCase):
         self.assertEqual(save_abi(XP2_CORE_SHA256).core_sha256, XP2_CORE_SHA256)
         self.assertNotEqual(self.profile.image_sha256, save_abi(XP2_CORE_SHA256).core_sha256)
 
-    def test_execution_image_is_not_admitted_for_xp1_checkpoint_sources(self):
-        with self.assertRaisesRegex(ValueError, 'requires the XP2 checkpoint ABI'):
+    def test_xp1_checkpoint_sources_require_the_registered_xp1_image(self):
+        with self.assertRaisesRegex(ValueError, 'registered installed XP1 session image'):
             source_dependencies(core_sha256=XP1_CORE_SHA256, execution_image=self.profile)
+        pins = source_dependencies(core_sha256=XP1_CORE_SHA256, execution_image=_XP1_PROFILE)
+        self.assertEqual(pins[_XP1_PROFILE.path], _XP1_PROFILE.image_sha256)
+        self.assertEqual(save_abi(XP1_CORE_SHA256).core_sha256, _XP1_PROFILE.reference_core_sha256)
 
 
 if __name__ == '__main__':

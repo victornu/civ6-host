@@ -1,7 +1,5 @@
 """Source-selected native XP1 placement/resume readers, without new rules."""
 from dataclasses import dataclass
-from pathlib import Path
-import hashlib
 from .configuration_profiles import BASE_CORE_SHA256, XP1_CORE_SHA256, XP2_CORE_SHA256, _source
 
 SOURCE=('work/host-extensions/xp1-production-placement-static/placement-source-v1.json',
@@ -134,12 +132,9 @@ def bind_owner(owner,core,read):
         return old
     from .xp1_production_profile import bind_owner as production
     from .xp1_world_input_profile import bind_owner as world
-    from .resource_resolution import resolve_path
+    from .xp1_session_inputs import verify_xp1_session_pins
     production(owner,core,read);world(owner,core,read)
-    for path,sha in source_dependencies().items():
-        with resolve_path(Path(path)).open('rb') as f:
-            if hashlib.file_digest(f,'sha256').hexdigest()!=sha:
-                raise ValueError('XP1 placement dependency changed: '+path)
+    verify_xp1_session_pins(source_dependencies(),core,family='placement')
     receipt=VerifiedPlacementSource(owner,core,core._handle,SOURCE[1],verify_live(core._handle,read))
     owner._xp1_production_placement_source_receipt=receipt
     return receipt

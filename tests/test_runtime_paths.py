@@ -69,6 +69,22 @@ class RuntimePathsTests(unittest.TestCase):
                     module.resource_root()
             self.assertEqual(resolved, module.resource_root())
 
+    @unittest.skipUnless(os.name == 'nt', 'the native backend is Windows-only')
+    def test_backend_preserves_an_already_imported_path_spelling(self):
+        from civ6_host.runtime.backend import _prepare_runtime
+
+        configured = ROOT.as_posix()
+        module = self.load_with_environment({'CIV6_HOST_RESOURCE_ROOT': configured})
+        self.assertEqual(module.resource_root(), ROOT)
+        with (mock.patch('civ6_host.runtime.resource_resolution.configure'),
+              mock.patch('civ6_host.runtime.capture_admission.configure'),
+              mock.patch('civ6_host.runtime.import_boundary.enable'),
+              mock.patch('civ6_host.runtime.provenance.verify_installation', return_value='verified')):
+            self.assertEqual(_prepare_runtime(ROOT, None, None), 'verified')
+            self.assertEqual(os.environ['CIV6_HOST_RESOURCE_ROOT'], configured)
+            with self.assertRaisesRegex(ValueError, 'different private resource root'):
+                _prepare_runtime(ROOT / 'src', None, None)
+
     def test_resource_root_does_not_depend_on_repository_or_current_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             unrelated = Path(temporary).resolve()

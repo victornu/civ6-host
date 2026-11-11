@@ -40,10 +40,13 @@ class NativeSharedDependencyProfilesTests(unittest.TestCase):
         self.assertEqual(profile.database_interface['selected_slots_match_reference'], True)
 
     def test_unknown_or_aliased_image_pairs_refuse(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
         for actual, reference in (
             ('0' * 64, INTERFACE_REFERENCE_SHA256),
             (ACTUAL_IMAGE_SHA256, ACTUAL_IMAGE_SHA256),
             (ACTUAL_IMAGE_SHA256, '0' * 64),
+            (_XP1_PROFILE.image_sha256, INTERFACE_REFERENCE_SHA256),
+            (ACTUAL_IMAGE_SHA256, _XP1_PROFILE.reference_core_sha256),
         ):
             with self.subTest(actual=actual, reference=reference):
                 with self.assertRaises(ValueError):
@@ -52,6 +55,23 @@ class NativeSharedDependencyProfilesTests(unittest.TestCase):
                         actual_image_sha256=actual,
                         interface_reference_sha256=reference,
                     )
+
+    def test_installed_xp1_selects_its_context_and_the_current_shared_libraries(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE, from_identity, identity
+        from civ6_host.runtime.native.native_core_context_profiles import (
+            profile_for_core, require_executable_profile,
+        )
+        selected = from_identity(identity(_XP1_PROFILE))
+        context = profile_for_core(selected.path, mode='context', execution_image=selected)
+        self.assertEqual(context.ruleset, 'xp1')
+        self.assertEqual(context.core_sha256, selected.image_sha256)
+        self.assertEqual(context.source_core_sha256, selected.reference_core_sha256)
+        shared = context.shared_dependency_profile
+        self.assertEqual(shared.profile_id, 'xp1-shared-dependencies-current-63c17d9')
+        self.assertEqual(dict(shared.dependency_sha256), {
+            row.name: row.sha256 for row in selected.shared_dependencies})
+        self.assertEqual(shared.havok_shim_rva_mismatches, 48)
+        require_executable_profile(context)
 
     def test_directory_and_profile_identity_are_rechecked(self):
         profile = profile_for_shared_dependencies(

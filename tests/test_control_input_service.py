@@ -8,10 +8,14 @@ from types import SimpleNamespace as NS,ModuleType
 import unittest
 from unittest.mock import Mock,patch
 
+from civ6_host.runtime.cache_facade_service import CacheFacadeService
+from civ6_host.runtime.control_input_source import reactivation_source,verify_reactivation
 from civ6_host.runtime.control_input_service import ControlInputService
-from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
+from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256
+from civ6_host.runtime.execution_images import _PROFILE,_XP1_PROFILE
 from civ6_host.runtime.native.native_host import DiagnosticHost
 from civ6_host.runtime.native.native_host_events import HostControllerQuery,NativeDeferredHostEvents
+from civ6_host.runtime.native.native_host_turn_reactivation import TIMER_REASON,UI_REASON
 from civ6_host.runtime.paths import resource_root
 from test_deferred_service import Host as QueueHost
 
@@ -39,18 +43,58 @@ class Host(QueueHost):
 
 
 class ControlInputServiceTests(unittest.TestCase):
-    def fixture(self,player_id=7):
+    def fixture(self,player_id=7,*,core_sha256=XP1_CORE_SHA256):
         h=Host();core=NS(_handle=1000);before=list(h.vtable);bindings=dict(h._slot_bindings)
         d=NS(host=h,core=core,context=2000,_check=Mock(),pending=[],_draining_empty_receivers=False,
              host_notification_counter=0,host_metadata_counter=0)
         for target,value in (
             ('civ6_host.runtime.control_input_source.verify_xp1',Mock(return_value={})),
+            ('civ6_host.runtime.xp2_preload_source.verify_control',Mock(return_value={})),
             ('civ6_host.runtime.control_input_service.NativeControllerCode',Code),
             ('civ6_host.runtime.native.native_controller_state.NativeControllerCode',Code)):
             m=patch(target,value);m.start();self.addCleanup(m.stop)
-        s=ControlInputService(h,core,2000,d,core_sha256=XP1_CORE_SHA256,
+        s=ControlInputService(h,core,2000,d,core_sha256=core_sha256,
             local_player_id=player_id,read=Mock(),emit=Mock())
         return h,d,s,before,bindings
+
+    def test_installed_reactivation_uses_shared_controller_and_restores_slot(self):
+        for image,sha in ((_XP1_PROFILE,XP1_CORE_SHA256),(_PROFILE,XP2_CORE_SHA256)):
+            with self.subTest(image=image.id):
+                self.check_reactivation(image,sha)
+
+    def check_reactivation(self,image,core_sha256):
+        h,d,s,_,_=self.fixture(core_sha256=core_sha256)
+        s.core._civ6_host_execution_image=image
+        unavailable=DiagnosticHost._unsupported(h,'host',0x68)
+        h._bind(h.vtable,0x68,None,[C.c_void_p],unavailable)
+        key=(C.addressof(h.vtable),0x68)
+        previous=h._slot_bindings[key]
+        cache=CacheFacadeService.__new__(CacheFacadeService)
+        cache.core,cache.context,cache.core_sha256=s.core,s.context,core_sha256
+        cache.check=Mock()
+        cache.retained_game_value=Mock(return_value=7)
+        source=reactivation_source(image)
+        machine={s.core._handle+int(row['rva'],16):bytes.fromhex(row['bytes'])
+                 for row in source['core_spans']['caller']['instructions']}
+        s.install_reactivation(cache,lambda address,size:machine[address])
+        with self.assertRaisesRegex(ValueError,'caller differs'):
+            verify_reactivation(s.core,lambda address,size:bytes(size))
+        with self.assertRaisesRegex(RuntimeError,'timer-dependent'):
+            s._reactivate(h.pointer,7,TIMER_REASON)
+        cache.retained_game_value.assert_not_called()
+        callback=C.WINFUNCTYPE(C.c_uint8,C.c_void_p,C.c_int32,C.c_uint32)(h.vtable[0x68//8])
+        with patch('civ6_host.runtime.control_input_service.clear_owned',return_value=[]) as clear:
+            self.assertEqual(callback(h.pointer,7,UI_REASON),1)
+            clear.assert_called_once_with(s.code.flag,7,7)
+        self.assertIs(s.turn_begin_state,d.turn_begin_state)
+        self.assertEqual(d.turn_begin_state.service_flags,64)
+        cache.retained_game_value.assert_called_once_with()
+        self.assertTrue(s.reactivated_since(0,7))
+        self.assertFalse(s.reactivated_since(1,7))
+        self.assertFalse(s.reactivated_since(0,8))
+        s.close()
+        self.assertEqual(h._slot_bindings[key],previous)
+        self.assertEqual(h.vtable[0x68//8],previous[0])
 
     def test_explicit_identity_lazy_original_state_and_no_implicit_reset(self):
         h,d,s,before,bindings=self.fixture()

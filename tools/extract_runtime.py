@@ -1624,6 +1624,9 @@ def main():
     prior_map_path=target/'source-map.json'
     prior_map=json.loads(prior_map_path.read_text(encoding='utf-8')) if prior_map_path.is_file() else {}
     maintained_overlays = {
+        'civ6rl.native_official_bundle': (
+            'host-maintained exact stock XP2 response writer source archive validation',
+            '7eb90487b13b23e2bdc2def6a8862c985e083a3d5d27ea1afc150c01864294bd'),
         'civ6rl.native_policy_catalog': (
             'host-maintained explicit opt-in active-policy relocation parser; legacy defaults unchanged',
             '1a1ccd4a1cd2ee51b4c56cddd621a6e583e070b0ee4af9ebb46710080115533e'),
@@ -1636,6 +1639,9 @@ def main():
         'civ6rl.native_saved_city_targets': (
             'host-maintained shared city-target proof path for the installed source closure',
             '55e4f0d424b0b67bf72088c99b819c20f0195d90902d6320dd39b6d965cb73af'),
+        'civ6rl.native_saved_captured_city': (
+            'host-maintained captured-city profile admission and native occupation effect verification',
+            'b85e62b78d2cfa423e81d469ddc2e8b74dca0e088c3356b7a5786c159b973bdc'),
         'civ6rl.native_saved_unit_work': (
             'host-maintained opt-in XP2 adjacent target adapter; not admitted by the saved-session API',
             '8b604a78767c97095fe81ee5128cede63abb7f6f1d3a3d5be50605d10b41887a'),
@@ -1648,6 +1654,12 @@ def main():
         'civ6rl.native_saved_unit_orders': (
             'host-maintained XP2 native skip-turn order through the shared operation catalogue',
             'd46d0c0a212aacea81a473412c8a80a4078ebe8dda382fce5ba95c86fbbb3d1d'),
+        'civ6rl.native_saved_trade': (
+            'host-maintained opt-in World A BBG trade quote helper; stock legality and default helper preserved',
+            'c4ff4f42cd482edcc581853378a96b708b2acfdde08398f94707c9b1a3a4bbeb'),
+        'civ6rl.native_deferred_empty_profile': (
+            'host-maintained current XP2 FeatureAddedToMap empty receiver row through the shared FIFO',
+            'f1709d7135f7e78e29d56d923918f515f71e233d9e6c8e23f83a06982db684b9'),
     }
     paths={'civ6rl.'+p.stem:p for p in (source/'civ6rl').glob('*.py')}
     paths.update({'civ6rl.learning.'+p.stem:p for p in (source/'civ6rl/learning').glob('*.py')})
@@ -1994,6 +2006,7 @@ def main():
             transformations.append('XP1 native parameterless unit orders and ordinary-unit cancellation use shared catalogues and command delivery with selected source profiles; Base defaults preserved')
         if name in XP1_WORLD_MODULES:
             transformations.append('explicit XP1 world-input and queued-destination source selection; shared official Lua route, catalogue and apply preserved; unsupported operation branches refused before transmission; Base default unchanged')
+            transformations.append('current XP2 attack no-effect disposition requires the live image and a complete native MOVE_TO lifecycle')
         from extraction_foundation_facades import transform as foundation_facades
         from extraction_foundation_queries import transform as foundation_queries
         from extraction_foundation_visibility import transform as foundation_visibility
@@ -2169,10 +2182,12 @@ def main():
                 'from civ6_host.contracts.policies import choose, validate_slots\n')
                 + text[parser:chooser]).rstrip() + '\n'
             transformations.append('policy assignment validation shared with the portable client')
-        from extraction_player_operations import parameterize as player_operations, MODULE as PLAYER_OPERATION_MODULE, LABEL as PLAYER_OPERATION_LABEL
+        from extraction_player_operations import (
+            parameterize as player_operations, MODULE as PLAYER_OPERATION_MODULE,
+            LABEL as PLAYER_OPERATION_LABEL, DEDICATION_LABEL as PLAYER_OPERATION_DEDICATION_LABEL)
         text=player_operations(name,text)
         if name == PLAYER_OPERATION_MODULE:
-            transformations.append(PLAYER_OPERATION_LABEL)
+            transformations.extend((PLAYER_OPERATION_LABEL, PLAYER_OPERATION_DEDICATION_LABEL))
         mapped=remap(name)
         dest=repo/'src'/Path(*mapped.split('.')).with_suffix('.py')
         if name in maintained_overlays:

@@ -44,10 +44,10 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if execution_image is not None:
         from .execution_images import identity
         identity(execution_image)
-        if (core_sha256 != XP2_CORE_SHA256
-                or execution_image.reference_core_sha256 != core_sha256):
-            raise ValueError('Session view execution image does not match its XP2 source ABI')
-        execution_options = {'execution_image': execution_image}
+        if execution_image.reference_core_sha256 != core_sha256:
+            raise ValueError('Session view execution image does not match its source ABI')
+        if core_sha256 == XP2_CORE_SHA256:
+            execution_options = {'execution_image': execution_image}
     from .captured_session_profile import select
     from .xp1_status_profiles import source_dependencies as status_dependencies
     from .unit_operation_ui_profile import source_dependencies as unit_dependencies
@@ -127,8 +127,12 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
                 raise ValueError('Captured session source dependency identity conflicts')
             result[path]=digest
     if execution_image is not None:
-        from .runtime_source_dependencies import materialize_runtime_source_pins
-        result=materialize_runtime_source_pins(result,execution_image=execution_image)
+        if core_sha256 == XP1_CORE_SHA256:
+            from .xp1_session_inputs import materialize_xp1_session_pins
+            result = materialize_xp1_session_pins(result, execution_image)
+        else:
+            from .runtime_source_dependencies import materialize_runtime_source_pins
+            result = materialize_runtime_source_pins(result, execution_image=execution_image)
     return result
 
 
@@ -317,6 +321,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
     An empty qualified founder family exists only after the official query ran.
     """
     review_requested = getattr(saved, 'world_congress_review_diagnostic', False)
+    stock_congress = (review_requested is True and getattr(saved, 'stock_dedications', False) is True)
     if (type(review_requested) is not bool
             or review_requested and getattr(saved, 'world_congress_diagnostic', False) is not True):
         raise ValueError('Congress review view requires its exact Boolean Congress group')
@@ -357,7 +362,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
         timer_elapsed = read_timer(b, core_sha256=core_sha256)
         observation = _observe_activity(saved, player_id, activity)
         permissions = (_read_command_permissions(saved, player_id, activity['turn'], sequence)
-                       if review_requested and not actions_closed else None)
+                       if stock_congress or review_requested and not actions_closed else None)
         strategic_allowed = permissions is None or permissions['allow_strategic']
         inventory=None
         if common_input_families:
@@ -732,17 +737,26 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 if overview is None else dict(status='queried_partial',
                     candidate_ids=[row['candidate_id'] for row in rows],
                     unqualified=list(contract.INITIAL_DIPLOMACY_GAPS)))
-        if getattr(saved, 'trade_diagnostic', False):
-            if decisions['schema'] != contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA:
-                raise ValueError('Trade requires the selected XP2 v33 query group')
+        standard_trade = getattr(saved, 'standard_trade', False)
+        if getattr(saved, 'trade_diagnostic', False) or standard_trade:
+            base = (contract.CAPABILITY_XP2_ENVOYS_SCHEMA if standard_trade
+                    else contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA)
+            if decisions['schema'] != base:
+                raise ValueError('Trade requires its selected XP2 base query group')
             from civ6_host.contracts import trade
             from .xp2_trade import catalogue as read_trade
 
             acting = not actions_closed and not contract.is_waiting(controls)
+            if standard_trade:
+                from .xp2_trade_overview import read_stock
+                panel, status = read_stock(saved, observation, sequence) if acting else (None, 'waiting_or_closed')
+                decisions.update(trade_overview=panel, trade_overview_status=status)
+                acting = acting and status != 'ui_boundary_unavailable'
             trade_view = (read_trade(saved, observation, **(
                             {'include_origins': strategic_allowed} if permissions is not None else {})) if acting else
                           dict(trade_routes=None, trade_origins=None))
-            decisions['schema'] = contract.CAPABILITY_XP2_TRADE_SCHEMA
+            decisions['schema'] = (contract.CAPABILITY_XP2_STANDARD_TRADE_SCHEMA if standard_trade
+                                   else contract.CAPABILITY_XP2_TRADE_SCHEMA)
             decisions.update(trade_view)
             for kind, field, choices in (
                     ('make_trade_route', 'trade_routes', trade.route_actions),
@@ -755,6 +769,37 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                     dict(status='unqualified', reason='session_closed' if actions_closed else
                          'native_trade_acting_boundary_unavailable') if value is None else
                     dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+        if getattr(saved, 'unit_formations', False):
+            from .xp2_unit_formations import catalogue as read_formations
+            if decisions['schema'] != contract.CAPABILITY_XP2_STANDARD_TRADE_SCHEMA:
+                raise ValueError('Formation query requires the stock trade capability boundary')
+            state = (read_formations(saved, observation)
+                     if not actions_closed and not contract.is_waiting(controls) and strategic_allowed else None)
+            rows = [dict(candidate_id=contract.digest(action), action=action)
+                    for action in ([] if state is None else state['offers'])]
+            candidates.extend(rows)
+            decisions['schema'] = contract.CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA
+            decisions['unit_formations'] = state
+            decisions['families']['unit_formation'] = (
+                dict(status='unqualified', reason='session_closed' if actions_closed else
+                     'native_unit_formation_acting_boundary_unavailable') if state is None else
+                dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+        if getattr(saved, 'stock_dedications', False):
+            from .xp2_dedications import catalogue as read_dedications
+            from civ6_host.contracts import dedications
+            if decisions['schema'] != contract.CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA:
+                raise ValueError('Dedication query requires the stock formation capability boundary')
+            acting = not actions_closed and not contract.is_waiting(controls)
+            state = read_dedications(saved, observation) if acting else None
+            rows = [dict(candidate_id=contract.digest(action), action=action)
+                    for action in dedications.candidates(state)]
+            candidates.extend(rows)
+            decisions['schema'] = contract.CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA
+            decisions['dedications'] = state
+            decisions['families'][dedications.KIND] = (
+                dict(status='unqualified', reason='session_closed' if actions_closed else
+                     'native_dedication_acting_boundary_unavailable') if state is None else
+                dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
         if getattr(saved, 'espionage_diagnostic', False):
             if core_sha256 != XP2_CORE_SHA256:
                 raise ValueError('Espionage requires the selected XP2 engine')
@@ -777,7 +822,8 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             congress = (read_congress(saved, observation, sequence=sequence)
                         if not actions_closed and not contract.is_waiting(controls) else None)
             decisions = contract.upgrade_world_congress_catalogue(
-                decisions, congress, observation=observation)
+                decisions, congress, observation=observation,
+                stock_permissions=permissions if stock_congress else None, actions_closed=actions_closed)
         if review_requested:
             from .xp2_world_congress_review import catalogue as read_congress_review
             review = read_congress_review(saved, observation, sequence=sequence,
@@ -793,14 +839,27 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                         if family in decisions['families']:
                             decisions['families'][family] = dict(status='unqualified',
                                 reason=contract.NATIVE_STRATEGIC_READER_UNAVAILABLE)
-                decisions = contract.upgrade_command_permissions_catalogue(
-                    decisions, permissions, observation=observation, actions_closed=actions_closed)
+                if not stock_congress:
+                    decisions = contract.upgrade_command_permissions_catalogue(
+                        decisions, permissions, observation=observation, actions_closed=actions_closed)
                 from .xp2_world_congress_active_effects import catalogue as read_congress_active_effects
                 effects = read_congress_active_effects(saved, observation, sequence=sequence,
                     congress=decisions['world_congress'])
                 decisions = contract.upgrade_active_effects_catalogue(decisions,
                     effects['world_congress_active_effects'], observation=observation,
                     status=effects['world_congress_active_effects_status'])
+        if (getattr(saved, 'trade_overview_ui_selected', False)
+                and decisions['schema'] == contract.CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA):
+            from .xp2_trade_overview import read as read_trade_overview
+            panel, status = read_trade_overview(saved, observation, decisions)
+            decisions = contract.upgrade_trade_overview_catalogue(
+                decisions, panel, observation=observation, status=status)
+        if not actions_closed and getattr(continuation, 'captured_city_core', None) is not None:
+            from .xp2_captured_city import read as read_captured_city
+            captured_city = read_captured_city(saved, observation, controls=controls,
+                                              actions_closed=actions_closed)
+            decisions = contract.upgrade_captured_city_catalogue(
+                decisions, captured_city, actions_closed=actions_closed)
         decisions.pop('decision_id', None)
         decisions['decision_id'] = contract.digest(decisions)
         contract.validate_capability_catalogue(decisions, identity, sequence, activity['turn'],

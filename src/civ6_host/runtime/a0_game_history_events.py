@@ -34,6 +34,9 @@ def _selected(kind, core_sha256=XP1_CORE_SHA256):
             xp2.descriptor_sources(kind)
             spec, refs, _ = xp2.DESCRIPTOR_EVENTS[kind]
             return spec, refs[0][1]
+        if kind == xp2.DESCRIPTOR_E4_KIND:
+            xp2.descriptor_e4_source()
+            return xp2.DESCRIPTOR_E4_SPEC, xp2.DESCRIPTOR_E4_SOURCE[1]
         specs={source.HISTORY_KIND:source.EVENTS[source.HISTORY_KIND],
                source.ERA_KIND:source.EVENTS[source.ERA_KIND],
                score.EVENT_KIND:score.SPEC}
@@ -53,7 +56,7 @@ def encode(kind, fields, sequence, *, normalizer_transform_present,
     row={'callback_shape_group':'two_value_three_key','payload_value_count':2,'writer_record_type':hex(record)}
     from .native.native_scalar_event_encoder import (
         _decode_profile_fields, _encode_profile_record, _read_u32_variant)
-    if core_sha256 == XP2_CORE_SHA256 and record in (0xdf, 0xe3):
+    if core_sha256 == XP2_CORE_SHA256 and record in (0xdf, 0xe3, 0xe4):
         from .native.native_event_99e85ec6 import DESCRIPTOR_KEY, SELECTOR_KEY, decode_fields
         scalar_keys = (0xD6FCF3E4, 0xA1FBC372)
         if type(fields) is not dict or set(fields) != {DESCRIPTOR_KEY, SELECTOR_KEY, *scalar_keys}:
@@ -68,7 +71,10 @@ def encode(kind, fields, sequence, *, normalizer_transform_present,
         result = bytearray(_encode_profile_record(row, sequence, ()))
         result.extend(bytes(16))
         struct.pack_into('<I', result, 0, len(result))
-        struct.pack_into('<HHIII', result, 88, descriptor.owner, 2, descriptor.item_id, *values)
+        if record == 0xe4:
+            struct.pack_into('<IIHHI', result, 88, *values, descriptor.owner, 2, descriptor.item_id)
+        else:
+            struct.pack_into('<HHIII', result, 88, descriptor.owner, 2, descriptor.item_id, *values)
         return bytes(result)
     if core_sha256 == XP2_CORE_SHA256 and record == 0x106:
         row.update(callback_shape_group='one_value_two_key', payload_value_count=0)

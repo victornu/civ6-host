@@ -157,12 +157,47 @@ class LifetimeTests(unittest.TestCase):
         b.destroyed=True
         self.assertFalse(observer._exclusive())
 
-    def test_host_binding_snapshot_check_is_retained(self):
-        # Exact original guard remains present; lifetime is not permission to
-        # replace callbacks silently while releasing the two facade owners.
-        body=Path(cache.__file__).read_text()
-        self.assertIn("tuple(table)!=snapshot",body)
-        self.assertIn("b.host._slot_bindings!=self.bindings",body)
+    def test_unload_wrapper_release_rejects_changed_xp1_callbacks(self):
+        b, attempt, lease, _ = graph()
+        prefix = b.prefix
+        b.check_thread = Mock()
+        b.stage, b.busy = 'loaded-lifetime-wrappers', True
+        b.runtime = NS(read=Mock())
+        b.inputs = NS(game=b'component')
+        b.reader = NS(transport=NS(closed=True, cursor=len(b.inputs.game)))
+        b.bound_identity = {'game': 0x30000}
+        b.host.pointer = 0x50000
+        b.host.aux_object, b.host.logger_object = C.c_void_p(), C.c_void_p()
+        table = [0x60000]
+        b.host._slot_bindings = {0: table[0]}
+        b.host._saved_load_services = prefix
+        prefix.core, prefix.context = b.core, b.context
+        prefix.runtime.service_owner = b.host
+        prefix.configuration_readback_verified = True
+        prefix.deferred_events = NS(_check=Mock())
+        lease.thread, lease.inputs = threading.get_ident(), b.inputs
+        lease.core, lease.host = b.core, b.host
+        lease.script_runtime, lease.configuration_owner = prefix.runtime, b.owner
+        lease.core_sha256 = b.load_abi.core_sha256
+        attempt.cache_abi = b.load_abi
+        lease.identity = b.bound_identity.copy()
+        lease.tables = ((table, tuple(table)),)
+        lease.bindings = b.host._slot_bindings.copy()
+        globals_ = [b.host.pointer, C.addressof(b.host.aux_object), C.addressof(b.host.logger_object)]
+        with (patch.object(cache, 'context_state', return_value=lease.identity),
+              patch.object(cache, 'exact', return_value=b'\x01'),
+              patch.object(cache, 'qword', side_effect=globals_)):
+            def check():
+                cache.LoadedCachePublication._check_state(lease, b.stage, b.busy)
+
+            check()
+            table[0] = 0x60010
+            with self.assertRaisesRegex(RuntimeError, 'host callback binding changed'):
+                check()
+            table[0] = lease.tables[0][1][0]
+            b.host._slot_bindings[0] = 0x60010
+            with self.assertRaisesRegex(RuntimeError, 'host callback binding changed'):
+                check()
 
     def test_cleanup_jobs_allow_only_quiescent_removals(self):
         before=snapshot();after=copy.deepcopy(before)

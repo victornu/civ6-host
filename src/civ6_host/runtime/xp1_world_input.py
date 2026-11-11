@@ -213,6 +213,7 @@ def apply(saved, action, before):
                 or receipt.get('automatic_choices_applied') is not False):
             raise RuntimeError('Shared world-input receipt is absent or inconsistent')
         request = receipt['request']
+        refusal_code = None
         if action['kind'] in ('world_select_unit', 'world_deselect_unit'):
             if request is not None:
                 raise RuntimeError('Host UI selection unexpectedly submitted a game request')
@@ -231,6 +232,8 @@ def apply(saved, action, before):
                     raise RuntimeError('The official war prompt was not retained by its owner')
             submitted = request['status'] == 'request'
             status = 'refused' if request['status'] == 'unsupported' else 'completed'
+            if status == 'refused':
+                refusal_code = 'native_world_input_branch_unqualified'
             qualified_operations = {'MOVE_TO'}
             if b.load_abi.core_sha256 == XP2_CORE_SHA256:
                 from .xp2_world_input_source import verify_swap_source
@@ -246,10 +249,14 @@ def apply(saved, action, before):
         if submitted:
             if type(archive) is not str or not archive or bytes.fromhex(archive).hex() != archive:
                 raise RuntimeError('World-input submission lacks its original archive')
+            if request['operation_name'] == 'MOVE_TO' and observed == before:
+                expected_queue = dict(unit_present=True, plot_id=action['plot_id'])
+                if receipt['queued_destination_after'] != expected_queue:
+                    status = 'refused'
+                    refusal_code = 'native_world_move_effect_unobserved'
         elif archive is not None or observed != before:
             raise RuntimeError('Unsubmitted world input changed the native observation')
-        return dict(status=status,
-            refusal_code='native_world_input_branch_unqualified' if status=='refused' else None,
+        return dict(status=status, refusal_code=refusal_code,
             observation=deepcopy(observed), receipt=deepcopy(receipt))
     finally:
         # The common worker publishes a fresh catalogue after every command.

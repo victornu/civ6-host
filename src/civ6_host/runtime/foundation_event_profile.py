@@ -152,6 +152,17 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
         pillage_source(execution_image=execution_image)
         from .native.native_event_e660_building_pillaged import source_dependencies as pillage_dependencies
         from .xp2_wonder_completion import source_dependencies as wonder_dependencies
+        if execution_image is not None:
+            from .xp2_great_work import source_dependencies as great_work_dependencies
+            selected.update(great_work_dependencies(execution_image=execution_image))
+            from .xp2_feature_events import source_dependencies as feature_dependencies
+            from .xp2_capture_notification_source import source_dependencies as capture_dependencies
+            from .xp2_player_restored import source_dependencies as restored_dependencies
+            for path, digest in (*feature_dependencies(execution_image=execution_image).items(),
+                                 *capture_dependencies(execution_image).items(),
+                                 *restored_dependencies(execution_image=execution_image).items()):
+                if selected.setdefault(path, digest) != digest:
+                    raise ValueError('Conflicting current XP2 foundation event dependency')
         for path, digest in (PILLAGE_SOURCE, PROJECT_SOURCE):
             selected[str(_path(path).resolve())] = digest
         for path, digest in (*pillage_dependencies(execution_image=execution_image).items(), *wonder_dependencies().items()):
@@ -261,6 +272,58 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             available_rows[record_type] = receiver_rows[str(record_type)] = row
             sizes[record_type] = RECORD_SIZE
         mapping[KIND] |= frozenset(RECORD_TYPES)
+        if execution_image is not None:
+            from .native import native_event_great_work as great_work
+            row = resolve_empty_receiver_row(great_work.RECORD_TYPE)
+            if (great_work.EVENT_KIND in mapping or great_work.RECORD_TYPE in sizes
+                    or row is None or row != great_work.receiver_row()):
+                raise ValueError('XP2 GreatWorkCreated receiver differs from the shared codec')
+            mapping[great_work.EVENT_KIND] = frozenset((great_work.RECORD_TYPE,))
+            sizes[great_work.RECORD_TYPE] = great_work.RECORD_SIZE
+            available_rows[great_work.RECORD_TYPE] = receiver_rows[str(great_work.RECORD_TYPE)] = row
+            from . import xp2_feature_events as feature
+            row = resolve_empty_receiver_row(feature.RECORD_TYPE)
+            if (feature.ADDED in mapping or feature.RECORD_TYPE in sizes
+                    or row != feature.receiver_row() or mapping.get(feature.VISIBILITY) != frozenset((118,))):
+                raise ValueError('XP2 feature receiver differs from the shared family')
+            mapping[feature.ADDED] = frozenset((feature.RECORD_TYPE,))
+            sizes[feature.RECORD_TYPE] = feature.RECORD_SIZE
+            available_rows[feature.RECORD_TYPE] = receiver_rows[str(feature.RECORD_TYPE)] = row
+            from . import xp2_city_occupation_event as occupation
+            row = resolve_empty_receiver_row(occupation.RECORD_TYPE, execution_image=execution_image)
+            if (occupation.KIND in mapping or occupation.RECORD_TYPE in sizes
+                    or row != occupation.receiver_row()):
+                raise ValueError('XP2 city occupation receiver overlaps another source')
+            mapping[occupation.KIND] = frozenset((occupation.RECORD_TYPE,))
+            sizes[occupation.RECORD_TYPE] = occupation.RECORD_SIZE
+            available_rows[occupation.RECORD_TYPE] = receiver_rows[str(occupation.RECORD_TYPE)] = row
+            from . import xp2_building_removal as removal
+            row = resolve_empty_receiver_row(removal.RECORD_TYPE, execution_image=execution_image)
+            if (removal.KIND in mapping or removal.RECORD_TYPE in sizes
+                    or row != removal.receiver_row()):
+                raise ValueError('XP2 building removal receiver overlaps another source')
+            mapping[removal.KIND] = frozenset((removal.RECORD_TYPE,))
+            sizes[removal.RECORD_TYPE] = removal.RECORD_SIZE
+            available_rows[removal.RECORD_TYPE] = receiver_rows[str(removal.RECORD_TYPE)] = row
+            from . import xp2_capture_notification_source as capture
+            from . import xp2_player_can_construct_event as player_notification
+            if player_notification.KIND in mapping or player_notification.RECORD_TYPES.intersection(sizes):
+                raise ValueError('XP2 player notification overlaps another source')
+            mapping[player_notification.KIND] = player_notification.RECORD_TYPES
+            for record_type in player_notification.RECORD_TYPES:
+                row = resolve_empty_receiver_row(record_type, execution_image=execution_image)
+                if row != capture.receiver_row(record_type):
+                    raise ValueError('XP2 player notification receiver differs')
+                sizes[record_type] = player_notification.RECORD_SIZE
+                available_rows[record_type] = receiver_rows[str(record_type)] = row
+            from . import xp2_player_restored as restored
+            row = resolve_empty_receiver_row(restored.RECORD_TYPE, execution_image=execution_image)
+            if (restored.KIND in mapping or restored.RECORD_TYPE in sizes
+                    or row != restored.receiver_row()):
+                raise ValueError('XP2 player restoration overlaps another source')
+            mapping[restored.KIND] = frozenset((restored.RECORD_TYPE,))
+            sizes[restored.RECORD_TYPE] = restored.RECORD_SIZE
+            available_rows[restored.RECORD_TYPE] = receiver_rows[str(restored.RECORD_TYPE)] = row
     if set().union(*mapping.values()) != set(sizes):
         raise ValueError('Foundation record membership differs')
     for kind, size in sizes.items():

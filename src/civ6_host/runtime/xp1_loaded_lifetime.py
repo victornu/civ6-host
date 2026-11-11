@@ -69,6 +69,14 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuatio
     if core_sha256==XP2_CORE_SHA256:
         from .a0_district_removed import source_dependencies as district_dependencies
         pins.update(district_dependencies(core_sha256))
+        if execution_image is not None:
+            from .xp2_capture_notification_source import source_dependencies as current_district_dependencies
+            from .xp2_diplomacy_events import source_dependencies as diplomacy_dependencies
+            for group in (current_district_dependencies(execution_image),
+                          diplomacy_dependencies(execution_image)):
+                for path, digest in group.items():
+                    if pins.setdefault(path, digest) != digest:
+                        raise ValueError('Conflicting current XP2 lifetime dependency: '+path)
         if postload:
             from .xp2_loaded_lifetime_source import postload_source_dependencies
             for path,digest in postload_source_dependencies().items():
@@ -106,7 +114,9 @@ def _unloaded_record(record,consumer):
     # Only the already installed A0 receiver family: these copied byte records
     # take the proven no-hook/no-subscriber path, without dereferencing payloads
     # or calling Core. Native CacheUpdate feedback requires a live cache instead.
-    validate_empty_profile_record(record,**consumer.empty_receiver_state)
+    core = getattr(getattr(consumer, 'deferred', None), 'core', None)
+    execution_image = getattr(core, '_civ6_host_execution_image', None)
+    validate_empty_profile_record(record, execution_image=execution_image, **consumer.empty_receiver_state)
     return True
 
 def verify_live(b):
@@ -693,10 +703,12 @@ class LoadedLifetime:
                 self._emit('xp1_loaded_notifications_consumed',count=loaded_notifications_consumed,
                            sequence=p.deferred_events._sequence,consumed=p.deferred_events.consumed_count,
                            game_alive=True,post160_called=False,cache_wrappers_present=False)
-                p.event_arguments.consumer.enable_district_events()
+                if getattr(p.event_arguments.consumer,'district_event_profile',None) is None:
+                    p.event_arguments.consumer.enable_district_events()
                 self.phase='wrappers';b.stage='loaded-lifetime-wrappers'
             else:
-                p.event_arguments.consumer.enable_district_events()
+                if getattr(p.event_arguments.consumer,'district_event_profile',None) is None:
+                    p.event_arguments.consumer.enable_district_events()
                 self.phase='wrappers';self.lease.begin_release(self)
             before=b.jobs_snapshot('before');require_quiescent(before)
             self._emit('before_xp1_loaded_wrapper_release',source_sha256=self.source_reference[1],jobs_before=before)

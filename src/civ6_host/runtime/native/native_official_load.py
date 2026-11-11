@@ -230,24 +230,45 @@ class OfficialLoadBackend(NativeLoadBackend):
         if self.stage != 'raw-loaded':
             raise RuntimeError('Readback requires the validated raw Load return')
         source = b'local w,h=Map.GetGridSize()\nlocal p=Players[0]; assert(p~=nil)\nlocal units={}; for _,u in p:GetUnits():Members() do units[#units+1]=u end\ntable.sort(units,function(a,b) return a:GetID()<b:GetID() end)\nlocal rows={}; for _,u in ipairs(units) do\n for _,name in ipairs({\'GetID\',\'GetType\',\'GetX\',\'GetY\',\'GetDamage\',\'GetMovesRemaining\'}) do\n  assert(type(u[name])==\'function\',\'missing GameCore unit getter: \'..name)\n end\n rows[#rows+1]=string.format(\'{"id":%d,"type":%d,"x":%d,"y":%d,"damage":%d,"moves":%.17g}\',\n u:GetID(),u:GetType(),u:GetX(),u:GetY(),u:GetDamage(),u:GetMovesRemaining())\nend\nlocal cities=0; for _,c in p:GetCities():Members() do cities=cities+1 end\nreturn string.format(\'{"turn":%d,"width":%d,"height":%d,"player_id":0,"gold":%.17g,"city_count":%d,"units":[%s]}\',\n Game.GetCurrentGameTurn(),w,h,p:GetTreasury():GetGoldBalance(),cities,table.concat(rows,\',\'))'
+        audit_xp1_checkpoint = False
         if self.inputs.checkpoint is not None:
-            from civ6_host.runtime.saved_load_profiles import XP2_CORE_SHA256
-            if self.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from civ6_host.runtime.execution_images import _XP1_PROFILE
+            from civ6_host.runtime.saved_load_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+            engine = self.load_abi.core_sha256
+            audit_xp1_checkpoint = (engine == XP1_CORE_SHA256
+                                    and self.profile.execution_image is _XP1_PROFILE)
+            if audit_xp1_checkpoint or engine == XP2_CORE_SHA256:
                 original = b'for _,u in p:GetUnits():Members() do units[#units+1]=u end'
                 if source.count(original) != 1:
                     raise ValueError('Saved own-unit enumeration changed')
-                source = source.replace(original,
+                audit_prefix = b'local delayed_units={}\n' if audit_xp1_checkpoint else b''
+                audit_exclusion = (b' else\n  delayed_units[#delayed_units+1]=string.format("%d",u:GetID())\n'
+                                   if audit_xp1_checkpoint else b'')
+                source = source.replace(original, audit_prefix +
                     b'for _,u in p:GetUnits():Members() do\n'
                     b' assert(type(u.IsDelayedDeath)=="function","unit lifecycle getter unavailable")\n'
                     b' if not (u:IsDelayedDeath() == true and u:GetX() == -9999 and u:GetY() == -9999) then\n'
-                    b'  units[#units+1]=u\n'
+                    b'  units[#units+1]=u\n' + audit_exclusion +
                     b' end\n'
                     b'end')
+                if audit_xp1_checkpoint:
+                    marker = b"""return string.format('{"turn":"""
+                    if source.count(marker) != 1:
+                        raise ValueError('Saved own-unit diagnostic format changed')
+                    source = source.replace(marker, b"""return string.format('{"delayed_units":[' .. table.concat(delayed_units, ',') .. '],"turn":""")
         raw = self.prefix.runtime.evaluate_text(self.prefix.game_child, source, b'@official_loaded_diagnostic', capacity=4096)
         observed = json.loads(raw)
         profile = validate_inputs(self.inputs, candidate_bundle=getattr(self, 'captured_bundle', None) if getattr(self, '_saved_load_candidate', False) else None)
         if self.inputs.official_bundle is not None:
             bundle = getattr(self, 'captured_bundle', None)
+            if audit_xp1_checkpoint:
+                delayed_units = observed.pop('delayed_units')
+                if bundle is not None and bundle.inputs is self.inputs:
+                    expected = bundle.expected_readback
+                    self.emit('xp1_checkpoint_raw_player_comparison',
+                        delayed_off_map_unit_ids=delayed_units, comparison_equal=observed == expected,
+                        differing_fields=sorted(key for key in expected if observed.get(key) != expected[key]),
+                        learner_observation=False)
             if bundle is None or bundle.inputs is not self.inputs or observed != bundle.expected_readback:
                 raise ValueError('Loaded own-player fields differ from the captured official bundle')
             comparison = dict(matched=True, reference_sha256=bundle.reference[1], compared=observed, comparison_scope='same-save P0 own units, city count, gold, turn and dimensions', complete_state_compared=False, observation_filter_validated=False, strategic_training_ready=False)

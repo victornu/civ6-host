@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import pefile
+
 import test_a0_family_service as shared
 from civ6_host.runtime import a0_policy_unlock as policy
 from civ6_host.runtime import a0_policy_unlock_current as current
@@ -87,7 +89,7 @@ class CurrentPolicyNotificationTests(unittest.TestCase):
         self.assertEqual([(row['sequence'], row['handler_va']) for row in receipts],
                          [(1, '0x1400da550'), (2, '0x1400da550')])
 
-    def test_current_policy_does_not_admit_obsolescence_producer(self):
+    def test_current_policy_refuses_obsolescence_outside_stock_capture(self):
         policy.enable(self.owner, self.backend)
         self.assertEqual(resolve_empty_receiver_row(207)['handler_va'], '0x1400dad50')
         self.assertEqual(current.receiver_row(self.image)['handler_va'], '0x1400da550')
@@ -99,6 +101,38 @@ class CurrentPolicyNotificationTests(unittest.TestCase):
         finally:
             self.owner.active_kind = None
         self.assertFalse(self.deferred.pending)
+
+    def test_stock_obsolescence_consumes_exact_named_row_in_shared_fifo(self):
+        self.backend.captured_bundle = SimpleNamespace(reference=current.STOCK_CAPTURE)
+        proof = current.obsolescence_source(self.image)
+        pe = pefile.PE(str(self.image.path), fast_load=True)
+        self.addCleanup(pe.close)
+        bodies = {self.address: self.raw}
+        for span in proof['core_spans'].values():
+            rva = int(span['rva'], 16)
+            bodies[self.deferred.core._handle + rva] = pe.get_data(rva, span['bytes'])
+        self.reader.read.side_effect = lambda address, size: bodies[address][:size]
+        policy.enable(self.owner, self.backend)
+        self.assertEqual(self.dispatch(0), 0)
+        self.reader.fields.return_value = {
+            current.SELECTOR_KEY: shared.scalar(3, 0),
+            current.PLAYER_KEY: shared.scalar(2, 1),
+            0xa1fbc372: shared.scalar(2, 114),
+        }
+        self.deferred.host_notification_counter = 2
+        self.deferred.host_metadata_counter = 7
+        self.assertEqual(self.arguments.dispatch(self.host.pointer, current.OBSOLETE_KIND, 0x9000), 0)
+        self.assertEqual(struct.unpack_from('<IIII', self.deferred.pending[-1]), (96, 207, 2, 0))
+        self.assertEqual(struct.unpack_from('<III', self.deferred.pending[-1], 80), (2, 1, 114))
+        self.assertEqual((self.deferred.host_notification_counter, self.deferred.host_metadata_counter), (2, 7))
+        self.assertEqual(self.deferred.drain(), 2)
+        self.assertFalse(self.deferred.pending)
+        receipts = [call.kwargs for call in self.deferred.emit.call_args_list
+                    if call.args == ('native_deferred_empty_record_consumed',)]
+        self.assertEqual([(row['sequence'], row['event_name'], row['handler_va']) for row in receipts], [
+            (1, 'GameCoreEvent::CivicsUnlocked', '0x1400da550'),
+            (2, 'GameCoreEvent::GovernmentPolicyObsoleted', '0x1400da490'),
+        ])
 
     def test_wrong_live_producer_is_refused_before_enabling(self):
         self.reader.read.side_effect = None

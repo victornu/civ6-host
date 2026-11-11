@@ -4,8 +4,6 @@ This selects native readers and the pinned UI gate; it implements no production
 rules. Current legality remains in the common native catalogue/CanStartOperation.
 """
 from dataclasses import dataclass
-import hashlib
-from pathlib import Path
 
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256, _source
 
@@ -164,14 +162,12 @@ def bind_owner(owner, core, read):
         return old
     from .xp1_saved_load import validate_candidate_inputs
     from .xp1_production_profile import bind_owner as bind_production
+    from .xp1_session_inputs import verify_xp1_session_pins
     validate_candidate_inputs(owner.inputs, owner.captured_bundle)
     bind_production(owner, core, read)
     # Pinned UI source/capture bytes are part of this one-time admission, not
     # repeatedly hashed for each offered queue gesture.
-    for name, digest in source_dependencies().items():
-        with Path(name).open('rb') as stream:
-            if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
-                raise ValueError('XP1 queue dependency changed: '+name)
+    verify_xp1_session_pins(source_dependencies(), core, family='queue')
     receipt = VerifiedQueueSource(owner, core, core._handle, owner.inputs,
         owner.captured_bundle, SOURCE[1], verify_live(core._handle, read))
     owner._xp1_production_queue_source_receipt = receipt

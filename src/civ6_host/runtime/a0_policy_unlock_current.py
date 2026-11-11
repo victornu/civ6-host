@@ -1,4 +1,4 @@
-"""Current-image CivicsUnlocked source binding for the shared type-208 codec."""
+"""Current-image policy notification bindings for the shared A0 FIFO."""
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +21,13 @@ CURRENT_CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1
 CURRENT_EXE_SHA256 = 'd1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe'
 KIND, RECORD_TYPE, RECORD_SIZE = 0x0a981150, 208, 96
 SELECTOR_KEY, PLAYER_KEY = 0xa1e5a149, 0xd6fcf3e4
+OBSOLETE_KIND, OBSOLETE_RECORD = 0xd127ff37, 207
+OBSOLETE_SOURCE = ('evidence/host-xp2-stock-policy-obsolescence-source.json',
+                   'c6ae75bd612abfcf717b1ce6a82af52867f489a2409a81f5a484e6d66212c09d')
+STOCK_CAPTURE = ('work/official-capture/xp2-gs-lan-rows-20261102-04/manifest.json',
+                 '28cc55ad4c2d56535db8c0a1351445125fd75800ab54eefd3b0b600b41717f1d')
+_OBSOLETE_RECEIVER = 'GameCoreEvent::GovernmentPolicyObsoleted'
+_OBSOLETE_HANDLER = '0x1400da490'
 
 
 def _sha_file(path: Path) -> str:
@@ -94,10 +101,53 @@ def source_dependencies(execution_image):
     proof = source(execution_image)
     root = resolve_path(resource_root())
     refs = [dict(path=PROFILE_REF[0], sha256=PROFILE_SHA256), *proof['source_references'].values()]
-    return {
+    pins = {
         str(resolve_path(root / Path(row['path'].replace('\\', '/'))).resolve()): row['sha256']
         for row in refs
     }
+    pins.update(obsolescence_dependencies(execution_image))
+    for module in ('a0_family_service.py', 'a0_policy_unlock.py', Path(__file__).name):
+        path = Path(__file__).with_name(module).resolve()
+        pins[str(path)] = _sha_file(path)
+    return pins
+
+
+def obsolescence_source(execution_image):
+    _require_image(execution_image)
+    proof = _source(OBSOLETE_SOURCE)
+    capture = proof['official_bundle']
+    if (proof['schema'] != 'civ6-host.xp2-stock-policy-obsolescence-source.v1'
+            or proof['core']['sha256'] != execution_image.image_sha256
+            or proof['exe']['sha256'] != CURRENT_EXE_SHA256
+            or (capture['path'], capture['sha256']) != STOCK_CAPTURE
+            or proof['contract'] != dict(core_kind=hex(OBSOLETE_KIND),
+                exe_semantic_kind=f'0x{KIND:08x}', event_name=_OBSOLETE_RECEIVER,
+                record_type=OBSOLETE_RECORD, record_size=RECORD_SIZE,
+                handler_va=_OBSOLETE_HANDLER, selector=0, payload_offsets=(84, 88),
+                core_slot_mutation_before_notification=True, receiver='owned_empty',
+                gameplay_rule_reimplemented=False, native_execution_verified=False)):
+        raise ValueError('Current stock policy obsolescence source differs')
+    return proof
+
+
+def obsolescence_dependencies(execution_image):
+    proof = obsolescence_source(execution_image)
+    root = resolve_path(resource_root())
+    pins = {}
+    refs = [dict(path=OBSOLETE_SOURCE[0], sha256=OBSOLETE_SOURCE[1]),
+            *(proof[key] for key in ('exe', 'frontier', 'semantic_crosswalk', 'official_bundle',
+                                     'script_selection', 'gameplay_script')),
+            *proof['stock_ui']]
+    for row in refs:
+        path = resolve_path(root / Path(row['path'])).resolve()
+        if _sha_file(path) != row['sha256']:
+            raise ValueError('Current policy obsolescence dependency differs: ' + str(path))
+        pins[str(path)] = row['sha256']
+    return pins
+
+
+def _stock_scope(backend):
+    return getattr(getattr(backend, 'captured_bundle', None), 'reference', None) == STOCK_CAPTURE
 
 
 def _empty_state(owner):
@@ -186,12 +236,79 @@ def enable_current(owner, backend, execution_image):
     shape = bytearray(RECORD_SIZE)
     struct.pack_into('<II', shape, 0, RECORD_SIZE, RECORD_TYPE)
     validate_empty_record(shape, execution_image=execution_image, receiver_state=state)
+    kinds = {KIND: frozenset({RECORD_TYPE})}
+    sizes = {RECORD_TYPE: RECORD_SIZE}
+    if _stock_scope(backend):
+        obsolescence_dependencies(execution_image)
+        for span in obsolescence_source(execution_image)['core_spans'].values():
+            address = backend.core._handle + int(span['rva'], 16)
+            body = owner.read(address, span['bytes'])
+            if len(body) != span['bytes'] or hashlib.sha256(body).hexdigest() != span['sha256']:
+                raise ValueError('Live current policy obsolescence span differs at ' + span['rva'])
+        kinds[OBSOLETE_KIND] = frozenset({OBSOLETE_RECORD})
+        sizes[OBSOLETE_RECORD] = RECORD_SIZE
     profile = A0FamilyProfile(
-        MappingProxyType({KIND: frozenset({RECORD_TYPE})}),
-        MappingProxyType({RECORD_TYPE: RECORD_SIZE}), PROFILE_SHA256)
+        MappingProxyType(kinds), MappingProxyType(sizes), PROFILE_SHA256)
     owner.policy_unlock_event_profile = owner._policy_unlock_event_profile = profile
     owner._policy_unlock_current_image_id = CURRENT_PROFILE_ID
     return owner
+
+
+def _require_obsolescence(owner):
+    profile = owner.policy_unlock_event_profile
+    image = getattr(owner.deferred.core, '_civ6_host_execution_image', None)
+    if (profile is None or profile is not owner._policy_unlock_event_profile
+            or profile.source_sha256 != PROFILE_SHA256
+            or profile.record_types_by_kind.get(OBSOLETE_KIND) != frozenset({OBSOLETE_RECORD})
+            or getattr(owner, '_policy_unlock_current_image_id', None) != CURRENT_PROFILE_ID
+            or getattr(image, 'image_sha256', None) != CURRENT_CORE_SHA256
+            or not _stock_scope(owner._foundation_backend)
+            or owner.per_thread_hook_present is not False
+            or owner.writer_metadata_callback_present is not False
+            or owner.normalizer_transform_present is not False
+            or owner.dynamic_event_registration_present is not False):
+        raise ValueError('Unqualified current-image record-207 producer')
+    _empty_state(owner)
+
+
+def _obsolescence_row(record, sequence):
+    if (len(record) != RECORD_SIZE
+            or struct.unpack_from('<IIII', record) != (RECORD_SIZE, OBSOLETE_RECORD, sequence, 0)
+            or struct.unpack_from('<I', record, 80) != (sequence,)):
+        raise ValueError('Current policy obsolescence record differs')
+    return dict(record_type=OBSOLETE_RECORD, record_size=RECORD_SIZE,
+                event_name=_OBSOLETE_RECEIVER, handler_va=_OBSOLETE_HANDLER)
+
+
+def validate_obsolescence_enqueue(owner, record):
+    _require_obsolescence(owner)
+    if owner.active_kind != OBSOLETE_KIND:
+        raise ValueError('Current policy obsolescence producer lacks its exact key')
+    _obsolescence_row(record, owner._sequence + 1)
+
+
+def dispatch_obsolescence(owner, fields):
+    from .native.native_two_value_event_family import encode_core_fields
+
+    _require_obsolescence(owner)
+    if type(fields) is not dict or set(fields) != {SELECTOR_KEY, PLAYER_KEY, 0xa1fbc372}:
+        raise ValueError('Current policy obsolescence requires its exact three fields')
+    if (len(owner.pending) >= owner.limit or type(owner._sequence) is not int
+            or not 0 <= owner._sequence < 0x7fffffff):
+        raise RuntimeError('Current policy obsolescence FIFO bound exceeded')
+    record = encode_core_fields(OBSOLETE_KIND, owner._sequence + 1, fields,
+        optional_callback_present=False, queue_metadata_service_present=False)
+    before = (owner.host_notification_counter, owner.host_metadata_counter, owner._sequence, len(owner.pending))
+    owner._enqueue(record)
+    notifications, metadata, sequence, count = before
+    if (owner.host_notification_counter, owner.host_metadata_counter, owner._sequence, len(owner.pending)) != (
+            notifications, metadata, sequence + 1, count + 1):
+        raise RuntimeError('Current policy obsolescence changed its counter or FIFO semantics')
+    owner.emit('xp2_stock_policy_obsolescence_enqueued', dispatch_kind=hex(OBSOLETE_KIND),
+        queue_type=hex(OBSOLETE_RECORD), sequence=owner._sequence, record_hex=record.hex(),
+        source_proof_sha256=OBSOLETE_SOURCE[1], payload_exposed_to_learner=False,
+        gameplay_effect_substituted=False, native_dispatch_return=0)
+    return 0
 
 
 def consume(owner, record, sequence):
@@ -202,7 +319,11 @@ def consume(owner, record, sequence):
             or not deferred._draining_empty_receivers or not deferred.pending
             or deferred.pending[0] is not record or sequence != deferred.consumed_count + 1):
         raise ValueError('Current policy notification lacks its exact owned FIFO head')
-    row = validate_empty_record(record, execution_image=execution_image, receiver_state=_empty_state(owner))
+    if int.from_bytes(record[4:8], 'little') == OBSOLETE_RECORD:
+        _require_obsolescence(owner)
+        row = _obsolescence_row(record, sequence)
+    else:
+        row = validate_empty_record(record, execution_image=execution_image, receiver_state=_empty_state(owner))
     from .unit_panel_gate import observe_consumed_record
     observe_consumed_record(deferred, record)
     deferred.pending.pop(0)

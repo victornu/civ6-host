@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import re
+import struct
 import xml.etree.ElementTree as ET
 
 from .configuration_profiles import XP2_CORE_SHA256, _source
@@ -15,6 +16,13 @@ from .resource_resolution import resolve_path
 
 SOURCE=('work/host-extensions/xp2-unit-attacks-static/source-profile-v1.json',
         '94562a3ba9e6988fde63a146dd1228b2454b5b1dbee93ffc12a25d83756d95e2')
+CURRENT_XP2_IMAGE_SHA = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+CURRENT_XP2_LIFECYCLE = ('evidence/host-xp2-attack-no-effect-boundary.json',
+                         'd4055d8e44b42cf53116b03644f91b8ea9e1e700108417bafa7ea66362275efb')
+CURRENT_XP2_NO_EFFECT = 'native_attack_consumed_without_observable_effect'
+CURRENT_XP2_RANGE_ADDED = ('evidence/host-xp2-ranged-operation-added-source.json',
+                          '00ed561dcada41429dd74183cc6fd72e8aca08d05dcca8bbb3b5f4d289834bfa')
+CURRENT_XP2_RANGE_SUBMITTED = 'native_ranged_attack_order_added'
 EXE_SHA256='e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63'
 _IMAGE_BASE=0x180000000
 CALLBACKS={
@@ -166,6 +174,116 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
     return p
 
 
+def current_lifecycle_image(execution_image):
+    from .execution_images import ExecutionImageProfile
+
+    return (type(execution_image) is ExecutionImageProfile
+            and execution_image.image_sha256 == CURRENT_XP2_IMAGE_SHA
+            and execution_image.reference_core_sha256 == XP2_CORE_SHA256)
+
+
+def _ranged_submission(window, selected, player_id, live_core, live_read, prefix):
+    """Match the isolated request to the native insertion, without inferring a hit."""
+    from .native.native_event_15c35863 import EventFields, encode_fields, encode_queue_record
+    from .native.native_operation_lifecycle import DeliveryWindow
+
+    proof = _source(CURRENT_XP2_RANGE_ADDED)
+    contract = proof['command_contract']
+    if (proof['schema'] != 'civ6-host.xp2-ranged-operation-added-source.v1'
+            or proof['image']['image_sha256'] != CURRENT_XP2_IMAGE_SHA
+            or contract != dict(message_type=0x8c0f3f36, operation_hash=164636970,
+                archive_size=44, added_kind=67, activity_kind=35, cache_kind=275,
+                route='dedicated_ranged')):
+        raise ValueError('Current XP2 ranged insertion source changed')
+    if (type(window) is not DeliveryWindow or type(window.archive) is not bytes
+            or len(window.archive) != contract['archive_size']
+            or type(window.records) is not tuple or not 1 <= len(window.records) <= 4096
+            or type(window.consumed_before) is not int or type(window.consumed_after) is not int
+            or not 0 <= window.consumed_before < window.consumed_after <= 0xffffffff
+            or window.consumed_after - window.consumed_before != len(window.records)):
+        return None
+    message, owner, entity_type, unit, index, target, options, form, x, y, extra, trailer = (
+        struct.unpack('<IHH9I', window.archive))
+    if ((message, owner, entity_type, unit, x, y) != (
+            contract['message_type'], player_id, 1, selected['unit_id'], selected['x'], selected['y'])
+            or not 0 <= index <= 2047
+            or (target, options, form, extra, trailer) != (0xffffffff, 0, 1, 0, 0)):
+        return None
+    descriptor = struct.pack('<HHI', player_id, 1, unit)
+    added = []
+    for seq, raw in enumerate(window.records, window.consumed_before + 1):
+        if type(raw) is not bytes or len(raw) < 84:
+            raise ValueError('Malformed XP2 ranged operation event')
+        size, kind, sequence, metadata = struct.unpack_from('<IIII', raw)
+        if (size, sequence, metadata, struct.unpack_from('<I', raw, 80)[0]) != (
+                len(raw), seq, 0, seq):
+            raise ValueError('XP2 ranged operation event escaped its delivery window')
+        if kind == contract['cache_kind']:
+            continue
+        if kind == contract['activity_kind'] and raw[24:32] == raw[88:96] == descriptor:
+            continue
+        if kind != contract['added_kind']:
+            return None
+        fields = EventFields(0, index, 1, descriptor)
+        expected = encode_queue_record(seq, encode_fields(fields), blob_contents=descriptor,
+                                       padding_policy='headless-zero-initialization')
+        if raw != expected:
+            return None
+        added.append(seq)
+    if len(added) != 1:
+        return None
+    for name, span in proof['body_spans'].items():
+        raw = live_read(live_core._handle + span['rva'], span['bytes'])
+        if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
+            raise ValueError('Live XP2 ranged insertion source changed: ' + name)
+    actual = prefix.runtime.evaluate_text(prefix.ui_child, b"""
+local operation = GameInfo.UnitOperations['UNITOPERATION_RANGE_ATTACK']
+assert(operation and operation.Hash == UnitOperationTypes.RANGE_ATTACK and
+       operation.Hash == 164636970 and type(operation.Index) == 'number' and
+       operation.Index % 1 == 0 and operation.Index >= 0 and operation.Index <= 2047,
+       'Native ranged operation definition changed')
+return string.format('%.0f', operation.Index)
+""", b'@xp2_ranged_operation_index', capacity=16)
+    if actual != str(index).encode('ascii'):
+        raise ValueError('XP2 ranged archive does not identify the selected native operation')
+    return dict(status='RANGE_ATTACK_added', current_xp2_source_sha256=CURRENT_XP2_RANGE_ADDED[1],
+                player_id=player_id, unit_id=unit, operation_index=index,
+                added_sequence=added[0], archive_sha256=hashlib.sha256(window.archive).hexdigest(),
+                operation_success=None, combat_resolution_inferred=False)
+
+
+def attack_cycle(window, selected, player_id, queued_before, queued_after, *,
+                 core_sha256, state_unchanged, live_core, live_read, prefix=None):
+    from .configuration_profiles import BASE_CORE_SHA256
+    from .native.native_operation_lifecycle import completed_cycle
+
+    image = getattr(live_core, '_civ6_host_execution_image', None)
+    if core_sha256 == BASE_CORE_SHA256:
+        return completed_cycle(window, selected, player_id, queued_before, queued_after)
+    if core_sha256 != XP2_CORE_SHA256 or not state_unchanged or not current_lifecycle_image(image):
+        raise RuntimeError('Expansion attack lifecycle-only no-change readback is unqualified')
+    if (prefix is not None and selected['operation'] == 'RANGE_ATTACK'
+            and selected['input_route'] == 'dedicated_ranged'):
+        return _ranged_submission(window, selected, player_id, live_core, live_read, prefix)
+    cycle = completed_cycle(window, selected, player_id, queued_before, queued_after)
+    if cycle is None:
+        return None
+    proof = _source(CURRENT_XP2_LIFECYCLE)
+    base = live_core._handle
+    if (type(base) is not int or base <= 0 or not callable(live_read)
+            or proof['schema'] != 'civ6-host.xp2-attack-no-effect-boundary.v1'
+            or proof['image']['image_sha256'] != image.image_sha256
+            or proof['command_contract'] != dict(message_type=0x8c0f3f36,
+                operation_hash=cycle['operation_hash'], lifecycle_kinds=(67, 70, 71))
+            or set(proof['body_spans']) != {'archive_type', 'added', 'deactivated', 'cleared', 'request_operation'}):
+        raise ValueError('Current XP2 operation lifecycle source changed')
+    for name, span in proof['body_spans'].items():
+        raw = live_read(base + span['rva'], span['bytes'])
+        if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
+            raise ValueError('Live XP2 operation lifecycle body changed: ' + name)
+    return dict(cycle, current_xp2_source_sha256=CURRENT_XP2_LIFECYCLE[1])
+
+
 def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
     p=verify_source(core_sha256);result={}
     if execution_image is not None:
@@ -175,6 +293,11 @@ def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
             raise ValueError('XP2 attack provenance differs from the selected execution/reference pair')
     refs=[dict(path=SOURCE[0],sha256=SOURCE[1]),p['image'],p['exe'],*p['references'],
           *p['extractors'],*p['official_ui'].values(),p['enum_selection']['body_reference']]
+    if current_lifecycle_image(execution_image):
+        lifecycle = _source(CURRENT_XP2_LIFECYCLE)
+        refs.extend((dict(path=CURRENT_XP2_LIFECYCLE[0], sha256=CURRENT_XP2_LIFECYCLE[1]),
+                     dict(path=CURRENT_XP2_RANGE_ADDED[0], sha256=CURRENT_XP2_RANGE_ADDED[1]),
+                     lifecycle['base_cycle_source'], lifecycle['base_layout_source']))
     for row in refs:
         path=resolve_path(resource_root()/row['path']).resolve()
         if execution_image is None and hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:

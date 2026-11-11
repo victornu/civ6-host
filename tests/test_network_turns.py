@@ -211,6 +211,35 @@ class NetworkTurnTests(unittest.TestCase):
             with self.subTest(kind=kind,boundary=type(boundary).__name__), self.assertRaisesRegex(RuntimeError,'unresolved'):
                 boundary.unchanged_request(owner, {'kind':kind}, controls, dict(controls))
 
+    def test_active_expansion_turn_requires_fresh_matching_reactivation(self):
+        from civ6_host.runtime.xp1_turn_boundary import BOUNDARY, XP2_BOUNDARY
+        for boundary in (BOUNDARY, XP2_BOUNDARY):
+            with self.subTest(core=boundary.core_sha256):
+                self.check_active_reactivation(boundary)
+
+    def check_active_reactivation(self, boundary):
+        controls = dict(turn=13, active=True, active_complete=True, can_unready=False,
+                        timer_elapsed=False)
+        prefix = SimpleNamespace(actions=Mock(pending=[]), deferred_events=Mock(pending=[]),
+                                 view_publisher=Mock())
+        owner = SimpleNamespace(prefix=prefix, _check_active=Mock(), emit=Mock(),
+                                network_reference={'major_player_ids':(0,1)})
+        action = {'kind':'force_end_turn'}
+        controller = Mock(reactivation_count=4)
+        controller.reactivated_since.side_effect = [True,False]
+        with patch.object(boundary,'state',return_value={}), \
+             patch.object(boundary,'controls',return_value=controls), \
+             patch.object(boundary,'refusal',return_value=None), \
+             patch.object(boundary,'reactivation_owner',return_value=controller), \
+             patch.object(boundary,'retain'), patch.object(boundary,'control'):
+            self.assertEqual(submit(owner,action,0,boundary=boundary),
+                             dict(status='submitted',reason='native_turn_reactivated_same_turn',
+                                  requested_action=action))
+            self.assertIs(owner.emit.call_args.kwargs['turn_advanced'],False)
+            controller.reactivated_since.assert_called_once_with(4,0)
+            with self.assertRaisesRegex(RuntimeError,'unresolved'):
+                submit(owner,action,0,boundary=boundary)
+
 
 if __name__ == '__main__':
     unittest.main()

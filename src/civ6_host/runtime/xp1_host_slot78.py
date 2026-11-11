@@ -21,12 +21,24 @@ def _adapter_references(original):
     if (proof['schema']!='civ6-host.host78-adapter-compatibility.v1'
             or proof['native_execution'] is not False
             or proof['prior_host_sha256']!=original['sha256']
-            or proof['current_host']['sha256']!=actual
             or Path(proof['current_host']['path']).resolve()!=current
             or proof['exact_diagnostic_host_class_unchanged'] is not True):
         raise ValueError('HOST78 shared callback adapter changed')
-    return (dict(path=ADAPTER_COMPATIBILITY[0],sha256=ADAPTER_COMPATIBILITY[1]),
-            proof['current_host'],proof['archive'])
+    if proof['current_host']['sha256'] == actual:
+        return (dict(path=ADAPTER_COMPATIBILITY[0],sha256=ADAPTER_COMPATIBILITY[1]),
+                proof['current_host'],proof['archive'])
+    from .execution_images import _XP1_PROFILE
+    from .xp1_session_inputs import CURRENT_XP1_SESSION_JOIN, current_session_join
+    join = current_session_join(_XP1_PROFILE)
+    reviewed = join['host78']
+    if (reviewed['previous'] != original['sha256']
+            or reviewed['current']['sha256'] != actual
+            or Path(reviewed['current']['path']).resolve() != current
+            or reviewed['diagnostic_host_unchanged'] is not True
+            or join['archive'] != proof['archive']):
+        raise ValueError('HOST78 shared callback adapter changed')
+    return (dict(path=CURRENT_XP1_SESSION_JOIN[0], sha256=CURRENT_XP1_SESSION_JOIN[1]),
+            reviewed['current'], join['archive'])
 
 
 def verify_source(*, core_sha256=XP1_CORE_SHA256):
@@ -180,10 +192,15 @@ pointer presence. Existing source-selected owners remain the authority for ABI.
         if (services.core is not backend.core or services.context!=backend.context
                 or services.core_sha256!=core_sha256):
             raise ValueError('Composed XP2 callback audit has a foreign service owner')
+    from .control_input_source import reactivation_profile
+    has_reactivation=reactivation_profile(backend.core) is not None
     result={}
     for interface,(name,slots) in REQUIRED.items():
-        if interface=='host' and core_sha256==XP2_CORE_SHA256:
-            slots=tuple(sorted((*slots,0x20)))
+        if interface=='host':
+            if core_sha256==XP2_CORE_SHA256:
+                slots=tuple(sorted((*slots,0x20)))
+            if has_reactivation:
+                slots=tuple(sorted((*slots,0x68)))
         table=getattr(host,name);entries=[]
         for slot in slots:
             binding=host._slot_bindings.get((C.addressof(table),slot))

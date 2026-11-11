@@ -17,7 +17,8 @@ def enable(owner):
     core_sha256=owner.deferred.cache_core_sha256
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unit activity event has no selected Core query profile')
-    execution_image=getattr(owner.deferred.core,'_civ6_host_execution_image',None)
+    execution_image = (getattr(owner.deferred.core, '_civ6_host_execution_image', None)
+                       if core_sha256 == XP2_CORE_SHA256 else None)
     verify_live(owner.deferred.core._handle,owner.read,core_sha256=core_sha256,
         execution_image=execution_image)
     if owner.handles_kind(codec.EVENT_KIND) or _ROWS[0x23]['handler_va']!='0x1400d6cd0' or _ROWS[0x23]['record_sizes']!={128}:
@@ -45,7 +46,8 @@ def dispatch(owner,kind,fields):
     if owner.found_unit_event_profile.source_sha256 != (
             XP2_MAP_SOURCE[1] if core_sha256==XP2_CORE_SHA256 else SOURCE[1]):
         raise ValueError('Unit activity event source selection changed')
-    execution_image=getattr(owner.deferred.core,'_civ6_host_execution_image',None)
+    execution_image = (getattr(owner.deferred.core, '_civ6_host_execution_image', None)
+                       if core_sha256 == XP2_CORE_SHA256 else None)
     query=(codec.query_unit_parameters(owner.deferred.core,owner.deferred.context,identity,
         incoming_selector=identity['selector'],read=owner.read,core_sha256=core_sha256,
         execution_image=execution_image)

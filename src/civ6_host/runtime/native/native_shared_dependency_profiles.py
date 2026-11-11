@@ -1,4 +1,4 @@
-"""Exact shared-DLL identities and selected interface maps for XP2 current Core.
+"""Exact shared-DLL identities and selected interface maps for current Cores.
 
 This profile keeps the installed bytes distinct from their older interface
 reference. It validates paths and file hashes only; it does not load a DLL or
@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
-from civ6_host.runtime.execution_images import select as _select_execution_image
+from civ6_host.runtime.execution_images import select_pair
 from civ6_host.runtime.native.native_source_cache import load_pinned_json
 from civ6_host.runtime.provenance import historical_source_file as _historical_source_file
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
@@ -23,7 +23,6 @@ ACTUAL_IMAGE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1
 INTERFACE_REFERENCE_SHA256 = '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
 EVIDENCE_PATH = Path('work/bbg751-turn-source-scope/shared-dependencies/current-shared-dependency-interfaces-v1.json')
 EVIDENCE_SHA256 = 'a4de406dfbbed460af4ed2b15b7cb4d75afc610e3f9268838b65a65fc9a069c9'
-_EXECUTION_IMAGE_ID = 'xp2-gamecore-current-092abfbb'
 _EVIDENCE = None
 
 
@@ -60,10 +59,11 @@ class NativeSharedDependencyProfile:
 
     def verify_files(self) -> Mapping[str, Path]:
         """Recheck the exact three shared files and return their pinned paths."""
-        if (self.actual_image_sha256, self.interface_reference_sha256) != (ACTUAL_IMAGE_SHA256, INTERFACE_REFERENCE_SHA256):
-            raise ValueError('shared dependency profile image/reference pair changed')
-        selected = _select_execution_image(_EXECUTION_IMAGE_ID, core_path=_execution_image_path())
-        if (selected.image_sha256, selected.reference_core_sha256) != (self.actual_image_sha256, self.interface_reference_sha256):
+        try:
+            selected = select_pair(self.actual_image_sha256, self.interface_reference_sha256)
+        except ValueError as exc:
+            raise ValueError('shared dependency profile image/reference pair changed') from exc
+        if self.profile_id != selected.id.replace('-gamecore-', '-shared-dependencies-', 1):
             raise ValueError('execution-image profile does not match the shared dependency profile')
         expected_directory = _resolve_resource_path(Path(selected.shared_dependencies[0].path)).resolve().parent
         if _normalized(self.directory) != _normalized(expected_directory):
@@ -106,21 +106,10 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _execution_image_path() -> Path:
-    profile = _select_execution_image(_EXECUTION_IMAGE_ID, core_path=(
-        r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI"
-        r"\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll"))
-    return Path(profile.path)
-
-
 def profile_for_shared_dependencies(directory: str | os.PathLike[str], *, actual_image_sha256: str,
                                     interface_reference_sha256: str) -> NativeSharedDependencyProfile:
     """Select the exact Steam DLL set for an explicit current/reference pair."""
-    if (actual_image_sha256, interface_reference_sha256) != (ACTUAL_IMAGE_SHA256, INTERFACE_REFERENCE_SHA256):
-        raise ValueError('unrecognized actual/reference execution-image pair for shared dependencies')
-    selected = _select_execution_image(_EXECUTION_IMAGE_ID, core_path=_execution_image_path())
-    if (selected.image_sha256, selected.reference_core_sha256) != (actual_image_sha256, interface_reference_sha256):
-        raise ValueError('execution image and shared dependency profile identities differ')
+    selected = select_pair(actual_image_sha256, interface_reference_sha256)
     directory = _resolve_resource_path(Path(directory)).resolve()
     evidence = _evidence()
     record_directory = _resolve_resource_path(Path(evidence['install_directory'])).resolve()
@@ -136,7 +125,7 @@ def profile_for_shared_dependencies(directory: str | os.PathLike[str], *, actual
     localization_rvas = {row['name']: int(row['current_rva'], 16) for row in localization}
     havok_rvas = {row['name']: int(row['current_rva'], 16) for row in havok}
     profile = NativeSharedDependencyProfile(
-        profile_id=PROFILE_ID,
+        profile_id=selected.id.replace('-gamecore-', '-shared-dependencies-', 1),
         actual_image_sha256=actual_image_sha256,
         interface_reference_sha256=interface_reference_sha256,
         directory=directory,

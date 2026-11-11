@@ -68,11 +68,12 @@ def verify_source(project_root) -> dict:
     return {'schema': 'civ6rl.native_xp1_archive_access_source.v1', 'project_root': str(root), 'source_sha256': source_hashes, 'descriptor_proof_sha256': DESCRIPTOR_PROOF_SHA256, 'audit_proof_sha256': AUDIT_PROOF_SHA256, 'xp1_core_sha256': XP1_CORE_SHA256, 'supported_slots': {'host': '0x108', 'descriptor': ['0x08']}, 'unsupported_fatal_slots': {'descriptor': ['0x00']}, 'eligible_for_training': False}
 
 def _check_teardown_receipt(receipt, host, core_base: int) -> None:
+    from civ6_host.runtime.xp1_saved_load import teardown_core_identity
     if type(receipt) is not dict or receipt.get('schema') != 'civ6rl.native_xp1_teardown_adapter_installation.v1':
         raise ValueError('XP1 archive binding requires the retained 821 teardown receipt')
     if getattr(host, '_xp1_teardown_binding', None) is not receipt:
         raise ValueError('XP1 teardown receipt is not the one retained by this host')
-    if receipt.get('installed') is not True or receipt.get('core_sha256') != XP1_CORE_SHA256 or receipt.get('core_module_base') != hex(core_base) or (receipt.get('host_pointer') != hex(host.pointer)) or (receipt.get('initialized_getter_observed') is not True) or (receipt.get('destroy_called') is not False) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('eligible_for_training') is not False):
+    if receipt.get('installed') is not True or receipt.get('core_sha256') != teardown_core_identity(host) or receipt.get('core_module_base') != hex(core_base) or (receipt.get('host_pointer') != hex(host.pointer)) or (receipt.get('initialized_getter_observed') is not True) or (receipt.get('destroy_called') is not False) or (receipt.get('game_created') is not False) or (receipt.get('newgame_called') is not False) or (receipt.get('eligible_for_training') is not False):
         raise ValueError('XP1 teardown receipt is failed, mismatched, or out of scope')
     if receipt.get('init_receipt_schema') != 'civ6rl.native_xp1_context_init_receipt.v1' or receipt.get('context_pointer') in (None, '0x0') or receipt.get('callback_references_retained') is not True or (type(receipt.get('type_names_allowed')) is not list) or (receipt.get('type_names_allowed') != ['Unit', 'Formation', 'City::Instance', 'Trade::Edge', 'Control::Contract', 'District::Instance', 'AI::CityBuild', 'BehaviorTree', 'AI::Operation', 'DynamicModifier']) or (not callable(getattr(host, 'native_aligned_free', None))):
         raise ValueError('XP1 teardown binding is not retained/complete for this host')

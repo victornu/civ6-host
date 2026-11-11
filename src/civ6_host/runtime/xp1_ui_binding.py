@@ -47,7 +47,8 @@ def verify_live(base,read):
 def bind_xp1_ui_api(runtime,game_child,ui_child,core_context,core):
     from .native.native_xp1_script_bindings import (
         source_profile,verify_getter,verify_interface,verify_registration_owner)
-    from .native.native_core_context_profiles import profile_for_core,validate_loaded_modules
+    from .native.native_core_context_profiles import profile_for_core, validate_loaded_modules
+    from .xp1_saved_load import select_context
     from .native.native_probe import Windows
     from .native.native_setup import local_reader
     from .paths import resource_root
@@ -58,9 +59,8 @@ def bind_xp1_ui_api(runtime,game_child,ui_child,core_context,core):
             or runtime.lua['gettop'](game) or runtime.lua['gettop'](ui)
             or not hasattr(runtime.host,'LAB_XP1ScriptCoreUIBindingsInstall')):
         raise ValueError('XP1 UI binding requires fresh distinct owned children and its native export')
-    profile=profile_for_core(core._name,mode='context')
-    if profile.ruleset!='xp1' or profile.core_sha256!=XP1_CORE_SHA256:
-        raise ValueError('XP1 UI binder refuses other engines')
+    owner = getattr(runtime, 'service_owner', None)
+    profile = select_context(core, getattr(owner, '_xp1_saved_load_bundle', None), profile_for_core)
     validate_loaded_modules(profile,Windows().modules())
     read=local_reader();verify_live(core._handle,read)
     proof=source_profile(resource_root())
@@ -143,6 +143,9 @@ class SavedPlayerView:
             observation=observe_player(rt,self.child,player)
             if tuple(observation[k] for k in ('turn','width','height'))!=tuple(b.loaded_readback[k] for k in ('turn','width','height')):
                 raise ValueError('XP1 player observation differs from the loaded state')
+            if self.core_sha256 == XP1_CORE_SHA256 and getattr(b.profile, 'execution_image', None) is not None:
+                from .native.native_official_postload import compare_public_own_fields
+                compare_public_own_fields(observation, b.loaded_readback)
             rt.execute(p.game_child,
                 b"assert(type(PlayersVisibility[0].IsUnitVisible)~='function','UI binding polluted gameplay visibility')",
                 b'@xp1_ui_gameplay_binding_isolation')

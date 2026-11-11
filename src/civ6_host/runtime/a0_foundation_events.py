@@ -26,7 +26,8 @@ def enable(owner, backend):
             or getattr(backend, '_xp1_commands_requested', False) is not True):
         raise ValueError('Foundation callbacks require the original idle saved command owner')
     from .foundation_event_profile import event_profile, verify_project_live, verify_pillage_live
-    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    image = (getattr(backend.core, '_civ6_host_execution_image', None)
+             if core_sha256 == XP2_CORE_SHA256 else None)
     execution_options = {'execution_image': image} if image is not None else {}
     profile = event_profile(core_sha256=core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
@@ -34,7 +35,7 @@ def enable(owner, backend):
     for kind, size in profile.record_sizes.items():
         record = bytearray(size)
         struct.pack_into('<II', record, 0, size, kind)
-        validate_empty_profile_record(record, **owner.empty_receiver_state)
+        validate_empty_profile_record(record, execution_image=image, **owner.empty_receiver_state)
     from .foundation_facade_profiles import verify_xp1_once
     from .paths import resource_root
     verify_xp1_once(backend.core, backend.core._handle, owner.read, resource_root(),
@@ -46,6 +47,21 @@ def enable(owner, backend):
         verify_project_live(backend.core._handle, owner.read)
         verify_pillage_live(backend.core._handle, owner.read, **execution_options)
         verify_wonder_completion(backend.core._handle, owner.read)
+        if image is not None:
+            from .xp2_great_work import verify_live as verify_great_work
+            from . import xp2_feature_events as feature
+            from . import xp2_city_occupation_event as occupation
+            from . import xp2_building_removal as removal
+            from . import xp2_player_can_construct_event as construct
+            if owner.profile.record_types_by_kind.get(feature.CHANGED) != frozenset((117,)):
+                raise ValueError('FeatureChanged must retain the shared A0 producer')
+            verify_great_work(backend.core, owner.read)
+            feature.verify_live(backend.core, owner.read)
+            occupation.verify_live(backend.core, owner.read)
+            removal.verify_live(backend.core, owner.read)
+            construct.verify_live(backend.core, owner.read)
+            from .xp2_player_restored import verify_live as verify_restored
+            verify_restored(backend.core, owner.read)
     owner.foundation_event_profile = owner._foundation_event_profile = profile
     owner._foundation_backend = backend
     return owner
@@ -161,7 +177,8 @@ def enable_turn_units(owner, backend):
     if hasattr(owner, 'entity_event_count') or hasattr(owner, 'visual_profile'):
         raise ValueError('Turn unit producer state already exists')
     from .turn_unit_event_profile import event_profile, bind_owner
-    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    image = (getattr(backend.core, '_civ6_host_execution_image', None)
+             if backend.load_abi.core_sha256 == XP2_CORE_SHA256 else None)
     execution_options = {'execution_image': image} if image is not None else {}
     profile=event_profile(core_sha256=backend.load_abi.core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
@@ -212,6 +229,24 @@ def dispatch(owner, kind, fields, borrowed_argument=None):
         if kind==0x8cbda9f3 and b.load_abi.core_sha256==XP2_CORE_SHA256:
             from .xp2_wmd_fallout_visibility import dispatch as dispatch_wmd_visibility
             return dispatch_wmd_visibility(owner,fields)
+        if kind == 0x1a71e9f0 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_great_work import dispatch as dispatch_great_work
+            return dispatch_great_work(owner, fields)
+        if kind == 0xb39c906a and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_feature_events import dispatch_added
+            return dispatch_added(owner, fields)
+        if kind == 0xe05ec908 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_city_occupation_event import dispatch as dispatch_occupation
+            return dispatch_occupation(owner, fields)
+        if kind == 0xe074eef4 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_building_removal import dispatch as dispatch_removal
+            return dispatch_removal(owner, fields)
+        if kind == 0xad6c0a71 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_player_restored import dispatch as dispatch_restored
+            return dispatch_restored(owner, fields)
+        if kind == 0xa0a8f479 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_player_can_construct_event import dispatch as dispatch_construct
+            return dispatch_construct(owner, fields)
         return SharedHostEventDispatch._dispatch_fields(owner, kind, fields,
                                                         borrowed_argument=borrowed_argument)
     finally:

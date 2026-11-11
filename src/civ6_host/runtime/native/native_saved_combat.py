@@ -169,7 +169,7 @@ def validate_queued_destination(value, width, height):
         raise ValueError('Invalid queued movement witness')
     return value
 
-def effect(before, after, units_before, units_after, selected, *, player_id=0, cities_before=None, cities_after=None, queued_before=None, queued_after=None, delivery_window=None, core_sha256=_UNIT_ATTACK_BASE_CORE_SHA256):
+def effect(before, after, units_before, units_after, selected, *, player_id=0, cities_before=None, cities_after=None, queued_before=None, queued_after=None, delivery_window=None, core_sha256=_UNIT_ATTACK_BASE_CORE_SHA256, live_core=None, live_read=None, prefix=None):
     if core_sha256 != _UNIT_ATTACK_BASE_CORE_SHA256:
         from civ6_host.runtime.xp1_unit_attack_profile import verify_source as selected_source
         selected_source(core_sha256)
@@ -207,15 +207,15 @@ def effect(before, after, units_before, units_after, selected, *, player_id=0, c
     changed = immediate or queued
     lifecycle = None
     if not changed and delivery_window is not None:
-        if core_sha256 != _UNIT_ATTACK_BASE_CORE_SHA256:
-            raise RuntimeError('Expansion attack lifecycle-only no-change readback is unqualified')
-        from civ6_host.runtime.native.native_operation_lifecycle import completed_cycle
-        lifecycle = completed_cycle(delivery_window, selected, pid, queued_before, queued_after)
+        from civ6_host.runtime.xp2_unit_attack_source import attack_cycle
+        lifecycle = attack_cycle(delivery_window, selected, pid, queued_before, queued_after,
+            core_sha256=core_sha256, state_unchanged=before == after and units_before == units_after and cities_before == cities_after,
+            live_core=live_core, live_read=live_read, prefix=prefix)
     if not changed and lifecycle is None:
         raise RuntimeError('Attack delivered without a verified observable change or native operation lifecycle')
     return dict(actor_before=old[0], actor_after=new[0] if new else None, visible_targets_before=targets, visible_targets_after=observed_after, visible_cities_before=old_cities, visible_cities_after=new_cities, city_ownership_changed=bool(old_cities and new_cities and (old_cities[0]['owner'] != new_cities[0]['owner'])), actor_absent_from_own_roster=not new, observable_native_change=changed, operation_lifecycle=lifecycle, combat_resolution_inferred_from_lifecycle=False, immediate_state_change=immediate, queued_move_to_selected_plot=queued, queued_destination_before=queued_before, queued_destination_after=queued_after, combat_resolution_inferred_from_queue=False, target_visible_damage_increased=any((a['owner'] == b['owner'] and a['id'] == b['id'] and (a['damage'] > b['damage']) for a in observed_after for b in targets)), selected_defender_claimed=False, death_or_capture_inferred_from_absence=False)
 
-def apply(owner, prefix, selected, turn, before, *, player_id=0, core_sha256=_UNIT_ATTACK_BASE_CORE_SHA256):
+def apply(owner, prefix, selected, turn, before, *, player_id=0, core_sha256=_UNIT_ATTACK_BASE_CORE_SHA256, live_core=None, live_read=None):
     from civ6_host.runtime.xp1_unit_attack_profile import selected_proof, selected_queued_proof
     pid = _player_id(player_id)
     if type(before) is not dict or type(before.get('player_id')) is not int or before.get('player_id') != pid or (before.get('turn') != turn):
@@ -259,6 +259,7 @@ def apply(owner, prefix, selected, turn, before, *, player_id=0, core_sha256=_UN
     cities_after = city_targets.catalog(prefix, turn, player_id=pid, collect=False, core_sha256=core_sha256)['cities']
     queued_after = queued_destination(prefix, pid, turn, selected['unit_id'], before['width'], before['height'], core_sha256=core_sha256)
     owner.emit('official_explicit_unit_attack_readback', action=selected, own_units_before=units_before, own_units_after=units_after, observation_before=before, observation_after=after, queued_before=queued_before, queued_after=queued_after, queued_source_sha256=selected_queued_proof(QUEUED_SOURCE_SHA, core_sha256), relationships=fresh['relationships'], native_defender_selection=True, effect_verified=False)
-    receipt = effect(before, after, units_before, units_after, selected, player_id=pid, cities_before=cities_before, cities_after=cities_after, queued_before=queued_before, queued_after=queued_after, delivery_window=window, core_sha256=core_sha256)
+    receipt = effect(before, after, units_before, units_after, selected, player_id=pid, cities_before=cities_before, cities_after=cities_after, queued_before=queued_before, queued_after=queued_after, delivery_window=window, core_sha256=core_sha256,
+                     live_core=live_core, live_read=live_read, prefix=prefix)
     owner.emit('official_explicit_unit_attack_effect', action=selected, effect=receipt, observation_before=before, observation_after=after, automatic_choices_applied=False, native_defender_selection=True, source_proof_sha256=selected_proof(native._PROOF_SHA256, core_sha256), city_target_source_sha256=selected_proof(city_targets.SOURCE_SHA, core_sha256) if city_witnesses else None)
     return after

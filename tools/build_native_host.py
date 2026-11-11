@@ -27,6 +27,7 @@ PROFILE_MANIFESTS = {
     'xp2-bbg': 'native/profiles/xp2-bbg/source-manifest.json',
     'xp2-current-havok': 'native/profiles/xp2-current-havok/source-manifest.json',
     'xp2-current-strings': 'native/profiles/xp2-current-strings/source-manifest.json',
+    'xp2-current-strings-unsigned-log': 'native/profiles/xp2-current-strings-unsigned-log/source-manifest.json',
     'xp2-ui': 'native/profiles/xp2-ui/source-manifest.json',
     'xp2-script-api': 'native/profiles/xp2-script-api/source-manifest.json',
     'xp2-mutable-map': 'native/profiles/xp2-mutable-map/source-manifest.json',

@@ -188,7 +188,7 @@ class XP1NetworkSessionTests(unittest.TestCase):
             session = f.session()
             self.assertIs(session.protocol_class, NativeNetworkSession.protocol_class)
             for change in (dict(input_profile='xp2'), dict(prepared_capture=None),
-                           dict(lifetime_seconds=421), dict(checkpoint_on_close=1),
+                           dict(lifetime_seconds=1501), dict(checkpoint_on_close=1),
                            dict(city_management_diagnostic=True), dict(world_input_diagnostic=True),
                            dict(_admitted_bundle=object()), dict(privileged_critic_diagnostic=True)):
                 with self.subTest(change=change), self.assertRaises(ValueError):

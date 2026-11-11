@@ -13,6 +13,178 @@ from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
 
 
 class XP2FoundationEventProfileTests(unittest.TestCase):
+    def test_current_player_restored_record_passes_the_composed_fifo(self):
+        import test_a0_family_service as shared
+        from civ6_host.runtime.a0_family_source import family_profile
+        from civ6_host.runtime import xp2_player_restored as restored
+        from civ6_host.runtime.execution_images import _PROFILE
+
+        self.profile = family_profile()
+        _, deferred, _, owner, _, _, _ = shared.A0FamilyServiceTests.fixture(self, XP2_CORE_SHA256)
+        deferred.core._civ6_host_execution_image = _PROFILE
+        profile = event_profile(core_sha256=XP2_CORE_SHA256, execution_image=_PROFILE)
+        owner.foundation_event_profile = owner._foundation_event_profile = profile
+        owner.active_kind = restored.KIND
+        selector = bytearray(shared.scalar(3, 0xd2022433))
+        selector[4:8] = b'alue'
+        fields = {restored.SELECTOR: bytes(selector), restored.PLAYER: shared.scalar(2, 2)}
+        backend = SimpleNamespace(core=deferred.core)
+        with patch('civ6_host.runtime.a0_foundation_events.require_borrow',
+                   return_value=SimpleNamespace(owner=backend)):
+            self.assertEqual(restored.dispatch(owner, fields), 0)
+        record, = deferred.pending
+        self.assertEqual(struct.unpack_from('<IIII', record), (96, 19, 1, 0))
+        self.assertEqual(struct.unpack_from('<I', record, 72), (6,))
+        self.assertEqual(struct.unpack_from('<III', record, 80), (1, 2, 0xd2022433))
+        owner.active_kind = None
+        self.assertEqual(deferred.drain(), 1)
+        self.assertEqual(deferred.pending, [])
+        self.assertEqual(deferred.consumed_count, 1)
+        calls = [call for call in deferred.emit.call_args_list
+                 if call.args and call.args[0] == 'native_deferred_empty_record_consumed']
+        self.assertEqual(calls[-1].kwargs['event_name'], 'GameCoreEvent::PlayerRestored')
+
+    def test_current_player_notification_preserves_player_and_boolean_branch(self):
+        from civ6_host.runtime import xp2_player_can_construct_event as player
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import resolve_empty_receiver_row
+
+        current = event_profile(core_sha256=XP2_CORE_SHA256, execution_image=_PROFILE)
+        self.assertEqual(current.record_types_by_kind[player.KIND], frozenset((0x110, 0x111)))
+
+        def scalar(tag, value):
+            return struct.pack('<H6xI12x', tag, value)
+
+        fields = {player.SELECTOR: scalar(3, 0), player.PLAYER: scalar(2, 2)}
+        for active, record_type, name in ((0, 0x110, 'PlayerDestroyed'), (1, 0x111, 'PlayerRevived')):
+            record = player.encode_record(7, fields | {player.AVAILABLE: scalar(1, active)})
+            self.assertEqual(current.record_sizes[record_type], 96)
+            row = resolve_empty_receiver_row(record_type, execution_image=_PROFILE)
+            self.assertEqual(row['event_name'], 'GameCoreEvent::' + name)
+            self.assertEqual(struct.unpack_from('<IIII', record), (96, record_type, 7, 0))
+            self.assertEqual(record[80:], struct.pack('<IIII', 7, 2, 0, 0))
+        with self.assertRaisesRegex(ValueError, 'boolean'):
+            player.encode_record(7, fields | {player.AVAILABLE: scalar(1, 2)})
+        with self.assertRaisesRegex(ValueError, 'selector'):
+            player.encode_record(7, fields | {player.AVAILABLE: scalar(1, 1),
+                                              player.SELECTOR: scalar(3, 1)})
+
+    def test_current_building_removal_uses_building_receiver_and_holds_plot_through_enqueue(self):
+        from contextlib import contextmanager
+        from unittest.mock import Mock
+        from civ6_host.runtime import xp2_building_removal as removal
+        from civ6_host.runtime.a0_family_service import A0FamilyService
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_event_15c35863 import encode_scalar
+        from civ6_host.runtime.native.native_deferred_empty_profile import (
+            resolve_empty_receiver_row, validate_empty_profile_record)
+
+        current = event_profile(core_sha256=XP2_CORE_SHA256, execution_image=_PROFILE)
+        self.assertEqual(current.record_types_by_kind[removal.KIND], frozenset((0xa8,)))
+        self.assertEqual(current.record_types_by_kind[0x037a1bee], frozenset((0xa7,)))
+        self.assertEqual(resolve_empty_receiver_row(0xa7)['handler_va'], '0x1400d9d90')
+        self.assertEqual(resolve_empty_receiver_row(0xa8, execution_image=_PROFILE)['handler_va'],
+                         '0x1400d9530')
+
+        position = struct.pack('<ii', 22, 12)
+        raw_pointer = struct.pack('<H6xQII', 0, 123, 8, 0x21000001)
+        fields = {removal.SELECTOR: encode_scalar(3, 0), removal.POSITION: raw_pointer,
+                  removal.VALUE: encode_scalar(2, 17)}
+        state = dict(observer_registered=False, state_pointer_nonnull=True, pre_hook=None,
+                     post_hook=None, subscriber_count=0, state_flags=0)
+        core = SimpleNamespace(_civ6_host_execution_image=_PROFILE)
+        pending = []
+        lifetime = []
+
+        def read(pointer, size):
+            self.assertEqual((pointer, size), (123, 8))
+            return position
+
+        @contextmanager
+        def lease(passed_core, context, decoded, *, core_sha256, read):
+            self.assertIs(passed_core, core)
+            self.assertEqual(core_sha256, XP2_CORE_SHA256)
+            self.assertEqual(decoded['position_bytes'], position)
+            lifetime.append('acquire')
+            yield dict(owner=2, city_id=15, district_id=16, flag148=1)
+            self.assertEqual(len(pending), 1)
+            lifetime.append('release')
+
+        consumed = []
+        deferred = SimpleNamespace(core=core, _consume_empty_record=lambda raw, seq, *,
+            empty_receiver_state: consumed.append(validate_empty_profile_record(raw, **empty_receiver_state)))
+        owner = SimpleNamespace(_check=Mock(), active_kind=removal.KIND, _sequence=6,
+            core=core, context=13, _require_no_f391_reentry=Mock(),
+            foundation_core_sha256=XP2_CORE_SHA256, ui_cache_callbacks_enabled=True,
+            pending=pending, limit=1, empty_receiver_state=state, read=read,
+            host_notification_counter=0, normalizer_transform_present=False,
+            per_thread_hook_present=False, writer_metadata_callback_present=False,
+            _enqueue=pending.append, emit=Mock(), deferred=deferred,
+            handles_record=lambda kind: kind == 0xa8, policy_unlock_event_profile=None,
+            bbg_trade_event_profile=None, climate_event_profile=None)
+        with (patch('civ6_host.runtime.a0_foundation_events.require_borrow',
+                    return_value=SimpleNamespace(owner=SimpleNamespace(core=core))),
+              patch('civ6_host.runtime.xp2_building_removal.plot_snapshot', lease)):
+            with self.assertRaisesRegex(ValueError, 'three witnessed fields'):
+                removal.dispatch(owner, fields | {0xa1fbc372: encode_scalar(2, 1)})
+            self.assertEqual(lifetime, [])
+            self.assertEqual(removal.dispatch(owner, fields), 0)
+        self.assertEqual(lifetime, ['acquire', 'release'])
+        record, = pending
+        self.assertEqual(struct.unpack_from('<IIII', record), (128, 0xa8, 7, 0))
+        self.assertEqual(record[80:], struct.pack('<I4x8sHHIHHIB3xI8x',
+            7, position, 2, 2, 15, 2, 3, 16, 1, 17))
+        owner.active_kind = None
+        A0FamilyService.consume(owner, record, 7)
+        self.assertEqual(consumed[0]['handler_va'], '0x1400d9530')
+
+    def test_current_city_transfer_preserves_descriptor_previous_owner_and_type(self):
+        from civ6_host.runtime import xp2_city_occupation_event as occupation
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import resolve_empty_receiver_row
+        from civ6_host.runtime.native.native_event_15c35863 import encode_blob_pointer, encode_scalar
+
+        current = event_profile(core_sha256=XP2_CORE_SHA256, execution_image=_PROFILE)
+        self.assertEqual(current.record_types_by_kind[occupation.KIND], frozenset((0x73,)))
+        self.assertEqual(current.record_sizes[0x73], 112)
+        self.assertEqual(resolve_empty_receiver_row(0x73, execution_image=_PROFILE), occupation.receiver_row())
+        self.assertNotEqual(resolve_empty_receiver_row(0x73), occupation.receiver_row())
+        descriptor = struct.pack('<HHI', 4, 2, 65536)
+        fields = {
+            occupation.SELECTOR: encode_scalar(3, 0),
+            occupation.CITY: encode_blob_pointer(123),
+            occupation.PRIOR_OWNER: encode_scalar(2, 14),
+            occupation.TRANSFER: encode_scalar(2, 2),
+        }
+
+        def read(pointer, size):
+            self.assertEqual((pointer, size), (123, 8))
+            return descriptor
+
+        record = occupation.encode_record(7, fields, read)
+        self.assertEqual(struct.unpack_from('<IIII', record), (112, 0x73, 7, 0))
+        self.assertEqual(record[80:], struct.pack('<I4x8sII8x', 7, descriptor, 14, 2))
+        from civ6_host.runtime.a0_family_service import A0FamilyService
+        from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
+        from unittest.mock import Mock
+
+        state = dict(observer_registered=False, state_pointer_nonnull=True, pre_hook=None,
+                     post_hook=None, subscriber_count=0, state_flags=0)
+        observed = []
+        deferred = SimpleNamespace(core=SimpleNamespace(_civ6_host_execution_image=_PROFILE),
+            _consume_empty_record=lambda raw, seq, *, empty_receiver_state:
+                observed.append((seq, validate_empty_profile_record(raw, **empty_receiver_state))))
+        a0 = SimpleNamespace(_check=Mock(), active_kind=None, handles_record=lambda k: k == 0x73,
+            policy_unlock_event_profile=None, bbg_trade_event_profile=None, climate_event_profile=None,
+            empty_receiver_state=state, deferred=deferred)
+        A0FamilyService.consume(a0, record, 7)
+        self.assertEqual(observed[0][1]['handler_va'], '0x1400d8150')
+        self.assertNotIn('execution_image', state)
+        with self.assertRaises(ValueError):
+            occupation.encode_record(7, {**fields, occupation.TRANSFER: encode_scalar(3, 2)}, read)
+        with self.assertRaises(ValueError):
+            occupation.encode_record(7, fields, lambda *_: struct.pack('<HHI', 4, 1, 65536))
+
     def test_common_exe_membership_is_separate_from_xp2_turn_notifications(self):
         foundation = event_profile(core_sha256=XP2_CORE_SHA256)
         turn = turn_profile(core_sha256=XP2_CORE_SHA256)

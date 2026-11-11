@@ -79,8 +79,9 @@ class SavedLoadServices(SavedConfigurationReadback,ExplicitSavedOperations):
             self.events=ScriptEventService(self.host,runtime,map_factory=self.map_arguments)
             if core_sha256==XP2_CORE_SHA256:
                 self.events.install_mutable_map_result(self.core,core_sha256=core_sha256,read=read)
-                from .source_build_identity import CURRENT_STRINGS_HOST_REFERENCE
-                if self.events.mutable_map_dispatcher.proof['native_host_sha256'] == CURRENT_STRINGS_HOST_REFERENCE[1]:
+                from .source_build_identity import CURRENT_STRINGS_HOST_REFERENCES
+                if self.events.mutable_map_dispatcher.proof['native_host_sha256'] in {
+                        sha for _, sha in CURRENT_STRINGS_HOST_REFERENCES}:
                     self.events.install_string_arguments(self.core,read=read)
                 if bootstrap is None:
                     from .script_context_service import bootstrap_cached_context

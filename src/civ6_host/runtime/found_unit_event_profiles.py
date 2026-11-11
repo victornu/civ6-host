@@ -225,7 +225,9 @@ def _tables(raw):
 
 def query_abi(core_sha256,root=None,*,execution_image=None):
     if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
-        raise ValueError('Selected execution image requires the XP2 FoundUnit source ABI')
+        from .execution_images import _XP1_PROFILE
+        if execution_image is not _XP1_PROFILE or core_sha256!=XP1_SHA256:
+            raise ValueError('Selected execution image differs from the FoundUnit source ABI')
     if core_sha256==BASE_SHA256:
         from civ6_host.runtime.native import native_found_city_event as m
         from civ6_host.runtime.native.native_unit_created_event import TABLES

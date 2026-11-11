@@ -38,6 +38,11 @@ NATIVE02_SOURCE = (
     "eeeccad843287fccfd356155369fc3aa5e9250bb2816321e795c39e27f032d71",
 )
 CITY_LISTENER_PREFIX = ("0x17f098", "0x178ed0", "0x25c54c", "0x25d3f1", "0x25d459")
+CITY_CAPTURE_LISTENER_SOURCE = (
+    'evidence/host-xp2-previous-owner-capture-achievement-source.json',
+    '457b32250afb749a40cd9bbf6e7e4f3f2bff4d72e107ef145a7cd7ee528997dd',
+)
+CITY_CAPTURE_LISTENER_PREFIX = CITY_LISTENER_PREFIX[:4] + ('0x144325', '0x151b0c')
 NATIVE02_PREFIX = ("0x17f098", "0x17feda", "0x2e9e8c")
 NATIVE02_OBSERVED_CHAIN = ("0x17f098", "0x17feda", "0x2e9e8c", "0x2eda33", "0x2ead5b",
     "0x2eadb4", "0x447ffe", "0x447dc8", "0x447e33", "0x42e2c6", "0x401537",
@@ -58,6 +63,12 @@ _CONGRESS_DATA = (
     (0x9c46f8, b"PlayerType\0"),
     (0x9d0650, b"APPLY_DECREASED_DIPLO_VP_TO_PLAYER\0"),
 )
+RAF35_SOURCE = (
+    'evidence/host-xp2-stock-t61-achievement-frontier.json',
+    '8f2cb0ad3a5106e9c93a0b1c671d8654ac32db258955c36fac936c00eea85064',
+)
+RAF35_PREFIX = ('0x17f098', '0x17fd22', '0xfc253', '0x1e2e97')
+_RAF35_LITERAL = b'RAF_ACHIEVEMENT_35\0'
 CORE_MODULE = "GameCore_XP2_FinalRelease.dll"
 EXE_SHA256 = "e7450823cc8e00468cff7b9d7b97c63140eae38ae1d774ba4efa437556c42d63"
 HOST_GLOBAL_RVA = 0xB8AA80
@@ -394,6 +405,51 @@ def congress_source(execution_image):
     return proof
 
 
+def raf35_source(execution_image):
+    from .a0_policy_unlock_current import _require_image
+
+    _require_image(execution_image)
+    proof = _source(RAF35_SOURCE)
+    spans = {name: (span['rva'], span['bytes']) for name, span in proof['spans'].items()}
+    if (proof['schema'] != 'civ6-host.xp2-stock-t61-achievement-frontier.v1'
+            or proof['core']['sha256'] != execution_image.image_sha256
+            or tuple(proof['refusal']['core_return_stack'][:len(RAF35_PREFIX)]) != RAF35_PREFIX
+            or proof['refusal']['slot'] != '0x20'
+            or proof['literal'] != dict(rva='0x9d0400', text='RAF_ACHIEVEMENT_35',
+                sha256=hashlib.sha256(_RAF35_LITERAL).hexdigest())
+            or proof['listener_vtable_slot'] != dict(rva='0x9d0a50', target_rva='0x17fcd0', relocatable=True)
+            or spans != {
+                'optional_service_helper': ('0x17f060', 176),
+                'platform_listener': ('0x17fcd0', 93),
+                'native_delegate_dispatch': ('0xfc214', 264),
+                'event_producer_join': ('0x1e2e18', 229),
+            }
+            or proof['claimed_achievement_success'] is not False):
+        raise ValueError('Current XP2 RAF35 achievement source differs')
+    return proof
+
+
+def city_capture_listener_source(execution_image):
+    from .a0_policy_unlock_current import _require_image
+
+    _require_image(execution_image)
+    proof = _source(CITY_CAPTURE_LISTENER_SOURCE)
+    spans = {name: (row['rva'], row['bytes']) for name, row in proof['spans'].items()}
+    if (proof['schema'] != 'civ6-host.xp2-host-slot20-city-capture-listener.v1'
+            or proof['image']['sha256'] != execution_image.image_sha256
+            or proof['shared_city_listener']['sha256'] != CITY_LISTENER_SOURCE[1]
+            or proof['observed_prefix'] != CITY_CAPTURE_LISTENER_PREFIX
+            or proof['refusal']['chain'] != CITY_CAPTURE_LISTENER_PREFIX
+            or proof['slot'] != '0x20' or proof['return_path'] != 'native_null_optional_achievement'
+            or proof['platform_success_reported'] is not False
+            or proof['gameplay_result_is_separate'] is not True
+            or spans != {'transfer_calls_city_listener': ('0x144311', 0x33),
+                         'combat_calls_city_transfer': ('0x151afb', 0x34)}):
+        raise ValueError('Current XP2 city capture achievement source differs')
+    city_listener_source()
+    return proof
+
+
 def source_dependencies(*, execution_image=None) -> dict[str, str]:
     """Return immutable proof and source references required by the adapter."""
     proof = source()
@@ -413,6 +469,10 @@ def source_dependencies(*, execution_image=None) -> dict[str, str]:
     if execution_image is not None:
         congress = congress_source(execution_image)
         refs.append(dict(path=CONGRESS_SOURCE[0], sha256=CONGRESS_SOURCE[1]))
+        raf35_source(execution_image)
+        refs.append(dict(path=RAF35_SOURCE[0], sha256=RAF35_SOURCE[1]))
+        city_capture_listener_source(execution_image)
+        refs.append(dict(path=CITY_CAPTURE_LISTENER_SOURCE[0], sha256=CITY_CAPTURE_LISTENER_SOURCE[1]))
         current_refs = [*congress['references'], *congress['images'].values()]
     pins: dict[str, str] = {}
     for ref in refs:
@@ -496,6 +556,26 @@ def verify_live(base: int, read, *, host_pointer: int, execution_image=None) -> 
             count += len(expected); spans += 1
         current_receipt = dict(congress_source_sha256=CONGRESS_SOURCE[1],
             execution_image_sha256=execution_image.image_sha256)
+        for row in raf35_source(execution_image)['spans'].values():
+            body = _read_exact(read, base + int(row['rva'], 16), row['bytes'])
+            if hashlib.sha256(body).hexdigest() != row['sha256']:
+                raise ValueError('XP2 RAF35 achievement live source differs at ' + row['rva'])
+            count += len(body)
+            spans += 1
+        for rva, expected in ((0x9d0400, _RAF35_LITERAL),
+                (0x9d0a50, (base + 0x17fcd0).to_bytes(8, 'little'))):
+            if _read_exact(read, base + rva, len(expected)) != expected:
+                raise ValueError('XP2 RAF35 achievement live data differs')
+            count += len(expected)
+            spans += 1
+        current_receipt['raf35_source_sha256'] = RAF35_SOURCE[1]
+        for row in city_capture_listener_source(execution_image)['spans'].values():
+            body = _read_exact(read, base + int(row['rva'], 16), row['bytes'])
+            if hashlib.sha256(body).hexdigest() != row['sha256']:
+                raise ValueError('XP2 city capture achievement live source differs at ' + row['rva'])
+            count += len(body)
+            spans += 1
+        current_receipt['city_capture_listener_source_sha256'] = CITY_CAPTURE_LISTENER_SOURCE[1]
     count += len(_ERA_TRANSITION_LITERAL) + len(_RAF30_LITERAL) + len(_CITY_LISTENER_LITERAL)
     spans += 3
     return {**current_receipt, "source_sha256": SOURCE[1], "native02_source_sha256": NATIVE02_SOURCE[1],
@@ -527,6 +607,12 @@ def select_contract(frames, *, service_installed: bool = False, execution_image=
         congress_source(execution_image)
         if returns[:len(CONGRESS_PREFIX)] == CONGRESS_PREFIX:
             return CONGRESS_SOURCE[1]
+        if returns[:len(RAF35_PREFIX)] == RAF35_PREFIX:
+            raf35_source(execution_image)
+            return RAF35_SOURCE[1]
+        if returns[:len(CITY_CAPTURE_LISTENER_PREFIX)] == CITY_CAPTURE_LISTENER_PREFIX:
+            city_capture_listener_source(execution_image)
+            return CITY_CAPTURE_LISTENER_SOURCE[1]
     if returns[:len(ACCEPTED_CORE_RETURN_PREFIX)] == ACCEPTED_CORE_RETURN_PREFIX:
         return SOURCE[1]
     if returns[:len(NATIVE02_PREFIX)] == NATIVE02_PREFIX:

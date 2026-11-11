@@ -23,6 +23,10 @@ def validate_command(action, *, observation=None):
         from civ6_host.contracts.world_congress import validate_action
         validate_action(action)
         return
+    if action.get('kind') == 'confirm_dedications':
+        from civ6_host.contracts.dedications import validate_action
+        validate_action(action)
+        return
     if action.get('kind') in SPY_COMPLETION_KINDS:
         from civ6_host.contracts.spy_completion import validate_action
         if observation is None:
@@ -99,6 +103,10 @@ def validate_command(action, *, observation=None):
         from civ6_host.contracts.capability_unit_orders import validate_action
         validate_action(action)
         return
+    if action.get('kind') == 'unit_formation':
+        from civ6_host.contracts.unit_formations import validate_action
+        validate_action(action)
+        return
     if action.get('kind') == 'district_range_attack':
         from civ6_host.contracts.city_ranged import district_validate_action
         district_validate_action(action)
@@ -109,6 +117,10 @@ def validate_command(action, *, observation=None):
         return
     if action.get('kind') == 'unit_attack':
         from civ6_host.contracts.capability_unit_attacks import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') == 'resolve_captured_city':
+        from civ6_host.contracts.captured_city import validate_action
         validate_action(action)
         return
     if action.get('kind') in ('production_placement', 'production_resume'):
@@ -176,6 +188,7 @@ class SavedContinuation:
         self.explicit_placements={}
         self.explicit_combat_units=None
         self.explicit_combat_cities=None
+        self.explicit_captured_city=None
         self._xp1_unit_attack_catalogue=None
         self._xp1_placement_catalogue=None
         self.world_input_selections={};self.world_input_prompts={}
@@ -244,18 +257,31 @@ class SavedContinuation:
         if action['kind'] == 'diplomacy_initiate' and (not xp2
                 or getattr(session, 'diplomacy_overview_diagnostic', False) is not True):
             raise ValueError('Initial diplomacy requires the selected XP2 initial-choice group')
-        if action['kind'] in TRADE_KINDS and (not xp2 or self.trade_feedback is None
-                or getattr(session, 'trade_diagnostic', False) is not True):
-            raise ValueError('Trade requires the selected XP2 BBG trade query group')
+        if action['kind'] in TRADE_KINDS:
+            standard = getattr(session, 'standard_trade', False) is True and self.trade_feedback is None
+            bbg = getattr(session, 'trade_diagnostic', False) is True and self.trade_feedback is not None
+            if not xp2 or not (standard or bbg):
+                raise ValueError('Trade requires a selected XP2 trade query group')
+        if action['kind'] == 'unit_formation' and (not xp2 or getattr(session, 'unit_formations', False) is not True):
+            raise ValueError('Formation commands require the selected stock XP2 query group')
+        if action['kind'] == 'resolve_captured_city' and (
+                not xp2 or getattr(self, 'captured_city_core', None) is not self.owner.core):
+            raise ValueError('Captured-city commands require the retained current XP2 route')
+        if action['kind'] == 'confirm_dedications' and (
+                not xp2 or getattr(session, 'stock_dedications', False) is not True):
+            raise ValueError('Dedication commands require the selected stock XP2 query group')
         if action['kind'] in ESPIONAGE_KINDS + SPY_COMPLETION_KINDS and (not xp2 or self.trade_feedback is None
                 or getattr(session, 'espionage_diagnostic', False) is not True):
             raise ValueError('Espionage requires the selected XP2 BBG espionage query group')
         if getattr(session, 'world_congress_diagnostic', False):
             from .xp2_world_congress import guard_other_action
             guard_other_action(session, action)
-        if action['kind'] in CONGRESS_KINDS and (not xp2 or self.trade_feedback is None
-                or getattr(session, 'world_congress_diagnostic', False) is not True):
-            raise ValueError('Congress requires its exact XP2 option and feedback owner')
+        if action['kind'] in CONGRESS_KINDS:
+            stock_congress = (getattr(session, 'stock_dedications', False) is True
+                              and getattr(session, 'world_congress_review_diagnostic', False) is True)
+            if (not xp2 or getattr(session, 'world_congress_diagnostic', False) is not True
+                    or stock_congress != (self.trade_feedback is None)):
+                raise ValueError('Congress requires its selected XP2 profile and feedback owner')
         if not xp2 and action['kind'] in UNIT_WORK_FIELDS:
             raise ValueError('Expansion unit work requires the verified XP2 route')
         if not xp2 and action['kind'] in ('purchase', 'promote_unit', 'upgrade_unit', 'policies', 'policy_unlock','government','retain_government','send_envoy','retain_envoys'):
@@ -267,8 +293,8 @@ class SavedContinuation:
                 and action['kind'] not in CONGRESS_KINDS
                 and action['kind'] not in GOVERNOR_KINDS and action['kind'] not in
                 ('found_city','research','civic','production','end_turn','force_end_turn','unready_turn',
-                 'world_select_unit','world_deselect_unit','world_plot_click','world_war_response','diplomacy_initiate','unit_order',
-                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit','policies','policy_unlock','government','retain_government','send_envoy','retain_envoys')):
+                 'world_select_unit','world_deselect_unit','world_plot_click','world_war_response','diplomacy_initiate','unit_order','unit_formation','confirm_dedications',
+                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit','policies','policy_unlock','government','retain_government','send_envoy','retain_envoys','resolve_captured_city')):
             raise ValueError('XP2 command family is not yet source-qualified in this session')
         return self._transition(action,session=session,pump=False)
 
@@ -299,9 +325,12 @@ class SavedContinuation:
         congress_turn=is_congress and (is_congress_auto or action['kind']=='congress_confirm_ballot')
         is_world=not pump and (action['kind'] in WORLD_KINDS or is_war_response)
         is_order=not pump and action['kind']=='unit_order'
+        is_formation=not pump and action['kind']=='unit_formation'
+        is_dedication=not pump and action['kind']=='confirm_dedications'
         is_queue=not pump and action['kind'] in ('queue_append','queue_remove','queue_swap')
         is_placement=not pump and action['kind'] in ('production_placement','production_resume')
         is_attack=not pump and action['kind']=='unit_attack'
+        is_occupation=not pump and action['kind']=='resolve_captured_city'
         is_city_shot=not pump and action['kind'] in ('city_range_attack', 'district_range_attack')
         is_city=not pump and action['kind'] in ('city_focus','city_citizen')
         is_work=not pump and action['kind'] in UNIT_WORK_FIELDS
@@ -312,10 +341,11 @@ class SavedContinuation:
         is_government=not pump and action['kind'] in ('government','retain_government')
         is_envoy=not pump and action['kind'] in ('send_envoy','retain_envoys')
         is_governor=not pump and action['kind'] in GOVERNOR_KINDS
-        has_observation_effect = (is_world or is_order or is_queue or is_placement or is_attack
+        has_observation_effect = (is_world or is_order or is_formation or is_queue or is_placement or is_attack or is_occupation
                                   or is_city or is_city_shot or is_work or is_purchase or is_promotion
                                   or is_upgrade or is_policy or is_government or is_envoy or is_governor
-                                  or is_trade or is_espionage or is_spy_completion or is_congress)
+                                  or is_trade or is_espionage or is_spy_completion or is_congress
+                                  or is_dedication)
         if is_turn or has_observation_effect or is_initial_diplomacy:
             from .xp1_saved_load_owner import SavedLoadOwner
             if (type(session) is not SavedLoadOwner or session.continuation is not self
@@ -349,6 +379,12 @@ class SavedContinuation:
                     effect=initiate(session,action,before_observation)
                 elif is_trade:
                     from .xp2_trade import apply
+                    effect=apply(session,action,before_observation)
+                elif is_formation:
+                    from .xp2_unit_formations import apply
+                    effect=apply(session,action,before_observation)
+                elif is_dedication:
+                    from .xp2_dedications import apply
                     effect=apply(session,action,before_observation)
                 elif is_espionage:
                     from .xp2_espionage import apply
@@ -395,6 +431,9 @@ class SavedContinuation:
                     effect=apply(session,action,before_observation)
                 elif is_attack:
                     from .xp1_unit_attacks import apply
+                    effect=apply(session,action,before_observation)
+                elif is_occupation:
+                    from .xp2_captured_city import apply
                     effect=apply(session,action,before_observation)
                 elif is_city_shot:
                     from .native import native_saved_city_shot, native_saved_district_shot

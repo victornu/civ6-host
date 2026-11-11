@@ -174,7 +174,29 @@ class CurrentBBGPreparedReaderCompatibilityTests(unittest.TestCase):
                     installed = package_root / name
                     self.assertEqual(pins[str(installed.resolve())], digest)
                     self.assertEqual(self.producer['runtime_sources'][name], digest)
-                    self.assertEqual(self.consumer['runtime_sources'][name], digest)
+                    if name == 'runtime/xp2_bbg_inputs.py':
+                        historical = raw.decode('utf-8')
+                        for old, new in (
+                            ('import CURRENT_HAVOK_HOST_REFERENCE',
+                             'import CURRENT_HAVOK_HOST_REFERENCE, CURRENT_STRINGS_HOST_REFERENCE'),
+                            ('UI_HOSTS = (*UI_HOSTS, CURRENT_HAVOK_HOST_REFERENCE)',
+                             'UI_HOSTS = (*UI_HOSTS, CURRENT_HAVOK_HOST_REFERENCE, CURRENT_STRINGS_HOST_REFERENCE)'),
+                            ('return CURRENT_HAVOK_HOST_REFERENCE', 'return CURRENT_STRINGS_HOST_REFERENCE'),
+                        ):
+                            self.assertEqual(historical.count(old), 1)
+                            historical = historical.replace(old, new, 1)
+                        self.assertEqual(ast.dump(ast.parse(historical)),
+                                         ast.dump(ast.parse(installed.read_text(encoding='utf-8'))))
+                    elif name == 'runtime/capture_package.py':
+                        self.assertEqual(
+                            (digest, self.consumer['runtime_sources'][name]),
+                            admission._XP1_PACKAGE_READER_DELTA)
+                    elif name == 'runtime/capture_candidates.py':
+                        self.assertEqual(
+                            (digest, self.consumer['runtime_sources'][name]),
+                            admission._XP1_HANDOFF_CANDIDATE_DELTA)
+                    else:
+                        self.assertEqual(self.consumer['runtime_sources'][name], digest)
 
             # capture_admission.py changed only in admission orchestration and
             # explicit proof data. The original origin/file readers are AST-identical.

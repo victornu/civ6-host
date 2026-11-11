@@ -102,10 +102,10 @@ def verify_runtime(runtime,core,read):
     executable = _current_executable()
     from . import xp2_bbg_property_table as bbg
     from .source_build_identity import (xp2_component_requirements, CURRENT_HAVOK_BUILD_PROFILE,
-                                        CURRENT_STRINGS_BUILD_PROFILE)
+                                        CURRENT_STRINGS_BUILD_PROFILES)
     build = verify_source_build(executable, required_components=xp2_component_requirements(executable, {
         'script_game_event_result_map.inc': core_components['script_game_event_result_map.inc']}))
-    if build['profile'] in (bbg.BUILD_PROFILE, CURRENT_HAVOK_BUILD_PROFILE, CURRENT_STRINGS_BUILD_PROFILE):
+    if build['profile'] in (bbg.BUILD_PROFILE, CURRENT_HAVOK_BUILD_PROFILE, *CURRENT_STRINGS_BUILD_PROFILES):
         core_components['script_game_event_dispatch_bbg_parent.inc'] = core_components['script_game_event_dispatch.inc']
         core_components['script_game_event_dispatch.inc'] = bbg.dispatch_wrapper_sha256(build)
         core_components['script_aux_b8.inc'] = bbg.property_component_sha256(build)

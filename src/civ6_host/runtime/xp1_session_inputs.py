@@ -58,14 +58,80 @@ def saved_load_pin(pins, path, expected=None):
     return path
 
 
+CURRENT_XP1_SESSION_JOIN = (
+    'work/trade-common-client/xp1-installed-session-source-joins.json',
+    '27290d6e1c5657b94f057085fd340ee27fb9b6101cdb626653390e144a1796fb',
+)
+
+
+def current_session_join(image):
+    from .configuration_profiles import _source
+    from .execution_images import _XP1_PROFILE, identity
+    if image is not _XP1_PROFILE:
+        raise ValueError('Expected the registered installed XP1 session image')
+    proof = _source(CURRENT_XP1_SESSION_JOIN)
+    if (proof['schema'] != 'civ6-host.xp1-installed-session-source-joins.v1'
+            or proof['execution_image'] != identity(image)):
+        raise ValueError('XP1 session source join differs from its selected image')
+    return proof
+
+
+def materialize_xp1_session_pins(pins, image):
+    from .found_unit_event_profiles import source as found_unit_source
+    from .resource_resolution import resolve_path
+    from .runtime_source_dependencies import materialize_runtime_source_pins
+    proof = current_session_join(image)
+    result = {}
+    for name, expected in pins.items():
+        path = str(resolve_path(Path(name)).resolve())
+        if path in result and result[path] != expected:
+            raise ValueError('XP1 session source dependency identity conflicts')
+        result[path] = expected
+    events = proof['events']
+    event_path = events['current']['path']
+    if result.get(event_path) == events['previous']:
+        result[event_path] = events['current']['sha256']
+        result[proof['archive']['path']] = proof['archive']['sha256']
+    path, digest = CURRENT_XP1_SESSION_JOIN
+    result[str(resource_root()/path)] = digest
+    return materialize_runtime_source_pins(result, execution_image=image,
+                                           provenance_images=found_unit_source(resource_root())['images'].values())
+
+
+def verify_xp1_session_pins(pins, core, *, family):
+    """Verify a live reader's inputs using the same image projection as preparation."""
+    from .resource_resolution import resolve_path
+    image = getattr(core, '_civ6_host_execution_image', None)
+    if image is not None:
+        pins = materialize_xp1_session_pins(pins, image)
+        if Path(core._name).resolve() != Path(image.path).resolve():
+            raise ValueError('XP1 reader module differs from its selected image')
+    for name, expected in pins.items():
+        if file_sha256(resolve_path(Path(name))) != expected:
+            raise ValueError(f'XP1 {family} dependency changed: {name}')
+
+
 def saved_load_build_pins(pins, *, ui=False, core_sha256=XP1_CORE_SHA256, official_bundle=None, execution_image=None):
     if type(ui) is not bool:raise ValueError('Native build selection must be explicit')
+    if execution_image is not None and core_sha256 == XP1_CORE_SHA256:
+        from .execution_images import _XP1_PROFILE, _verify_native_host_build
+        from .native.native_official_bundle import normalize_reference
+        from .xp1_saved_load import REFERENCE
+        origin = official_bundle if type(official_bundle) is tuple else normalize_reference(official_bundle)
+        if execution_image is not _XP1_PROFILE or origin != REFERENCE:
+            raise ValueError('Selected XP1 host requires its exact retained capture')
+        build = _verify_native_host_build(execution_image)
+        for name, expected in build['build_dependencies'].items():
+            saved_load_pin(pins, resource_root()/name, expected)
+        host = execution_image.native_host_build
+        return saved_load_pin(pins, resource_root()/host.executable_path, host.executable_sha256)
     if execution_image is not None and core_sha256 != XP2_CORE_SHA256:
-        raise ValueError('Selected execution-image host requires the XP2 source ABI')
+        raise ValueError('Selected execution-image host requires its exact source ABI')
     if core_sha256 == XP2_CORE_SHA256:
         if not ui:raise ValueError('Shared XP2 sessions require the qualified UI host build')
         from .xp2_session_inputs import XP2_UI_HOST
-        from .source_build_identity import verify_source_build, XP2_HOST_COMPONENT_SHA, xp2_component_requirements
+        from .source_build_identity import (verify_source_build, XP2_HOST_COMPONENT_SHA,
+                                            xp2_component_requirements, CURRENT_UNSIGNED_LOG_HOST_REFERENCE)
         from .xp2_ui_binding_source import UI_COMPONENT_SHA
         from . import xp2_bbg_inputs as bbg
         bbg_capture=bbg.is_reference(official_bundle)
@@ -73,8 +139,10 @@ def saved_load_build_pins(pins, *, ui=False, core_sha256=XP1_CORE_SHA256, offici
         if execution_image is not None and not bbg_capture:
             from .capture_admission import _stock_xp2_execution
             stock_current=_stock_xp2_execution(execution_image,origin=official_bundle)
-        host = (bbg.selected_ui_host(execution_image)
-                if bbg_capture or stock_current else XP2_UI_HOST)
+        if stock_current:
+            host = CURRENT_UNSIGNED_LOG_HOST_REFERENCE
+        else:
+            host = bbg.selected_ui_host(execution_image) if bbg_capture else XP2_UI_HOST
         executable=saved_load_pin(pins,resource_root()/host[0],host[1])
         build=verify_source_build(executable,required_components=xp2_component_requirements(executable, {
             'gamecore_python_host.c':XP2_HOST_COMPONENT_SHA,
@@ -237,7 +305,8 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
     for name, expected in notification_dependencies().items():
         saved_load_pin(pins, name, expected)
     from civ6_host.runtime.xp1_absent_event_families import source_dependencies as absent_event_dependencies
-    for name, expected in absent_event_dependencies().items():
+    image = getattr(captured, 'execution_image', None)
+    for name, expected in absent_event_dependencies(execution_image=image).items():
         saved_load_pin(pins, name, expected)
     if postload160:
         from civ6_host.runtime.xp1_postload_candidate import source_dependencies as post160_dependencies
@@ -276,10 +345,29 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
         from civ6_host.runtime.xp1_unit_attack_profile import source_dependencies as attack_dependencies
         from civ6_host.runtime.district_damage_profile import source_dependencies as district_damage_dependencies
         for dependencies in (transport_dependencies(),unit_dependencies(),event_dependencies(),found_event_dependencies(),foundation_dependencies(),city_scalar_dependencies(),private_dependencies(),turn_unit_dependencies(),turn_dependencies(),thread_dependencies(),slot78_dependencies(),placement_dependencies(),combat_dependencies(),improvement_change_dependencies(),inventory_dependencies(),attack_dependencies(),district_damage_dependencies()):
+            if image is not None:
+                dependencies = materialize_xp1_session_pins(dependencies, image)
             for name,expected in dependencies.items():saved_load_pin(pins,name,expected)
+        from .execution_images import _XP1_PROFILE
+        if image is _XP1_PROFILE:
+            from .control_input_source import reactivation_source_pins
+            for name,expected in reactivation_source_pins().items():
+                saved_load_pin(pins,name,expected)
     saved_load_pin(pins, package['path'], package['sha256'])
-    executable = saved_load_build_pins(pins,ui=observe_player)
-    return pins, executable
+    if image is None:
+        return pins, saved_load_build_pins(pins, ui=observe_player)
+    from .execution_images import source_dependencies as image_dependencies
+    for path, expected in image_dependencies(image).items():
+        saved_load_pin(pins, path, expected)
+    from .native.native_app_ownership import CURRENT_XP2_INVENTORY_PATH, CURRENT_XP2_INVENTORY_SHA256
+    inventory = saved_load_pin(pins, resource_root()/CURRENT_XP2_INVENTORY_PATH,
+                              CURRENT_XP2_INVENTORY_SHA256)
+    for row in json.loads(inventory.read_bytes())['current_inventory']:
+        private = row.get('private_copy')
+        if private is not None:
+            saved_load_pin(pins, resource_root()/private['path'], private['sha256'])
+    return pins, saved_load_build_pins(pins, ui=observe_player, official_bundle=captured.reference,
+                                      execution_image=image)
 
 
 def command_source_dependencies(core_sha256, *, execution_image=None):
@@ -331,6 +419,8 @@ def command_source_dependencies(core_sha256, *, execution_image=None):
         from .xp2_feature_reveal_source import source_dependencies as feature_dependencies
         collect(feature_dependencies())
         if execution_image is not None:
+            from .control_input_source import reactivation_source_pins
+            collect(reactivation_source_pins(execution_image))
             from .xp2_congress_presentation import source_dependencies as congress_dependencies
             collect(congress_dependencies())
             from .xp2_wmd_fallout_source import source_dependencies as fallout_dependencies

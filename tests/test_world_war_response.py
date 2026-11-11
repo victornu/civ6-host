@@ -85,6 +85,34 @@ class ResponseTests(unittest.TestCase):
             saved.prefix.view_publisher.publish.assert_called_once()
             self.assertFalse(result['receipt']['automatic_choices_applied'])
 
+    def test_minor_accept_publishes_observation_after_native_bbg_feedback(self):
+        with ExitStack() as stack:
+            obs, saved, _, _, _ = self.fixture(stack)
+            pending = [(239, 'governor', (0, 2, 65536, -1))]
+            saved.continuation.trade_feedback = NS(events=pending)
+            settled = deepcopy(obs)
+            settled['economy'] = {'gold': 99}
+
+            def flush():
+                saved.prefix.actions.deliver_one.assert_called_once()
+                self.assertEqual(len(pending), 1)
+                pending.clear()
+                return []
+
+            def observe(*args):
+                self.assertFalse(pending)
+                return settled
+
+            saved.continuation.flush_trade_feedback = Mock(side_effect=flush)
+            stack.enter_context(patch('civ6_host.runtime.native.native_player_observation.observe_player',
+                                      side_effect=observe))
+            result = war.respond(saved, dict(kind='world_war_response', accept=True), obs)
+            self.assertTrue(result['receipt']['bbg_feedback_flushed'])
+            self.assertTrue(result['receipt']['native_war_state_after']['at_war'])
+            self.assertEqual(result['observation'], settled)
+            self.assertEqual(result['receipt']['observation_after'], settled)
+            saved.continuation.flush_trade_feedback.assert_called_once_with()
+
     def test_major_is_refused_before_any_unwired_session_callback(self):
         with ExitStack() as stack:
             obs, saved, source, config, request = self.fixture(stack, major=True)

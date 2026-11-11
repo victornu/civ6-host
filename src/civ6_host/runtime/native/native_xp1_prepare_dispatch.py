@@ -90,9 +90,8 @@ def prepare_xp1_context(core, context, host, *, project_root, module_paths, emit
     from civ6_host.runtime.native.native_setup import local_reader
     from civ6_host.runtime.native.native_host import DiagnosticHost
     proofs = verify_source(project_root)
-    profile = profile_for_core(core._name, mode='context')
-    if profile.ruleset != 'xp1' or profile.core_sha256 != CORE_SHA256:
-        raise ValueError('XP1 Prepare refuses another GameCore')
+    from civ6_host.runtime.xp1_saved_load import select_context, teardown_core_identity
+    profile = select_context(core, getattr(host, '_xp1_saved_load_bundle', None), profile_for_core)
     validate_loaded_modules(profile, module_paths)
     if type(host) is not DiagnosticHost or getattr(host, 'localization_initialized', False) is not True:
         raise ValueError('XP1 Prepare requires retained native localization and owned host')
@@ -104,7 +103,7 @@ def prepare_xp1_context(core, context, host, *, project_root, module_paths, emit
     if getattr(host, '_xp1_prepare_entered', False):
         raise ValueError('XP1 Prepare has already been entered in this worker')
     binding = getattr(host, '_xp1_teardown_binding', {})
-    if binding.get('installed') is not True or binding.get('core_sha256') != CORE_SHA256 or binding.get('context_pointer') != hex(context) or (binding.get('core_module_base') != hex(core._handle)) or (binding.get('host_pointer') != hex(host.pointer)):
+    if binding.get('installed') is not True or binding.get('core_sha256') != teardown_core_identity(host) or binding.get('context_pointer') != hex(context) or (binding.get('core_module_base') != hex(core._handle)) or (binding.get('host_pointer') != hex(host.pointer)):
         raise ValueError('XP1 Prepare requires the matching retained teardown binding')
     read = local_reader()
     dispatch = verify_dispatch(core._handle, context, read, proofs)

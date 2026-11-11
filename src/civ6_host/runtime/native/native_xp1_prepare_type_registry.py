@@ -77,6 +77,7 @@ def install_prepare_type_registry(host, core_base, teardown_receipt, *, project_
     and frees its allocation through the retained XP1 _aligned_free from 821.
     Callback addresses are stored as opaque integers; this module never invokes them.
     """
+    from civ6_host.runtime.xp1_saved_load import teardown_core_identity
     source = verify_source(project_root)
     base = _pointer(core_base, 'XP1 core base')
     max_rva = max((max(pair) for pair in CALLBACK_RVAS))
@@ -84,7 +85,7 @@ def install_prepare_type_registry(host, core_base, teardown_receipt, *, project_
         raise ValueError('XP1 core base plus callback RVA overflows an unsigned 64-bit address')
     if type(teardown_receipt) is not dict or teardown_receipt.get('schema') != TEARDOWN_INSTALL_SCHEMA:
         raise ValueError('XP1 Prepare registry requires the successful 821 teardown binding')
-    if getattr(host, '_xp1_teardown_binding', None) is not teardown_receipt or teardown_receipt.get('installed') is not True or teardown_receipt.get('core_sha256') != XP1_CORE_SHA256 or (teardown_receipt.get('core_module_base') != hex(base)) or (teardown_receipt.get('host_pointer') != hex(getattr(host, 'pointer', 0))) or (teardown_receipt.get('registrar_remove_slot') != '0x08') or (teardown_receipt.get('type_names_allowed') != list(TYPE_NAMES)) or (teardown_receipt.get('callback_references_retained') is not True) or (teardown_receipt.get('destroy_called') is not False) or (teardown_receipt.get('aligned_free_function_pointer') in (None, '0x0')) or (teardown_receipt.get('aligned_free_iat_va') != hex(base + 8771192)):
+    if getattr(host, '_xp1_teardown_binding', None) is not teardown_receipt or teardown_receipt.get('installed') is not True or teardown_receipt.get('core_sha256') != teardown_core_identity(host) or (teardown_receipt.get('core_module_base') != hex(base)) or (teardown_receipt.get('host_pointer') != hex(getattr(host, 'pointer', 0))) or (teardown_receipt.get('registrar_remove_slot') != '0x08') or (teardown_receipt.get('type_names_allowed') != list(TYPE_NAMES)) or (teardown_receipt.get('callback_references_retained') is not True) or (teardown_receipt.get('destroy_called') is not False) or (teardown_receipt.get('aligned_free_function_pointer') in (None, '0x0')) or (teardown_receipt.get('aligned_free_iat_va') != hex(base + 8771192)):
         raise ValueError('XP1 Prepare binding does not match the retained 821 XP1 host/free owner')
     adapter_source = teardown_receipt.get('source')
     if type(adapter_source) is not dict or adapter_source.get('schema') != 'civ6rl.native_xp1_teardown_adapter_source.v1' or adapter_source.get('proof_sha256') != TEARDOWN_PROOF_SHA256 or (adapter_source.get('prepare_proof_sha256') != CONTRACT_SHA256):

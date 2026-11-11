@@ -64,6 +64,22 @@ def source_dependencies(*, execution_image=None):
     return pins
 
 
+def standard_source_dependencies(reference, *, core_sha256, execution_image):
+    from .capture_admission import STOCK_XP2_READER_REVALIDATION
+    from .paths import resource_root
+    from .resource_resolution import resolve_path
+    from .xp2_world_congress_source import SOURCE as congress_source
+    from .xp2_trade_overview import stock_source_dependencies
+    from .source_verification import file_sha256
+    deps = stock_source_dependencies(reference, core_sha256=core_sha256, execution_image=execution_image)
+    deps.update(source_dependencies(execution_image=execution_image))
+    path = Path(__file__).resolve()
+    deps[str(path)] = file_sha256(path)
+    for path, digest in (STOCK_XP2_READER_REVALIDATION, congress_source):
+        deps[str(resolve_path(resource_root() / path).resolve())] = digest
+    return deps
+
+
 @dataclass(frozen=True)
 class _Catalogue:
     saved: object
@@ -75,6 +91,18 @@ class _Catalogue:
     observation: dict
     routes: dict
     origins: dict
+    bbg_display: bool
+
+
+def _bbg_display(saved, backend):
+    selected = getattr(saved, 'trade_overview_ui_selected', False)
+    if selected is False:
+        return False
+    from .xp2_trade_overview import supports
+    image = getattr(backend.core, '_civ6_host_execution_image', None)
+    if selected is not True or not supports(backend.captured_bundle.reference, image):
+        raise ValueError('Trade chooser requires its captured BBG display profile')
+    return True
 
 
 def _current(saved, catalogue, *, active):
@@ -85,7 +113,8 @@ def _current(saved, catalogue, *, active):
             or catalogue.sequence != c.sequence or catalogue.observation != c.observation
             or getattr(c, '_xp2_trade_catalogue', None) is not catalogue
             or getattr(c, 'explicit_trade_routes', None) != catalogue.routes
-            or getattr(c, 'explicit_trade_origins', None) != catalogue.origins):
+            or getattr(c, 'explicit_trade_origins', None) != catalogue.origins
+            or catalogue.bbg_display is not _bbg_display(saved, b)):
         raise ValueError('XP2 trade catalogue is stale or foreign')
     return b, c, p, identity
 
@@ -111,7 +140,9 @@ def catalogue(saved, observation, *, include_origins=True):
     before, sequence = deepcopy(observation), c.sequence
     c.transport.require_empty_native_queue()
     b.control(empty=True)
-    route_state = routes.catalog(p, before['turn'], player_id=before['player_id'])
+    bbg_display = _bbg_display(saved, b)
+    route_state = routes.catalog(p, before['turn'], player_id=before['player_id'],
+                                 bbg_display=bbg_display)
     origin_state = (origins.catalog(p, before['turn'], player_id=before['player_id'])
                     if include_origins else None)
     routes.compare_own(route_state, before)
@@ -124,7 +155,7 @@ def catalogue(saved, observation, *, include_origins=True):
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     record = _Catalogue(saved, b, c, p, identity, sequence, before,
-                        deepcopy(route_state), deepcopy(origin_state))
+                        deepcopy(route_state), deepcopy(origin_state), bbg_display)
     c.explicit_trade_routes = deepcopy(route_state)
     c.explicit_trade_origins = deepcopy(origin_state)
     c._xp2_trade_catalogue = record
@@ -141,6 +172,9 @@ def apply(saved, action, before):
     b, c, p, _ = _current(saved, record, active=True)
     if before != record.observation:
         raise ValueError('Trade action was not offered at this observation')
+    standard = getattr(saved, 'standard_trade', False) is True
+    if standard and c.trade_feedback is not None:
+        raise ValueError('Standard trade cannot use the BBG feedback owner')
     kind = action.get('kind') if type(action) is dict else None
     if kind == 'make_trade_route':
         module, state = routes, record.routes
@@ -158,7 +192,10 @@ def apply(saved, action, before):
     b.control(empty=True)
     count = c.publication_count
     player_id, turn = before['player_id'], before['turn']
-    request = module.request_source(action, state)
+    if kind == 'make_trade_route':
+        request = routes.request_source(action, state, bbg_display=record.bbg_display)
+    else:
+        request = origins.request_source(action, state)
     raw = p.runtime.evaluate_text(p.ui_child, request,
         b'@xp2_trade_route_request' if kind == 'make_trade_route' else b'@xp2_trade_origin_request')
     if raw != b'submitted' or len(p.actions.pending) != 1:
@@ -168,14 +205,14 @@ def apply(saved, action, before):
     p.deferred_events.drain_empty_receivers()
     # BBG can schedule route feedback in script callbacks. Consume that real
     # effect before publishing or taking the post-action observation.
-    feedback = c.flush_trade_feedback()
+    feedback = None if standard else c.flush_trade_feedback()
     if p.deferred_events.pending:
         raise RuntimeError('Trade feedback left deferred native events unconsumed')
     p.view_publisher.publish()
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     after = observe_player(p.runtime, p.ui_child, player_id)
-    refreshed_routes = routes.catalog(p, turn, player_id=player_id)
+    refreshed_routes = routes.catalog(p, turn, player_id=player_id, bbg_display=record.bbg_display)
     refreshed_origins = (origins.catalog(p, turn, player_id=player_id)
                          if record.origins is not None else None)
     routes.compare_own(refreshed_routes, after)
