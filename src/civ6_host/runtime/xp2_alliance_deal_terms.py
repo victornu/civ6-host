@@ -156,10 +156,14 @@ def check_archive(payload, offset, expected, alliance_subtype):
     """Verify one AGREEMENTS/ALLIANCE item in a submission/acceptance archive.
 
     The 56-byte AGREEMENTS ABI (kind/subtype/duration/giver/recipient/tail
-    offsets) is the layout pinned by the open-borders wire proof. The lock
-    flag and the value-type hash are verified on the live working deal in the
-    Lua INVENTORY (IsLocked/GetValueType against DB.MakeHash), not re-parsed
-    from these archive bytes.
+    offsets) is the layout pinned by the open-borders wire proof. OPEN GAP
+    (review be6ee5b7): no alliance submission/acceptance archive has been
+    captured yet, so a lock-byte/value-type-hash offset inside an alliance
+    archive item is NOT asserted — the 76-byte peace layout pins lock at 42,
+    but nothing pins that for the 56-byte AGREEMENTS layout. Lock and value
+    type are verified on the live working deal in the Lua INVENTORY
+    (IsLocked/GetValueType against DB.MakeHash); the archive ABI beyond the
+    pinned 56-byte fields awaits a real GameCore-qualified archive.
     """
     if len(payload) - offset < ITEM_BYTES:
         raise RuntimeError('Truncated native alliance term')
