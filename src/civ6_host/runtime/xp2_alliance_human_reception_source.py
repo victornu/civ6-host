@@ -48,10 +48,12 @@ CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
 READBACK_PROOF_SHA256 = 'be15eca6792e6c10675d4a9931de7ad12d262a5b86f035c5bb4d24a91a1b6b07'
 
 # Private UI drop (FTP aes zip sha 44a357d2..., embedded MANIFEST sha
-# 3195e4b127b4..., 11 scripts byte-exact verified).
+# 3195e4b127b4..., 11 scripts byte-exact verified). Resolved relative to the
+# configured resource root (CIV6_HOST_RESOURCE_ROOT) so no machine-specific
+# absolute path is baked into the source.
 UI_DROP_SHA256 = '44a357d2957dc50a8c4e7ca0be1340b7d6738dee8134fa0bb937ba1a953efce9'
 UI_MANIFEST_SHA256 = '3195e4b127b42c2997739e4bb8177042ea749f4a0383daa2e009d1a7c833599f'
-UI_DROP_ROOT = 'C:/civ6-private/alliances-ui-drop/3195e4b127b4'
+UI_DROP_REL = 'work/alliances-ui-drop/3195e4b127b4'
 
 # DealProposalAction enum pinned by the deal pipeline (deal_gold._SEND) plus
 # the support native source (e29ed1c3): CLOSED=8, REJECTED_PERMANENT=12.
