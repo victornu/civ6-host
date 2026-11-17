@@ -38,6 +38,36 @@ ALLIANCE_TAB_SHA256 = '560ba69ff03e0d26b557083da104c161357e7c705a2ece1555484a48f
 CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
 READBACK_PROOF_SHA256 = 'be15eca6792e6c10675d4a9931de7ad12d262a5b86f035c5bb4d24a91a1b6b07'
 
+# Private UI drop (FTP, aes zip sha 44a357d2..., embedded MANIFEST sha
+# 3195e4b127b4..., 11 scripts byte-exact verified): the real deal UI is
+# DiplomacyDealView (DealScreen.lua does NOT exist), plus ribbon support.
+UI_DROP_SHA256 = '44a357d2957dc50a8c4e7ca0be1340b7d6738dee8134fa0bb937ba1a953efce9'
+UI_MANIFEST_SHA256 = '3195e4b127b42c2997739e4bb8177042ea749f4a0383daa2e009d1a7c833599f'
+DEAL_VIEW_SHA256 = '34f5054482ba8afaf4d1641eeb2d5c7cc0819238a0b7fb807bfc0ce9d3ed7686'
+DEAL_VIEW_XP1_SHA256 = '0cd3b32a80725067e3c0d73a2dbab75ad968dd0cec8858fa297c07e85ceaf705'
+DEAL_VIEW_XP2_SHA256 = 'b873237d444943b66c81113d520e04f8f93a5a15121e1d50470f56855d2d5e01'
+RIBBON_SHA256 = '120f9f54161d41510a1f3c031b1a0284ee0b91289923d25b395baf3729a3477c'
+RIBBON_SUPPORT_SHA256 = 'c91b6f49d1a8e176dcd64ada171e33c490164bfcc442ec6d5fa4f3af1779be2b'
+
+# Custom MAKE_DEAL handler, registered in the base DiplomacyActionView.lua
+# (VIEW_SHA256) lines 2627-2629: SetDefaultHandlers("MAKE_DEAL");
+# StatementHandlers["MAKE_DEAL"].ApplyStatement = MakeDeal_ApplyStatement;
+# .TestValid = MakeDeal_TestValid. Reception: on an INITIAL/ACKNOWLEDGE
+# response MakeDeal_ApplyStatement (line 2545) calls ApplyStatement then
+# LuaEvents.DiploPopup_ShowMakeDeal(ms_OtherPlayerID) -> the deal UI opens on
+# the INCOMING working deal. Returning HUMAN_ACCEPT_DEAL/HUMAN_REFUSE_DEAL
+# with a human counterparty closes the session via
+# DiplomacyManager.CloseSession(ms_ActiveSessionID).
+MAKE_DEAL_HANDLER_REGISTRATION = ('Base/Assets/UI/DiplomacyActionView.lua', 2627)
+
+# Human answer path in DiplomacyDealView (DEAL_VIEW_SHA256): accept =
+# OnProposeOrAcceptDeal -> AreWorkingDealsEqual -> SendWorkingDeal(ACCEPTED)
+# (which also sends the POSITIVE response statement natively); refuse =
+# OnRefuseDeal -> SendWorkingDeal(REJECTED) then CloseSession; cancel =
+# SendWorkingDeal(CLOSED). Refusal of an AI-initiated deal uses
+# AddResponse(sessionID, local, "NEGATIVE") instead.
+ANSWER_ACTIONS = ('ACCEPTED', 'REJECTED', 'REJECTED_PERMANENT', 'CLOSED')
+
 # DealProposalAction enum pinned by the deal pipeline (_SEND in deal_gold):
 # ACCEPTED=1, REJECTED=2, ADJUSTED=3, PROPOSED=4, DEMANDED=5, EQUALIZE=6,
 # INSPECT=7, EQUALIZE_FAILED=10.

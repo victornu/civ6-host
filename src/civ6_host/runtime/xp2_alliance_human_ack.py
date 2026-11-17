@@ -45,21 +45,32 @@ def parse_reception(raw):
     return value
 
 
+# Real answer path from DiplomacyDealView.lua (DEAL_VIEW_SHA256): accept
+# requires AreWorkingDealsEqual then SendWorkingDeal(ACCEPTED) — which also
+# emits the POSITIVE response statement natively; refuse sends REJECTED then
+# closes the open session. All enum values are asserted live.
 _ACK = b"""
 assert(DealProposalAction.ACCEPTED==1 and DealProposalAction.REJECTED==2,
  'Native deal action enum changed')
-local deal=DealManager.GetWorkingDeal(DealDirection.INCOMING,me,other)
-assert(deal~=nil,'Incoming deal is absent')
-local before=deal:GetItemCount()
+if action==DealProposalAction.ACCEPTED then
+ assert(DealManager.AreWorkingDealsEqual(me,other)==true,'Working deals differ before accept')
+end
 assert(DealManager.SendWorkingDeal(action,me,other)==1,'Native deal answer refused')
-local after=DealManager.GetWorkingDeal(DealDirection.INCOMING,me,other)
-assert(after==nil or after:GetItemCount()<=before,'Native answer changed the incoming deal scope')
+if action==DealProposalAction.REJECTED then
+ local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
+ assert(sessionID~=nil,'Open session missing for refusal')
+ assert(DiplomacyManager.CloseSession(sessionID)==true,'Native session close refused')
+end
 return 'acknowledged'
 """
 
 
 def ack_source(prefix, pid, target, action):
-    """Eval sending the native ACK (ACCEPTED/REJECTED) for a received proposal."""
+    """Eval sending the native answer (ACCEPTED/REJECTED) for a received proposal.
+
+    Mirrors OnProposeOrAcceptDeal/OnRefuseDeal in the official
+    DiplomacyDealView.lua; SOURCE-ONLY, not wired to any session.
+    """
     if action not in ('ACCEPTED', 'REJECTED'):
         raise ValueError('Only ACCEPTED/REJECTED are alliance answers')
     if (type(pid) is not int or not 0 <= pid < 64 or type(target) is not int
