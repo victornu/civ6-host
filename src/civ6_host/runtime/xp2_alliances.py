@@ -141,9 +141,10 @@ for _,targetID in ipairs(targets) do
  if alliance~=-1 then
   local name=names[alliance]
   assert(name~=nil,'Unrecognized native alliance type')
+  -- The row and tab transmit GetAllianceTurnsUntilExpiration unchanged when
+  -- type ~= -1; only the signed-32 representation is checked, no bound.
   local remaining=diplomacy:GetAllianceTurnsUntilExpiration(targetID)
-  assert(type(remaining)=='number' and remaining%1==0 and remaining>0,
-   'Alliance expiration is not positive')
+  assert(type(remaining)=='number' and remaining%1==0,'Missing native alliance expiration')
   value='{"type":"'..name..'","turns_remaining":'..integer(remaining)..'}'
  end
  rows[#rows+1]='{"player_id":'..integer(targetID)..',"alliance":'..value..'}'
