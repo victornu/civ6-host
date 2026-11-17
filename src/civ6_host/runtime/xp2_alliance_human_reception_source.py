@@ -10,8 +10,12 @@ handler is NOT pinned and is never simulated.
 """
 from __future__ import annotations
 
-# Native statement wire of a received (empty) deal, pinned by
-# evidence/host-xp2-empty-deal-statement-native-source.json (sha 4f56dd2c...).
+# Native statement wire of a deal received on the AI seat (target-to-local
+# acknowledgement), pinned by evidence/host-xp2-empty-deal-statement-native-
+# source.json (sha 4f56dd2c...). This is the AI-seat wire only: the H2H
+# payload/runner envelopes (INITIAL/ACKNOWLEDGE, PROPOSED/REJECTED/CLOSED
+# with pair+sid) come from the support worker's native runner source on the
+# installed Core and are NOT asserted here.
 STATEMENT_SOURCE = ('evidence/host-xp2-empty-deal-statement-native-source.json',
                     '4f56dd2c6e0adf29cdb85ead16d96b336d3ef3721018d0299871aa9cb2820ae9')
 DRAFT_SOURCE = ('evidence/host-xp2-major-deal-draft-source.json',
@@ -77,5 +81,10 @@ DEAL_ACTIONS = {'ACCEPTED': 1, 'REJECTED': 2, 'ADJUSTED': 3, 'PROPOSED': 4,
 # MAKE_DEAL-family statement subtypes (official DiplomacySelections): the
 # received-deal dialogues offer only CHOICE_EXIT; the answer itself is sent
 # from the deal screen via SendWorkingDeal on the incoming working deal.
+# These are the AI-seat subtypes; the H2H subtype set is not asserted here.
 DEAL_SUBTYPES = ('MAKE_DEAL_AI_ACCEPT_DEAL', 'MAKE_DEAL_AI_REFUSE_DEAL',
                  'MAKE_DEAL_AI_ACCEPT_DEMAND', 'MAKE_DEAL_AI_REFUSE_DEMAND')
+
+# Stable local copy of the private UI drop (verified byte-exact against the
+# embedded MANIFEST, sha 3195e4b127b4...).
+UI_DROP_ROOT = 'C:/civ6-private/alliances-ui-drop/3195e4b127b4'

@@ -19,8 +19,9 @@ import json
 
 from . import xp2_alliance_human_reception_source as facts
 
-# The incoming-deal read reuses the frozen helper's INVENTORY (incoming
-# direction) so the locked alliance item is read exactly once, live enums.
+# The incoming-deal read consumes the v7 helper's non-terminal
+# inventory_source() (support-owned xp2_alliance_deal_terms.py); the locked
+# alliance item is read exactly once, with live enums.
 def reception_source(prefix, pid, target):
     """Eval reading the pending MAKE_DEAL identity and the incoming alliance term."""
     if (type(pid) is not int or not 0 <= pid < 64 or type(target) is not int
@@ -30,17 +31,20 @@ def reception_source(prefix, pid, target):
     return (prefix + b'\nlocal me,other=%d,%d\n' % (pid, target)
             + b"local deal=DealManager.GetWorkingDeal(DealDirection.INCOMING,me,other)\n"
             b"assert(deal~=nil,'Incoming deal is absent')\n"
-            + terms._inventory_body(True)
+            + terms.inventory_source()
+            + b"\nreadAllianceItem(deal,me,'outgoing')\nreadAllianceItem(deal,other,'incoming')\n"
             + b"""
-return '{"alliance_subtype":'..tostring(ALLIANCE)..',"terms":['..table.concat(allianceTerms,',')..']}'
+return '{"terms":['..table.concat(allianceTerms,',')..']}'
 """)
 
 
 def parse_reception(raw):
-    """Validate the reception readback (same shape as the deal-terms parse)."""
+    """Validate the reception readback through the v7 parse (bilateral)."""
     from . import xp2_alliance_deal_terms as terms
     value = terms.parse(raw, bilateral=True)
-    if not any(row['direction'] == 'incoming' for row in value['terms']):
+    terms_ = value['terms'] if isinstance(value, dict) and 'terms' in value else value
+    rows = terms_ if isinstance(terms_, list) else terms_.get('terms', [])
+    if not any(isinstance(row, dict) and row.get('direction') == 'incoming' for row in rows):
         raise ValueError('Received proposal carries no incoming alliance term')
     return value
 
@@ -49,19 +53,25 @@ def parse_reception(raw):
 # requires AreWorkingDealsEqual then SendWorkingDeal(ACCEPTED) — which also
 # emits the POSITIVE response statement natively; refuse sends REJECTED then
 # closes the open session. All enum values are asserted live.
+# Envelope: the open session is resolved and authenticated BEFORE any send
+# (lifetime), with pair and sid echoed back; accept mirrors
+# OnProposeOrAcceptDeal, refuse mirrors OnRefuseDeal (send REJECTED, then
+# CloseSession). Phase is asserted via IsSessionIDOpen around the send.
 _ACK = b"""
 assert(DealProposalAction.ACCEPTED==1 and DealProposalAction.REJECTED==2,
  'Native deal action enum changed')
+local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
+assert(sessionID~=nil and type(sessionID)=='number','Open session missing before answer')
+assert(DiplomacyManager.IsSessionIDOpen(sessionID)==true,'Session not open before answer')
 if action==DealProposalAction.ACCEPTED then
  assert(DealManager.AreWorkingDealsEqual(me,other)==true,'Working deals differ before accept')
 end
 assert(DealManager.SendWorkingDeal(action,me,other)==1,'Native deal answer refused')
 if action==DealProposalAction.REJECTED then
- local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
- assert(sessionID~=nil,'Open session missing for refusal')
  assert(DiplomacyManager.CloseSession(sessionID)==true,'Native session close refused')
 end
-return 'acknowledged'
+return '{"session_id":'..tostring(sessionID)..',"from":'..tostring(me)..',"to":'..tostring(other)..
+ ',"action":'..tostring(action)..'}'
 """
 
 
@@ -81,9 +91,27 @@ def ack_source(prefix, pid, target, action):
 
 
 def source_dependencies():
-    """Pins for the reception source (native statement evidence files)."""
+    """Full closure: native statement evidence + the 11-file private UI drop.
+
+    Verifies each UI script byte-exact against the drop's embedded MANIFEST
+    (sha 3195e4b127b4...) at UI_DROP_ROOT, plus the two evidence pins under
+    the resource root.
+    """
+    import hashlib
+    import json
+    from pathlib import Path
     from .paths import resource_root
     pins = {}
     for path, digest in (facts.STATEMENT_SOURCE, facts.DRAFT_SOURCE):
         pins[str((resource_root() / path).resolve())] = digest
+    drop = Path(facts.UI_DROP_ROOT)
+    manifest = drop / 'MANIFEST.json'
+    raw = manifest.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != facts.UI_MANIFEST_SHA256:
+        raise ValueError('Private UI drop manifest changed')
+    for row in json.loads(raw)['files']:
+        data = (drop / row['path']).read_bytes()
+        if len(data) != row['bytes'] or hashlib.sha256(data).hexdigest() != row['sha256']:
+            raise ValueError('Private UI drop script changed: ' + row['path'])
+        pins[str((drop / row['path']).resolve())] = row['sha256']
     return pins
