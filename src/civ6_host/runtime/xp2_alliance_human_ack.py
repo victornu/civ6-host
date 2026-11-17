@@ -21,21 +21,27 @@ from . import xp2_alliance_human_reception_source as facts
 # Reception: session identity + official open condition + PROPOSED-from-peer
 # provenance + TestValid + the locked alliance items via the v7 non-terminal
 # inventory_source().
-def reception_source(prefix, pid, target, deal_action=4):
+def reception_source(prefix, pid, target, deal_action=4, sequence=0, turn=0):
     """Eval establishing pair/sens/phase/provenance/validity + incoming term.
 
     deal_action is the received statement's DealAction; a received offer must
-    be PROPOSED (4) from the peer (native source 557445ff: INITIAL alone
-    proves neither PROPOSED nor an incoming item).
+    be PROPOSED (4) from the peer (native source 557445ff). sequence/turn are
+    the statement's event_sequence and game turn: with the sid they
+    authenticate the snapshot generation (anti-stale b4510f27 — a pair sid
+    is reusable after close/reopen, sid calc 0x188c00).
     """
     if (type(pid) is not int or not 0 <= pid < 64 or type(target) is not int
             or not 0 <= target < 64 or pid == target
-            or type(deal_action) is not int or not 0 <= deal_action < (1 << 32)):
+            or type(deal_action) is not int or not 0 <= deal_action < (1 << 32)
+            or type(sequence) is not int or sequence <= 0
+            or type(turn) is not int or not 0 <= turn < (1 << 31)):
         raise ValueError('Invalid human reception identity')
     from . import xp2_alliance_deal_terms as terms
-    return (prefix + b'\nlocal me,other,dealAction=%d,%d,%d\n' % (pid, target, deal_action)
+    return (prefix + b'\nlocal me,other,dealAction,sequence,reqTurn=%d,%d,%d,%d,%d\n'
+            % (pid, target, deal_action, sequence, turn)
             + b"""
 assert(Game.GetLocalPlayer()==me and Game.GetLocalObserver()==me,'Reception crossed its player')
+assert(Game.GetCurrentGameTurn()==reqTurn,'Reception snapshot generation differs')
 assert(Players[other] and Players[other]:IsMajor() and Players[me]:GetDiplomacy():HasMet(other),
  'Reception requires a met major')
 local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
@@ -62,7 +68,8 @@ assert(deal~=nil and deal:GetItemCount()>0 and deal:IsValid()==true,
             + terms.inventory_source()
             + b"\nreadAllianceItem(deal,me,'outgoing')\nreadAllianceItem(deal,other,'incoming')\n"
             + b"""
-return '{"session_id":'..tostring(sessionID)..',"from":'..tostring(other)..',"to":'..tostring(me)..
+return '{"session_id":'..tostring(sessionID)..',"event_sequence":'..tostring(sequence)..
+ ',"turn":'..tostring(reqTurn)..',"from":'..tostring(other)..',"to":'..tostring(me)..
  ',"response_type":'..tostring(rt)..',"deal_action":'..tostring(dealAction)..
  ',"terms":['..table.concat(allianceTerms,',')..']}'
 """)
@@ -89,9 +96,12 @@ assert(DealProposalAction.ACCEPTED==1 and DealProposalAction.REJECTED==2 and
  'Native deal action enum changed')
 assert(DealProposalAction.CLOSED==8 and DealProposalAction.REJECTED_PERMANENT==12,
  'Native CLOSED/REJECTED_PERMANENT enum changed (support source e29ed1c3)')
+assert(Game.GetCurrentGameTurn()==reqTurn,'Answer snapshot generation differs')
 assert(Players[other]:IsHuman()==true,'Human answer path requires a human counterparty')
 local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
-if sessionID==nil then return '{"session_id":null,"sent":false}' end
+if sessionID==nil then
+ return '{"session_id":null,"event_sequence":'..tostring(sequence)..',"turn":'..tostring(reqTurn)..',"sent":false}'
+end
 assert(DiplomacyManager.IsSessionIDOpen(sessionID)==true,'Session not open before answer')
 local sent=false
 if action==DealProposalAction.ACCEPTED then
@@ -123,16 +133,19 @@ elseif action==DealProposalAction.REJECTED or action==DealProposalAction.CLOSED 
 else
  error('Unsupported alliance answer action')
 end
-return '{"session_id":'..tostring(sessionID)..',"from":'..tostring(me)..',"to":'..tostring(other)..
+return '{"session_id":'..tostring(sessionID)..',"event_sequence":'..tostring(sequence)..
+ ',"turn":'..tostring(reqTurn)..',"from":'..tostring(me)..',"to":'..tostring(other)..
  ',"action":'..tostring(action)..',"sent":'..tostring(sent)..'}'
 """
 
 
-def ack_source(prefix, pid, target, action, incoming=4, initiator=None):
+def ack_source(prefix, pid, target, action, incoming=4, initiator=None, sequence=0, turn=0):
     """Eval sending the native answer for a received proposal (source-only).
 
     action in ACCEPTED/REJECTED/CLOSED; incoming is the received statement's
     DealAction; initiator defaults to the counterparty (other-initiated).
+    sequence/turn authenticate the snapshot generation alongside the sid
+    (anti-stale b4510f27: pair sid is reusable after close/reopen).
     """
     if action not in ('ACCEPTED', 'REJECTED', 'CLOSED'):
         raise ValueError('Alliance answers are ACCEPTED/REJECTED/CLOSED')
@@ -142,10 +155,13 @@ def ack_source(prefix, pid, target, action, incoming=4, initiator=None):
         initiator = target
     if (type(pid) is not int or not 0 <= pid < 64 or type(target) is not int
             or not 0 <= target < 64 or pid == target
-            or type(initiator) is not int or not 0 <= initiator < 64):
+            or type(initiator) is not int or not 0 <= initiator < 64
+            or type(sequence) is not int or sequence <= 0
+            or type(turn) is not int or not 0 <= turn < (1 << 31)):
         raise ValueError('Invalid human ack identity')
-    return (prefix + b'\nlocal me,other,incoming,initiator=%d,%d,%d,%d\nlocal action=DealProposalAction.%s\n'
-            % (pid, target, incoming, initiator, action.encode('ascii')) + _ACK)
+    return (prefix + b'\nlocal me,other,incoming,initiator,sequence,reqTurn=%d,%d,%d,%d,%d,%d\n'
+            b'local action=DealProposalAction.%s\n'
+            % (pid, target, incoming, initiator, sequence, turn, action.encode('ascii')) + _ACK)
 
 
 def source_dependencies(*, execution_image=None, stock=False):

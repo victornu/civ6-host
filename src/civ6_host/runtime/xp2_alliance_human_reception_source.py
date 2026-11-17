@@ -72,6 +72,12 @@ REQUEST_SESSION_RVA = 0x6952CC
 SEND_WORKING_DEAL_CHAIN = (0x693BE0, 0x6D1E80, 0x58BFB0)
 HUMAN_ARCHIVE_KIND = 0xF06250E4
 RUNNER_CLOSE_RVA = 0xFC731E25
+# Anti-stale (support source b4510f27): a pair sid is REUSABLE after
+# close/reopen (sid calculation at rva 0x188c00), so sid+pair alone prove
+# nothing. Reception/answer must also authenticate event_sequence, the
+# snapshot generation/turn, lifetime phase and the deal itself before any
+# mutation; native existence is read, never computed to fabricate a proof.
+SID_CALC_RVA = 0x188C00
 
 # Handler registration in DiplomacyActionView.lua (VIEW_SHA256):
 #   2627: SetDefaultHandlers("MAKE_DEAL")
