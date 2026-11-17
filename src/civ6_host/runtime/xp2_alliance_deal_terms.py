@@ -84,23 +84,21 @@ COPY_ASSERT = (b"assert(copied and copied:GetItemCount()==count+allianceCount,"
                b"'Native adjusted copy changed the item count')\n")
 
 
-def _read(prefix, bilateral):
-    body = INVENTORY + b"""
-allianceInventory(me,other,'outgoing')
-"""
+def _inventory_body(bilateral):
+    """INVENTORY plus the per-direction calls; no return, composable."""
+    body = INVENTORY + b"\nallianceInventory(me,other,'outgoing')\n"
     if bilateral:
         body += b"allianceInventory(other,me,'incoming')\n"
-    body += b"""
-return '{"alliance_subtype":'..tostring(ALLIANCE)..',"terms":['..table.concat(allianceTerms,',')..']}'
-"""
-    return prefix + body
+    return body
 
 
 def read_source(prefix, *, bilateral=False):
     """Eval reading the locked alliance terms of the working OUTGOING deal."""
     if type(bilateral) is not bool:
         raise ValueError('Bilateral alliance read must be boolean')
-    return _read(prefix, bilateral)
+    return prefix + _inventory_body(bilateral) + b"""
+return '{"alliance_subtype":'..tostring(ALLIANCE)..',"terms":['..table.concat(allianceTerms,',')..']}'
+"""
 
 
 def parse(raw, *, bilateral=False):
@@ -127,38 +125,53 @@ def parse(raw, *, bilateral=False):
 
 
 def copy_source(prefix):
-    """Alliance-aware adjusted-copy verification (mirrors copy_adjusted_source)."""
-    return _read(prefix, True) + b"""
+    """Alliance-aware adjusted-copy verification (mirrors copy_adjusted_source).
+
+    Standalone eval: count/treatyCount are local zeros here; when api_worker
+    composes INVENTORY inside the common _items block, the common count and
+    treatyCount are in scope and COPY_ASSERT applies to them directly.
+    """
+    return (prefix + b'local count,treatyCount=0,0\n' + _inventory_body(True) + b"""
 DealManager.CopyIncomingToOutgoingWorkingDeal(me,other)
 assert(DealManager.AreWorkingDealsEqual(me,other)==true,'GameCore did not copy the adjusted terms')
 local copied=DealManager.GetWorkingDeal(DealDirection.OUTGOING,me,other)
-""" + COPY_ASSERT + b"if count>0 then copied:Validate() end\nreturn 'verified'\n"
+""" + COPY_ASSERT + b"if count+allianceCount>0 then copied:Validate() end\nreturn 'verified'\n")
 
 
 def expected_alliance(player_id, target, alliance_type, duration):
     """Archive expectation for one outgoing locked alliance item.
 
-    The duration comes from the native working-deal read, never from the
-    capture constant ALLIANCE_DURATION (data only).
+    Keeps the alliance type alongside the duration. The duration comes from
+    the native working-deal read, never from the capture constant
+    ALLIANCE_DURATION (data only).
     """
     if alliance_type not in ALLIANCE_TYPES:
         raise ValueError('Unknown alliance type')
     if type(duration) is not int or not -(1 << 31) <= duration < (1 << 31):
         raise ValueError('Invalid alliance archive duration')
-    return {(player_id, target): duration}
+    return {(player_id, target): (duration, alliance_type)}
 
 
 def check_archive(payload, offset, expected, alliance_subtype):
-    """Verify one AGREEMENTS/ALLIANCE item in a submission/acceptance archive."""
+    """Verify one AGREEMENTS/ALLIANCE item in a submission/acceptance archive.
+
+    The 56-byte AGREEMENTS ABI (kind/subtype/duration/giver/recipient/tail
+    offsets) is the layout pinned by the open-borders wire proof. The lock
+    flag and the value-type hash are verified on the live working deal in the
+    Lua INVENTORY (IsLocked/GetValueType against DB.MakeHash), not re-parsed
+    from these archive bytes.
+    """
     if len(payload) - offset < ITEM_BYTES:
         raise RuntimeError('Truncated native alliance term')
     kind, = struct.unpack_from('<I', payload, offset + KIND_OFFSET)
     subtype, = struct.unpack_from('<I', payload, offset + SUBTYPE_OFFSET)
     duration, giver, recipient = struct.unpack_from('<III', payload, offset + DURATION_OFFSET)
     tail = struct.unpack_from('<III', payload, offset + TAIL_OFFSET)
+    entry = expected.pop((giver, recipient), None)
     if (kind != KIND or subtype != alliance_subtype or tail != TAIL
-            or expected.pop((giver, recipient), None) % (1 << 32) != duration):
+            or entry is None or entry[0] % (1 << 32) != duration):
         raise RuntimeError('Native deal archives contain different alliance terms')
+    return entry[1]
 
 
 def request_source(pid, turn, target, key, *, configuration, execution_image, counterparty):
