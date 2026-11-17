@@ -15,7 +15,8 @@ stay explicitly non-qualified because no team game is in the qualified capture.
 """
 from __future__ import annotations
 
-SCHEMA = 'civ6-host.diplomacy-overview.v9'
+# Public alliance view schema; must match contracts/alliances.py (claude lot).
+SCHEMA = 'civ6-host.alliances.v1'
 
 VIEW_SHA256 = '246409606568dc3f6f2b913334dbc626d9b59e81efc02df0d28409a6ae959cfc'
 ALLIANCE_ROW_SHA256 = '34990895aecfa4330b026939fc214b8f041caa231ecdc0f69ee9b8b86e4772aa'

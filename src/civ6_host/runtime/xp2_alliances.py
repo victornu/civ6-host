@@ -151,6 +151,7 @@ def _source(overview) -> bytes:
 
 
 def parse(overview, raw):
+    """Public alliance view (contracts/alliances.py shape) from a raw readback."""
     from civ6_host.contracts import diplomacy_overview
     pid, turn = overview['player_id'], overview['turn']
     diplomacy_overview.validate(overview, pid, turn)
@@ -160,17 +161,21 @@ def parse(overview, raw):
     targets = overview['targets']
     if (type(rows) is not list or len(rows) != len(targets)
             or any(type(row) is not dict or set(row) != {'player_id', 'alliance'}
-                   or type(row['player_id']) is not int or row['player_id'] != target['player_id']
+                   or type(row['player_id']) is not int
                    or not (row['alliance'] is None or (
                        type(row['alliance']) is dict
                        and set(row['alliance']) == {'type', 'turns_remaining'}
                        and row['alliance']['type'] in facts.ALLIANCE_TYPES
                        and type(row['alliance']['turns_remaining']) is int
-                       and row['alliance']['turns_remaining'] > 0))
-                   for row, target in zip(rows, targets))):
+                       and -(1 << 31) <= row['alliance']['turns_remaining'] < (1 << 31)))
+                   for row in rows)):
+        raise ValueError('Malformed XP2 alliance readback')
+    by_id = {row['player_id']: row['alliance'] for row in rows}
+    if set(by_id) != {target['player_id'] for target in targets}:
         raise ValueError('XP2 alliances differ from the current met targets')
-    return dict(overview, schema=SCHEMA,
-                targets=[dict(target, alliance=row['alliance']) for row, target in zip(rows, targets)])
+    # The public view is ordered and unique by target, like the contract.
+    view = [dict(player_id=target_id, alliance=by_id[target_id]) for target_id in sorted(by_id)]
+    return dict(schema=SCHEMA, player_id=pid, turn=turn, targets=view)
 
 
 def read(prefix, overview):
