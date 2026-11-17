@@ -28,6 +28,9 @@ NATIVE_VARIANT_TYPE = 22
 NATIVE_VARIANT_FLAGS = 1090519040
 DEAL_ACTION = 0
 RESPONDING_TO_DEAL_ACTION = 0
+# Received-offer action pinned by 557445ff: a real incoming offer is
+# DealProposalAction.PROPOSED (4); INITIAL alone proves nothing.
+PROPOSAL_DEAL_ACTION = 4
 EXTRA_KEYS = {'encoded_native_deal': 653299807, 'DealAction': 1009080843,
               'RespondingToDealAction': 4263390813}
 DEAL_POINTER_ROLE = 'serialized through deal object virtual slot 0x1c0; leave opaque in native argument map'

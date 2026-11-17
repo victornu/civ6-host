@@ -1,25 +1,37 @@
 """Source adapter for a human seat receiving an alliance proposal (MAKE_DEAL).
 
-SOURCE-ONLY (lot 98d405f3, corrections 2e608d3d/28d7fb8a, review 03a6da9f):
-reception_source establishes pair/direction/phase/validity exactly like the
-official handler (MakeDeal_ApplyStatement open condition + MakeDeal_TestValid)
-and reads the locked alliance items through the v7 helper's non-terminal
-inventory_source() (support-owned xp2_alliance_deal_terms.py: reads BOTH
-giver directions into allianceRows and provides publicAllianceTerms());
-parse_reception splits the session envelope from the inventory field and
-validates the terms via the v7 parse. ack_source mirrors the loaded XP2
-DiplomacyDealView (0cd3b32a...) answer path with anti-stale authentication
-(b4510f27): the session is matched against the authenticated reception
-snapshot (sid + event_sequence + initiator, IsSessionIDOpen) BEFORE any
-send; with no matching open session nothing is sent. Statement fields are
-taken from the HEAD of the live pending-statement ledger (the entry itself,
-never free-standing ints — review 0cff04c6), and the envelope carries an
-explicit provenance field (native_event|ui_derived, arbitrage 9fea8f08);
-the PROPOSED-from-peer gate is asserted only for native_event. The human
-subtype check uses the official name compare GetKeyName(subtype)=='NONE'
-(ActionView 2548/2759), not the unproven AI-seat wire hash. SendWorkingDeal's
-return is not asserted after the mutation (the official UI ignores its
-value). Archive item checking is delegated to the spy's
+SOURCE-ONLY (lot 98d405f3, corrections 2e608d3d/28d7fb8a, reviews
+03a6da9f/0cff04c6/f14c995f): reception_source establishes pair/direction/
+phase/validity exactly like the official handler (MakeDeal_ApplyStatement
+open condition + MakeDeal_TestValid) and reads the locked alliance items
+through the v7 helper's non-terminal inventory_source() (support-owned
+xp2_alliance_deal_terms.py: reads BOTH giver directions into allianceRows
+and provides publicAllianceTerms()); parse_reception splits the session
+envelope from the inventory field and validates the terms via the v7 parse.
+
+OWNER-BOUND (0bd09fe3/f14c995f): both evals take the backend owner and use
+the REAL Join/Retain — native_turn_continuation.validate(owner) returns the
+retained TurnContinuation whose pending DiplomacyChoicePending carries
+.statement (ledger entry: event_sequence TOP-LEVEL, named fields dict,
+source_proof_sha256) and .session (native join from
+native_pending_diplomacy.source/parse). No free ledger list, no positional
+head assumption, no free-standing ints: sid/participants/subtype/response/
+initiator/event_sequence all come from that retained entry and are re-read
+natively in Lua (IsSessionIDOpen(sid), GetSessionInfo participants,
+GetKeyName(subtype)=='NONE' per ActionView 2548/2759 — the AI-seat wire hash
+is not asserted). DealAction is never stored in the entry fields: under
+native_event it is attested by the consume-time projection against the
+pinned proof (source_proof_sha256 check Python-side) and published as
+PROPOSED (557445ff); under ui_derived (arbitrage 9fea8f08) the PROPOSED UI
+state was deduced by the official OnShow path and is published with that
+provenance, never as a native fact.
+
+ack_source mirrors the loaded XP2 DiplomacyDealView (0cd3b32a...) answer
+path with anti-stale authentication (b4510f27): the retained sid +
+event_sequence are matched against the authenticated reception snapshot
+BEFORE any send; without a match nothing is sent (matched=false).
+SendWorkingDeal's return is not asserted after the mutation (the official
+UI ignores its value). Archive item checking is delegated to the spy's
 xp2_alliance_archive_source.py.
 NOT WIRED: no session/borrowed/candidate, no H2H claim, no GameCore.
 """
@@ -31,56 +43,87 @@ from . import xp2_alliance_human_reception_source as facts
 
 
 # Statement provenance (arbitrage 9fea8f08): 'native_event' = a real
-# NativeDealAction was received; 'ui_derived' = the official OnShow/resume
-# path deduced the PROPOSED UI state from open sid + FromPlayer + INCOMING
-# copy. Both are legitimate, but the envelope must say which one it is.
+# NativeDealAction was received (attested by the pinned source proof);
+# 'ui_derived' = the official OnShow/resume path deduced the PROPOSED UI
+# state from open sid + FromPlayer + INCOMING copy. Both are legitimate,
+# but the envelope must say which one it is.
 PROVENANCES = ('native_event', 'ui_derived')
 
 
-def _statement_fields(pending_statements):
-    """Extract the authenticated fields from the HEAD of the pending ledger.
+def _owner_statement(owner, pid, target):
+    """Retained owner context -> (statement, identity) via the real Retain.
 
-    pending_statements is the owner's live ledger
-    (p.deferred_events.pending_diplomacy_statements); the entry is taken by
-    position, so no statement field can arrive as a free-standing int
-    (review 0cff04c6: injected-then-asserted integers were tautological).
-    Returns DealAction/ResponseType/subtype/Initiator/event_sequence.
+    native_turn_continuation.validate(owner) returns the retained
+    TurnContinuation; its pending DiplomacyChoicePending carries .statement
+    (ledger entry: event_sequence TOP-LEVEL, fields = named dict with
+    SessionID/FromPlayer/ToPlayer/StatementSubType/ResponseType/Initiator,
+    source_proof_sha256) and .session (native join: session_id/from_player/
+    to_player/is_open/...). The retained session must match the entry and
+    the requested pair. Returns (statement, identity dict).
     """
-    if type(pending_statements) is not list or len(pending_statements) == 0:
-        raise ValueError('Pending diplomacy statement ledger is empty')
-    entry = pending_statements[0]
-    if type(entry) is not dict or type(entry.get('fields')) is not dict:
-        raise ValueError('Malformed pending diplomacy statement entry')
-    fields = entry['fields']
-    def need_int(name):
-        value = fields.get(name)
+    from .native.native_turn_continuation import validate as validate_continuation
+    from .native.native_pending_diplomacy import DiplomacyChoicePending
+    c = validate_continuation(owner)
+    pending = c.pending
+    if type(pending) is not DiplomacyChoicePending:
+        raise ValueError('Retained continuation carries no diplomacy choice')
+    statement = pending.statement
+    session = pending.session
+    if type(statement) is not dict or type(statement.get('fields')) is not dict:
+        raise ValueError('Malformed retained statement entry')
+    f = statement['fields']
+    def need(name):
+        value = f.get(name)
         if type(value) is not int or not 0 <= value < (1 << 32):
             raise ValueError('Missing or invalid statement field: ' + name)
         return value
-    sequence = fields.get('event_sequence')
+    identity = {'session_id': need('SessionID'), 'from_player': need('FromPlayer'),
+                'to_player': need('ToPlayer'), 'subtype': need('StatementSubType'),
+                'response_type': need('ResponseType'), 'initiator': need('Initiator')}
+    sequence = statement.get('event_sequence')
     if type(sequence) is not int or sequence <= 0:
         raise ValueError('Missing or invalid statement event_sequence')
-    return {'deal_action': need_int('DealAction'), 'response_type': need_int('ResponseType'),
-            'subtype': need_int('subtype'), 'initiator': need_int('Initiator'),
-            'event_sequence': sequence}
+    identity['event_sequence'] = sequence
+    if (type(session) is not dict or session.get('player_id') != pid
+            or session.get('session_id') != identity['session_id']
+            or session.get('from_player') != identity['from_player']
+            or session.get('to_player') != identity['to_player']
+            or session.get('is_open') is not True
+            or identity['from_player'] != target or identity['to_player'] != pid):
+        raise ValueError('Retained statement/session does not match the reception pair')
+    return statement, identity
 
 
-# Reception: session identity + official open condition + TestValid + the
-# locked alliance items via the v7 non-terminal inventory_source() (reads
-# both directions, provides publicAllianceTerms()). Statement fields come
-# from the HEAD of the live pending-statement ledger, not from free ints.
-def reception_source(prefix, pid, target, pending_statements, turn, provenance):
+def _deal_action(statement, provenance):
+    """Received-offer action for the envelope.
+
+    DealAction is never stored in the entry fields (f14c995f): under
+    native_event the consume-time projection
+    (xp2_deal_draft.project_statement_fields) already validated it against
+    the pinned wire proof, attested here by source_proof_sha256, and the
+    received offer action is PROPOSED (557445ff). Under ui_derived the
+    PROPOSED state was deduced by OnShow and is published as provenance.
+    """
+    if statement.get('source_proof_sha256') != facts.STATEMENT_SOURCE[1]:
+        raise ValueError('Statement source proof differs from the pinned evidence')
+    return facts.PROPOSAL_DEAL_ACTION
+
+
+def _signed32(value):
+    return value if value < (1 << 31) else value - (1 << 32)
+
+
+# Reception: owner-bound retained statement + native session re-read +
+# official open condition + TestValid + locked items via v7 inventory_source().
+def reception_source(prefix, owner, pid, target, turn, provenance):
     """Eval establishing pair/sens/phase/provenance/validity + incoming term.
 
-    pending_statements is the live p.deferred_events.pending_diplomacy_
-    statements ledger; the head entry supplies DealAction/ResponseType/
-    subtype/Initiator/event_sequence. turn is the game turn: with the sid
-    and event_sequence they authenticate the snapshot generation (anti-stale
-    b4510f27 — a pair sid is reusable after close/reopen, sid calc
-    0x188c00). provenance (native_event|ui_derived) is published in the
-    envelope; the PROPOSED-from-peer gate (557445ff) is asserted only for
-    native_event — a ui_derived PROPOSED comes from the official OnShow
-    deduction (arbitrage 9fea8f08) and is recorded, not asserted as native.
+    owner is the backend owner; validate(owner) yields the retained
+    TurnContinuation whose pending statement supplies sid/participants/
+    subtype/response/initiator/event_sequence. turn is the game turn: with
+    the sid and event_sequence they authenticate the snapshot generation
+    (anti-stale b4510f27 - a pair sid is reusable after close/reopen, sid
+    calc 0x188c00).
     """
     if provenance not in PROVENANCES:
         raise ValueError('Provenance must be native_event or ui_derived')
@@ -88,51 +131,53 @@ def reception_source(prefix, pid, target, pending_statements, turn, provenance):
             or not 0 <= target < 64 or pid == target
             or type(turn) is not int or not 0 <= turn < (1 << 31)):
         raise ValueError('Invalid human reception identity')
-    st = _statement_fields(pending_statements)
+    statement, st = _owner_statement(owner, pid, target)
+    deal_action = _deal_action(statement, provenance)
     from . import xp2_alliance_deal_terms as terms
-    return (prefix + b'\nlocal me,other,dealAction,respType,stmtSubtype,sequence,reqTurn,provenance=%d,%d,%d,%d,%d,%d,%d,"%s"\n'
-            % (pid, target, st['deal_action'], st['response_type'], st['subtype'],
-               st['event_sequence'], turn, provenance.encode('ascii'))
+    return (prefix + b'\nlocal me,other,sid,fromP,toP,stmtSubtype,respType,sequence,reqTurn,provenance,dealAction=%d,%d,%d,%d,%d,%d,%d,%d,%d,"%s",%d\n'
+            % (pid, target, st['session_id'], st['from_player'], st['to_player'],
+               _signed32(st['subtype']), _signed32(st['response_type']),
+               st['event_sequence'], turn, provenance.encode('ascii'), deal_action)
             + b"""
 assert(Game.GetLocalPlayer()==me and Game.GetLocalObserver()==me,'Reception crossed its player')
 assert(Game.GetCurrentGameTurn()==reqTurn,'Reception snapshot generation differs')
 assert(Players[other] and Players[other]:IsMajor() and Players[me]:GetDiplomacy():HasMet(other),
  'Reception requires a met major')
-local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
-assert(sessionID~=nil and type(sessionID)=='number','Open MAKE_DEAL session missing')
-assert(DiplomacyManager.IsSessionIDOpen(sessionID)==true,'Session not open')
--- Only FromPlayer is proven on GetSessionInfo; ResponseType/subtype are read
--- from the received statement (ledger), never from the session info.
-local info=DiplomacyManager.GetSessionInfo(sessionID)
-assert(type(info)=='table' and info.FromPlayer==other,
- 'Session initiator differs from the received proposal sender')
--- Official open condition (ActionView 2548, name compare via GetKeyName as
--- at 2759): subtype must be 'NONE'. The AI-seat wire hash 3069842052 is NOT
--- asserted here - it is unproven for the human statement (review 0cff04c6).
+-- sid/participants come from the RETAINED statement entry (owner-bound) and
+-- are re-read natively: the open session must be exactly that sid with that
+-- speaker/recipient pair (same join as native_pending_diplomacy.source).
+assert(DiplomacyManager.IsSessionIDOpen(sid)==true,'Retained statement session is not open')
+local info=DiplomacyManager.GetSessionInfo(sid)
+assert(type(info)=='table' and ((info.FromPlayer==fromP and info.ToPlayer==toP) or
+ (info.FromPlayer==toP and info.ToPlayer==fromP)),'Session participants differ from the statement')
+assert(fromP==other and toP==me,'Received proposal is not addressed to the local player')
+-- Official open condition (ActionView 2548, name compare via GetKeyName at
+-- 2759): subtype must be 'NONE'. The AI-seat wire hash 3069842052 is NOT
+-- asserted here - unproven for the human statement (0cff04c6/f14c995f).
 assert(DiplomacyManager.GetKeyName(stmtSubtype)=='NONE',
  'Received statement subtype is not NONE')
 assert(type(DiplomacyResponseTypes)=='table','Missing native response enum')
 assert(respType==DiplomacyResponseTypes.INITIAL or respType==DiplomacyResponseTypes.ACKNOWLEDGE,
  'Received statement is not an initial/acknowledge proposal')
--- Native provenance (557445ff): a really received offer must be PROPOSED
--- from the peer. For ui_derived the PROPOSED state was deduced by OnShow and
--- is published as provenance, not asserted as a native fact.
+-- native_event: DealAction==PROPOSED was validated at consume time against
+-- the pinned proof (source_proof_sha256, checked Python-side). ui_derived
+-- (9fea8f08): PROPOSED deduced by OnShow, published as provenance only.
 if provenance=='native_event' then
  assert(dealAction==DealProposalAction.PROPOSED and DealProposalAction.PROPOSED==4,
   'Received offer is not an authenticated PROPOSED from the peer')
 end
--- MakeDeal_TestValid (2611): FromPlayer==other requires a valid non-empty
--- INCOMING working deal.
+-- MakeDeal_TestValid (2611): a valid non-empty INCOMING working deal.
 local deal=DealManager.GetWorkingDeal(DealDirection.INCOMING,me,other)
 assert(deal~=nil and deal:GetItemCount()>0 and deal:IsValid()==true,
  'Incoming deal missing, empty or invalid')
+local function u32(v) if v<0 then return v+4294967296 end return v end
 """
             + terms.inventory_source()
             + b"""
-return '{"session_id":'..tostring(sessionID)..',"event_sequence":'..tostring(sequence)..
- ',"turn":'..tostring(reqTurn)..',"from":'..tostring(other)..',"to":'..tostring(me)..
- ',"response_type":'..tostring(respType)..',"deal_action":'..tostring(dealAction)..
- ',"subtype":'..tostring(stmtSubtype)..',"provenance":"'..provenance..
+return '{"session_id":'..string.format('%.0f',sid)..',"event_sequence":'..tostring(sequence)..
+ ',"turn":'..tostring(reqTurn)..',"from":'..tostring(fromP)..',"to":'..tostring(toP)..
+ ',"response_type":'..string.format('%.0f',u32(respType))..',"deal_action":'..tostring(dealAction)..
+ ',"subtype":'..string.format('%.0f',u32(stmtSubtype))..',"provenance":"'..provenance..
  '","inventory":'..publicAllianceTerms()..'}'
 """)
 
@@ -160,8 +205,10 @@ def parse_reception(raw):
             or type(envelope['from']) is not int or type(envelope['to']) is not int
             or envelope['from'] == envelope['to']
             or type(envelope['response_type']) is not int
+            or not 0 <= envelope['response_type'] < (1 << 32)
             or type(envelope['deal_action']) is not int
             or type(envelope['subtype']) is not int
+            or not 0 <= envelope['subtype'] < (1 << 32)
             or envelope['provenance'] not in PROVENANCES
             or type(envelope['inventory']) is not dict):
         raise ValueError('Malformed human reception envelope')
@@ -173,13 +220,13 @@ def parse_reception(raw):
 
 
 # Answer: mirrors the loaded XP2 DiplomacyDealView (0cd3b32a) with anti-stale
-# authentication (b4510f27). The session is matched against the authenticated
-# reception snapshot (sid + event_sequence + initiator, IsSessionIDOpen)
-# BEFORE any send; without a matching open session nothing is sent and the
-# readback reports matched=false. Human counterparty guard; pending-deal ->
-# CLOSED; initiator==local -> no REJECTED; then CloseSession. SendWorkingDeal's
-# return is NOT asserted after the mutation (the official UI ignores its
-# value) - the call itself is the record.
+# authentication (b4510f27). The retained statement sid + event_sequence are
+# matched against the authenticated reception snapshot BEFORE any send; on
+# mismatch nothing is sent and the readback reports matched=false. Human
+# counterparty guard; pending-deal -> CLOSED; initiator==local -> no
+# REJECTED; then CloseSession. SendWorkingDeal's return is NOT asserted
+# after the mutation (the official UI ignores its value) - the call itself
+# is the record.
 _ACK = b"""
 assert(DealProposalAction.ACCEPTED==1 and DealProposalAction.REJECTED==2 and
  DealProposalAction.ADJUSTED==3 and DealProposalAction.PROPOSED==4,
@@ -190,23 +237,19 @@ assert(respType==DiplomacyResponseTypes.INITIAL or respType==DiplomacyResponseTy
  'Answered statement is not an initial/acknowledge proposal')
 assert(Game.GetCurrentGameTurn()==reqTurn,'Answer snapshot generation differs')
 assert(Players[other]:IsHuman()==true,'Human answer path requires a human counterparty')
--- Anti-stale (b4510f27 + review 0cff04c6): the pair sid is reusable after
--- close/reopen, so the open session must match the authenticated reception
--- snapshot (sid + event_sequence) and the CURRENT event_sequence re-read
--- from the live ledger head at call time must equal the reception one.
--- sequence is ledger-sourced, expectedSequence reception-sourced: the
--- comparison is not two caller-supplied ints. All BEFORE any mutation.
-local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
-if sessionID==nil or sessionID~=expectedSession or sequence~=expectedSequence then
- return '{"matched":false,"session_id":'..tostring(sessionID)..
+-- Anti-stale (b4510f27 + f14c995f): sid and sequence come from the RETAINED
+-- owner statement (re-validated at call time via validate(owner)), matched
+-- against the reception snapshot; the sid must be natively open with the
+-- statement participants. All BEFORE any mutation.
+assert(DiplomacyManager.IsSessionIDOpen(sid)==true,'Retained statement session is not open')
+if sid~=expectedSession or sequence~=expectedSequence then
+ return '{"matched":false,"session_id":'..string.format('%.0f',sid)..
   ',"event_sequence":'..tostring(sequence)..',"turn":'..tostring(reqTurn)..',"sent":false}'
 end
-assert(DiplomacyManager.IsSessionIDOpen(sessionID)==true,'Session not open before answer')
--- Only FromPlayer is proven on GetSessionInfo; cross-check it against the
--- initiator carried by the authenticated statement.
-local info=DiplomacyManager.GetSessionInfo(sessionID)
-assert(type(info)=='table' and info.FromPlayer==initiator,
- 'Session initiator differs from the authenticated statement')
+local info=DiplomacyManager.GetSessionInfo(sid)
+assert(type(info)=='table' and ((info.FromPlayer==fromP and info.ToPlayer==toP) or
+ (info.FromPlayer==toP and info.ToPlayer==fromP)),'Session participants differ from the statement')
+assert(fromP==initiator,'Statement initiator differs from the session speaker')
 local sent=false
 if action==DealProposalAction.ACCEPTED then
  -- Official accept only for incoming ACCEPTED/PROPOSED/ADJUSTED with equal deals.
@@ -231,28 +274,26 @@ elseif action==DealProposalAction.REJECTED or action==DealProposalAction.CLOSED 
  elseif initiator~=me then
   DealManager.SendWorkingDeal(DealProposalAction.REJECTED,me,other); sent=true
  end
- assert(DiplomacyManager.CloseSession(sessionID)==true,'Native session close refused')
+ assert(DiplomacyManager.CloseSession(sid)==true,'Native session close refused')
 else
  error('Unsupported alliance answer action')
 end
-return '{"matched":true,"session_id":'..tostring(sessionID)..',"event_sequence":'..tostring(sequence)..
+return '{"matched":true,"session_id":'..string.format('%.0f',sid)..',"event_sequence":'..tostring(sequence)..
  ',"turn":'..tostring(reqTurn)..',"from":'..tostring(me)..',"to":'..tostring(other)..
  ',"action":'..tostring(action)..',"provenance":"'..provenance..'","sent":'..tostring(sent)..'}'
 """
 
 
-def ack_source(prefix, pid, target, action, pending_statements, provenance,
+def ack_source(prefix, owner, pid, target, action, provenance,
                expected_session_id, expected_sequence, turn):
     """Eval sending the native answer for a received proposal (source-only).
 
-    action in ACCEPTED/REJECTED/CLOSED. expected_session_id/expected_sequence
-    come from parse_reception (the authenticated reception snapshot).
-    pending_statements is the live native ledger
-    (p.deferred_events.pending_diplomacy_statements); its HEAD entry is
-    re-read at call time, supplying incoming (DealAction), initiator,
-    respType and the CURRENT event_sequence — so the anti-stale
-    sequence==expectedSequence check compares a ledger-sourced value against
-    the reception-sourced one, never two caller-supplied ints (0cff04c6).
+    action in ACCEPTED/REJECTED/CLOSED. owner is re-validated at call time
+    (real Retain) supplying sid/participants/initiator/respType and the
+    CURRENT event_sequence; expected_session_id/expected_sequence come from
+    parse_reception (the authenticated reception snapshot). The match
+    sid==expectedSession + sequence==expectedSequence therefore compares an
+    owner-bound value against the reception record, never two free ints.
     """
     if action not in ('ACCEPTED', 'REJECTED', 'CLOSED'):
         raise ValueError('Alliance answers are ACCEPTED/REJECTED/CLOSED')
@@ -264,10 +305,12 @@ def ack_source(prefix, pid, target, action, pending_statements, provenance,
             or type(expected_sequence) is not int or expected_sequence <= 0
             or type(turn) is not int or not 0 <= turn < (1 << 31)):
         raise ValueError('Invalid human ack identity')
-    st = _statement_fields(pending_statements)
-    return (prefix + b'\nlocal me,other,incoming,initiator,respType,expectedSession,expectedSequence,sequence,reqTurn,provenance=%d,%d,%d,%d,%d,%d,%d,%d,%d,"%s"\n'
+    statement, st = _owner_statement(owner, pid, target)
+    incoming = _deal_action(statement, provenance)
+    return (prefix + b'\nlocal me,other,sid,fromP,toP,incoming,initiator,respType,expectedSession,expectedSequence,sequence,reqTurn,provenance=%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"%s"\n'
             b'local action=DealProposalAction.%s\n'
-            % (pid, target, st['deal_action'], st['initiator'], st['response_type'],
+            % (pid, target, st['session_id'], st['from_player'], st['to_player'],
+               incoming, st['initiator'], _signed32(st['response_type']),
                expected_session_id, expected_sequence, st['event_sequence'], turn,
                provenance.encode('ascii'), action.encode('ascii')) + _ACK)
 
