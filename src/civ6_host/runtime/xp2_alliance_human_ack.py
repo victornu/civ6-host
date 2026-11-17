@@ -22,9 +22,11 @@ GetKeyName(subtype)=='NONE' per ActionView 2548/2759 — the AI-seat wire hash
 is not asserted). DealAction is never stored in the entry fields and the
 receiver-wide source_proof_sha256 attests nothing per-statement (c86e3c9d):
 native_event with a deal_action is published only when the retained entry
-carries a per-statement deal projection (deal_reply); otherwise only
-ui_derived is publishable (arbitrage 9fea8f08: OnShow-deduced PROPOSED,
-recorded as provenance, never as a native fact).
+carries a per-statement deal projection — the receiver-seam sidecar
+``deal_offer`` (validated by xp2_alliance_reception_seam_source.check_sidecar,
+expected PROPOSED) or ``deal_reply``; otherwise only ui_derived is
+publicable (arbitrage 9fea8f08: OnShow-deduced PROPOSED, recorded as
+provenance, never as a native fact).
 
 ack_source mirrors the loaded XP2 DiplomacyDealView (0cd3b32a...) answer
 path with anti-stale authentication (b4510f27): the retained sid +
@@ -103,13 +105,22 @@ def _deal_action(statement, provenance):
     DealAction is never stored in the entry fields and source_proof_sha256 is
     only the receiver-wide constant (c86e3c9d): neither attests THIS
     statement's action. native_event is therefore publishable only when the
-    entry carries a per-statement deal projection (deal_reply, set by
-    a0_diplomacy_statement.consume when project_statement_fields ran on this
-    statement); otherwise the caller must use ui_derived, where the PROPOSED
-    state was deduced by the official OnShow path (9fea8f08).
+    entry carries a per-statement deal projection: the receiver-seam sidecar
+    ``deal_offer`` (xp2_alliance_reception_seam_source.check_sidecar, expected
+    PROPOSED) or ``deal_reply`` (outgoing projection set by
+    a0_diplomacy_statement.consume). Otherwise the caller must use
+    ui_derived, where the PROPOSED state was deduced by the official OnShow
+    path (9fea8f08).
     """
-    if provenance == 'native_event' and type(statement.get('deal_reply')) is not dict:
-        raise ValueError('native_event requires a per-statement deal projection (deal_reply); otherwise use ui_derived')
+    if provenance == 'native_event':
+        offer = statement.get('deal_offer')
+        if type(offer) is dict:
+            from . import xp2_alliance_reception_seam_source as seam
+            seam.check_sidecar(offer, expect_proposed=True)
+            return offer['action']
+        if type(statement.get('deal_reply')) is dict:
+            return facts.PROPOSAL_DEAL_ACTION
+        raise ValueError('native_event requires a per-statement deal projection (deal_offer/deal_reply); otherwise use ui_derived')
     return facts.PROPOSAL_DEAL_ACTION
 
 
