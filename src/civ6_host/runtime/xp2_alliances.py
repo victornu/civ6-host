@@ -1,11 +1,14 @@
 """XP2 alliance propose/renew requests and alliance state readback.
 
-Requests reuse the official overview dispatcher (OnSelectInitialDiplomacyStatement)
-with a proxied DiplomacyManager.RequestSession, exactly like the direct war or
-friendship routes; the expected statement type per choice comes from
-xp2_alliances_source. Alliance state is read back through the native
-GetAllianceType/GetAllianceTurnsUntilExpiration pair already used by the
-public relationships panel.
+Requests run the pinned official overview dispatcher
+(OnSelectInitialDiplomacyStatement) with a proxied DiplomacyManager
+.RequestSession, exactly like the existing direct routes; the dispatcher
+itself adds the locked AGREEMENTS/ALLIANCE deal item for propose choices and
+requests MAKE_DEAL, while CHOICE_RENEW_ALLIANCE requests RENEW_ALLIANCE. The
+expected statement type per choice comes from xp2_alliances_source. Alliance
+state is read back through the native GetAllianceType /
+GetAllianceTurnsUntilExpiration pair already used by the public
+relationships panel.
 """
 from __future__ import annotations
 
@@ -48,6 +51,7 @@ def request_source(pid: int, turn: int, target: int, key: str, *, configuration,
         raise ValueError('Invalid XP2 alliance initiation request')
     from . import xp2_diplomacy_overview_source as ui
     statement_name = facts.ALLIANCE_REQUESTS[key]
+    propose = key in facts.ALLIANCE_PROPOSALS
     profile = ui._load_profile()
     from .diplomacy_overview import _verify_capability_source
     _verify_capability_source()
@@ -70,6 +74,11 @@ if capability and not paused then
  end
 end
 assert(allowed,'Alliance choice is no longer available')
+'''
+    if propose:
+        validate += r'''
+assert(Players[target]:IsHuman()==false and DealManager.HasPendingDeal(pid,target)==false,
+ 'Outgoing alliance deal requires an AI counterparty without a pending deal')
 '''
     bindings = (b'\nlocal ms_LocalPlayerID=pid\nlocal ms_SelectedPlayerID=target\n'
                 + ui._function(profile, 'base', 'CanInitiateDiplomacyStatement'))
@@ -157,12 +166,11 @@ def parse(overview, raw):
                        and set(row['alliance']) == {'type', 'turns_remaining'}
                        and row['alliance']['type'] in facts.ALLIANCE_TYPES
                        and type(row['alliance']['turns_remaining']) is int
-                       and 0 < row['alliance']['turns_remaining'] <= facts.ALLIANCE_DURATION))
+                       and row['alliance']['turns_remaining'] > 0))
                    for row, target in zip(rows, targets))):
         raise ValueError('XP2 alliances differ from the current met targets')
-    public = dict(overview, schema=SCHEMA,
-                  targets=[dict(target, alliance=row['alliance']) for row, target in zip(rows, targets)])
-    return public
+    return dict(overview, schema=SCHEMA,
+                targets=[dict(target, alliance=row['alliance']) for row, target in zip(rows, targets)])
 
 
 def read(prefix, overview):

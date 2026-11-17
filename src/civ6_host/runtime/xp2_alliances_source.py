@@ -1,9 +1,17 @@
 """Static official XP2 alliance facts for propose/renew alliance requests.
 
-Facts come from the official Gathering Storm gameplay database of the retained
-capture (DiplomacySelections, DiplomacyStatementTypes, DiplomaticActions and
-DiplomaticActions_XP1, Alliances, AllianceEffects) and from the pinned official
-UI files. Team alliance variants (CHOICE_ALLIANCE_*_TEAM) stay unsupported.
+The request path is the pinned official XP1 overlay callback
+OnSelectInitialDiplomacyStatement (work/bbg751-turn-source-scope/
+war-confirmation/initial-diplomacy/source-profile.json): each
+CHOICE_ALLIANCE_<TYPE> builds an outgoing AGREEMENTS deal item with subtype
+DealAgreementTypes.ALLIANCE, value type DB.MakeHash("ALLIANCE_<TYPE>"),
+locked, then dispatches RequestSession(..., "MAKE_DEAL"); CHOICE_RENEW_ALLIANCE
+dispatches RequestSession(..., "RENEW_ALLIANCE") directly. The DB rows below
+(DiplomacySelections sorts 24-29 -> DIPLOACTION_*, DiplomaticActions,
+Alliances, AllianceEffects) are capture data only: eligibility, terms and the
+effective duration come from the native providers, never from these constants.
+Team variants CHOICE_ALLIANCE_*_TEAM share the exact same official branch; they
+stay explicitly non-qualified because no team game is in the qualified capture.
 """
 from __future__ import annotations
 
@@ -11,25 +19,29 @@ SCHEMA = 'civ6-host.diplomacy-overview.v9'
 
 VIEW_SHA256 = '246409606568dc3f6f2b913334dbc626d9b59e81efc02df0d28409a6ae959cfc'
 ALLIANCE_ROW_SHA256 = '34990895aecfa4330b026939fc214b8f041caa231ecdc0f69ee9b8b86e4772aa'
+PROFILE_PATH = 'work/bbg751-turn-source-scope/war-confirmation/initial-diplomacy/source-profile.json'
+PROFILE_SHA256 = '92f83b4e4b13b336529ed2f28b6552eb6958d16a5578ba5fea23f7fde5f48055'
 
-# GREETING selections (official DiplomacySelections rows, sorts 24-29):
-# choice key -> RequestSession statement type.
-ALLIANCE_REQUESTS = {
-    'CHOICE_ALLIANCE_RESEARCH': 'CREATE_RESEARCH_ALLIANCE',
-    'CHOICE_ALLIANCE_MILITARY': 'CREATE_MILITARY_ALLIANCE',
-    'CHOICE_ALLIANCE_ECONOMIC': 'CREATE_ECONOMIC_ALLIANCE',
-    'CHOICE_ALLIANCE_CULTURAL': 'CREATE_CULTURAL_ALLIANCE',
-    'CHOICE_ALLIANCE_RELIGIOUS': 'CREATE_RELIGIOUS_ALLIANCE',
-    'CHOICE_RENEW_ALLIANCE': 'RENEW_ALLIANCE',
+# Official callback: propose -> MAKE_DEAL (alliance item added by the pinned
+# overlay itself), renew -> RENEW_ALLIANCE.
+ALLIANCE_PROPOSALS = {
+    'CHOICE_ALLIANCE_RESEARCH': 'ALLIANCE_RESEARCH',
+    'CHOICE_ALLIANCE_MILITARY': 'ALLIANCE_MILITARY',
+    'CHOICE_ALLIANCE_ECONOMIC': 'ALLIANCE_ECONOMIC',
+    'CHOICE_ALLIANCE_CULTURAL': 'ALLIANCE_CULTURAL',
+    'CHOICE_ALLIANCE_RELIGIOUS': 'ALLIANCE_RELIGIOUS',
 }
-# Same rows' DiplomaticActionType column.
+RENEW_CHOICE = 'CHOICE_RENEW_ALLIANCE'
+ALLIANCE_REQUESTS = {**{key: 'MAKE_DEAL' for key in ALLIANCE_PROPOSALS},
+                     RENEW_CHOICE: 'RENEW_ALLIANCE'}
+# Capture data: the GREETING rows' DiplomaticActionType column (sorts 24-29).
 ALLIANCE_ACTIONS = {
     'CHOICE_ALLIANCE_RESEARCH': 'DIPLOACTION_ALLIANCE_RESEARCH',
     'CHOICE_ALLIANCE_MILITARY': 'DIPLOACTION_ALLIANCE_MILITARY',
     'CHOICE_ALLIANCE_ECONOMIC': 'DIPLOACTION_ALLIANCE_ECONOMIC',
     'CHOICE_ALLIANCE_CULTURAL': 'DIPLOACTION_ALLIANCE_CULTURAL',
     'CHOICE_ALLIANCE_RELIGIOUS': 'DIPLOACTION_ALLIANCE_RELIGIOUS',
-    'CHOICE_RENEW_ALLIANCE': 'DIPLOACTION_RENEW_ALLIANCE',
+    RENEW_CHOICE: 'DIPLOACTION_RENEW_ALLIANCE',
 }
 ALLIANCE_CHOICE_SORTS = {
     'CHOICE_ALLIANCE_RESEARCH': 24,
@@ -37,7 +49,7 @@ ALLIANCE_CHOICE_SORTS = {
     'CHOICE_ALLIANCE_ECONOMIC': 26,
     'CHOICE_ALLIANCE_CULTURAL': 27,
     'CHOICE_ALLIANCE_RELIGIOUS': 28,
-    'CHOICE_RENEW_ALLIANCE': 29,
+    RENEW_CHOICE: 29,
 }
 # Alliances table rows / DiplomacyActions_XP1.AllianceType values.
 ALLIANCE_TYPES = (
@@ -47,14 +59,9 @@ ALLIANCE_TYPES = (
     'ALLIANCE_MILITARY',
     'ALLIANCE_RELIGIOUS',
 )
-CHOICE_BY_ALLIANCE_TYPE = {
-    'ALLIANCE_RESEARCH': 'CHOICE_ALLIANCE_RESEARCH',
-    'ALLIANCE_MILITARY': 'CHOICE_ALLIANCE_MILITARY',
-    'ALLIANCE_ECONOMIC': 'CHOICE_ALLIANCE_ECONOMIC',
-    'ALLIANCE_CULTURAL': 'CHOICE_ALLIANCE_CULTURAL',
-    'ALLIANCE_RELIGIOUS': 'CHOICE_ALLIANCE_RELIGIOUS',
-}
-# Team variants offered by the XP2 overlay remain non-executable.
+CHOICE_BY_ALLIANCE_TYPE = {value: key for key, value in ALLIANCE_PROPOSALS.items()}
+# Same official branch as the non-team choices; provisional non-qualified state
+# until a team-game capture qualifies their conditions.
 ALLIANCE_TEAM_CHOICES = frozenset({
     'CHOICE_ALLIANCE_RESEARCH_TEAM', 'CHOICE_ALLIANCE_MILITARY_TEAM',
     'CHOICE_ALLIANCE_ECONOMIC_TEAM', 'CHOICE_ALLIANCE_CULTURAL_TEAM',
@@ -62,15 +69,17 @@ ALLIANCE_TEAM_CHOICES = frozenset({
 })
 ALLIANCE_CHOICES = frozenset(ALLIANCE_REQUESTS)
 
-# DiplomaticActions: DIPLOACTION_ALLIANCE has Agreement set and Duration 30;
-# DIPLOACTION_RENEW_ALLIANCE requires RequiresAllianceSoonToEnd and Duration 30.
-# Every alliance action requires CIVIC_CIVIL_SERVICE for initiator and target.
+# Capture data only (DiplomaticActions): DIPLOACTION_ALLIANCE has Agreement set
+# and Duration 30; DIPLOACTION_RENEW_ALLIANCE requires alliance soon to end and
+# Duration 30; every alliance action requires CIVIC_CIVIL_SERVICE both sides.
+# Never enforced in Python: the effective values come from the loaded rules.
 ALLIANCE_DURATION = 30
 ALLIANCE_PREREQ_CIVIC = 'CIVIC_CIVIL_SERVICE'
 RENEW_REQUIRES_ALLIANCE_SOON_TO_END = True
 
-# Statement types MAKE_ALLIANCE / RENEW_ALLIANCE with subtypes and the
-# POSITIVE/NEGATIVE/EXIT response selections from DiplomacySelections.
+# AI-side statement types and response selections (DiplomacyStatementTypes /
+# DiplomacySelections): MAKE_ALLIANCE / RENEW_ALLIANCE with FROM_AI / FROM_HUMAN
+# / EXIT subtypes offering POSITIVE / NEGATIVE / EXIT.
 ALLIANCE_STATEMENT_TYPES = (
     'MAKE_ALLIANCE', 'RENEW_ALLIANCE', 'CREATE_RESEARCH_ALLIANCE',
     'CREATE_MILITARY_ALLIANCE', 'CREATE_ECONOMIC_ALLIANCE',
@@ -89,5 +98,4 @@ NO_ALLIANCE = -1
 def source_dependencies(xp2_view_path):
     """Pin the alliance row overlay in addition to the XP2 view closure."""
     from . import xp2_diplomatic_relationships as relationships
-    pins = dict(relationships.source_dependencies(xp2_view_path))
-    return pins
+    return dict(relationships.source_dependencies(xp2_view_path))
