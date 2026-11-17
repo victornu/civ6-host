@@ -9,6 +9,16 @@ expected statement type per choice comes from xp2_alliances_source. Alliance
 state is read back through the native GetAllianceType /
 GetAllianceTurnsUntilExpiration pair already used by the public
 relationships panel.
+
+Readback seam split (proof handoffs/private-env/alliances/readback/
+host-xp2-alliance-readback-source.json, sha256 be15eca6...): this module owns
+exactly the pact seam — active/type/turns via GetAllianceType +
+GetAllianceTurnsUntilExpiration for every met major including humans
+(AddIntelAlliance has no human restriction, unlike AddIntelRelationship).
+The progression getters GetAllianceLevel / GetAlliancePointsPerTurn /
+GetAllianceTurnsThisLevel / GetAllianceTurnsToNextLevel and the
+ALLIANCE_POINTS_MULTIPLIER division belong solely to the spy worker's
+xp2_alliance_readback_source.py and are never re-read here.
 """
 from __future__ import annotations
 
