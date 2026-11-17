@@ -60,7 +60,10 @@ local function allianceInventory(giver,receiver,direction)
  for _,item in ipairs(items) do
   assert(item:IsLocked()==true,'Alliance agreement is not locked')
   local duration=item:GetDuration()
-  assert(type(duration)=='number' and duration%1==0 and duration>0,'Invalid alliance item duration')
+  -- Signed-32 representation only; the value itself is set by the native
+  -- builder (pinned overlay adds the item, pDeal:Validate()) and consumed by
+  -- the archive; never bounded from the capture DB here.
+  assert(type(duration)=='number' and duration%1==0,'Invalid alliance item duration')
   local name=ALLIANCE_HASH[item:GetValueType()]
   assert(name~=nil,'Unknown alliance value type')
   allianceCount=allianceCount+1
@@ -114,7 +117,8 @@ def parse(raw, *, bilateral=False):
             or any(type(row) is not dict or set(row) != {'direction', 'type', 'duration'}
                    or row['direction'] not in expected_directions
                    or row['type'] not in ALLIANCE_TYPES
-                   or type(row['duration']) is not int or row['duration'] <= 0
+                   or type(row['duration']) is not int
+                   or not -(1 << 31) <= row['duration'] < (1 << 31)
                    for row in terms)):
         raise ValueError('Malformed alliance deal terms')
     if len({row['direction'] for row in terms}) != len(terms):
@@ -139,7 +143,7 @@ def expected_alliance(player_id, target, alliance_type, duration):
     """
     if alliance_type not in ALLIANCE_TYPES:
         raise ValueError('Unknown alliance type')
-    if type(duration) is not int or duration <= 0:
+    if type(duration) is not int or not -(1 << 31) <= duration < (1 << 31):
         raise ValueError('Invalid alliance archive duration')
     return {(player_id, target): duration}
 
@@ -153,7 +157,7 @@ def check_archive(payload, offset, expected, alliance_subtype):
     duration, giver, recipient = struct.unpack_from('<III', payload, offset + DURATION_OFFSET)
     tail = struct.unpack_from('<III', payload, offset + TAIL_OFFSET)
     if (kind != KIND or subtype != alliance_subtype or tail != TAIL
-            or expected.pop((giver, recipient), None) != duration):
+            or expected.pop((giver, recipient), None) % (1 << 32) != duration):
         raise RuntimeError('Native deal archives contain different alliance terms')
 
 
