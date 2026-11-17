@@ -19,12 +19,12 @@ head assumption, no free-standing ints: sid/participants/subtype/response/
 initiator/event_sequence all come from that retained entry and are re-read
 natively in Lua (IsSessionIDOpen(sid), GetSessionInfo participants,
 GetKeyName(subtype)=='NONE' per ActionView 2548/2759 — the AI-seat wire hash
-is not asserted). DealAction is never stored in the entry fields: under
-native_event it is attested by the consume-time projection against the
-pinned proof (source_proof_sha256 check Python-side) and published as
-PROPOSED (557445ff); under ui_derived (arbitrage 9fea8f08) the PROPOSED UI
-state was deduced by the official OnShow path and is published with that
-provenance, never as a native fact.
+is not asserted). DealAction is never stored in the entry fields and the
+receiver-wide source_proof_sha256 attests nothing per-statement (c86e3c9d):
+native_event with a deal_action is published only when the retained entry
+carries a per-statement deal projection (deal_reply); otherwise only
+ui_derived is publishable (arbitrage 9fea8f08: OnShow-deduced PROPOSED,
+recorded as provenance, never as a native fact).
 
 ack_source mirrors the loaded XP2 DiplomacyDealView (0cd3b32a...) answer
 path with anti-stale authentication (b4510f27): the retained sid +
@@ -71,6 +71,9 @@ def _owner_statement(owner, pid, target):
     session = pending.session
     if type(statement) is not dict or type(statement.get('fields')) is not dict:
         raise ValueError('Malformed retained statement entry')
+    from .native.native_diplomacy_statement import PROOF_SHA256
+    if statement.get('source_proof_sha256') != PROOF_SHA256:
+        raise ValueError('Retained statement was not produced by the pinned native receiver')
     f = statement['fields']
     def need(name):
         value = f.get(name)
@@ -97,15 +100,16 @@ def _owner_statement(owner, pid, target):
 def _deal_action(statement, provenance):
     """Received-offer action for the envelope.
 
-    DealAction is never stored in the entry fields (f14c995f): under
-    native_event the consume-time projection
-    (xp2_deal_draft.project_statement_fields) already validated it against
-    the pinned wire proof, attested here by source_proof_sha256, and the
-    received offer action is PROPOSED (557445ff). Under ui_derived the
-    PROPOSED state was deduced by OnShow and is published as provenance.
+    DealAction is never stored in the entry fields and source_proof_sha256 is
+    only the receiver-wide constant (c86e3c9d): neither attests THIS
+    statement's action. native_event is therefore publishable only when the
+    entry carries a per-statement deal projection (deal_reply, set by
+    a0_diplomacy_statement.consume when project_statement_fields ran on this
+    statement); otherwise the caller must use ui_derived, where the PROPOSED
+    state was deduced by the official OnShow path (9fea8f08).
     """
-    if statement.get('source_proof_sha256') != facts.STATEMENT_SOURCE[1]:
-        raise ValueError('Statement source proof differs from the pinned evidence')
+    if provenance == 'native_event' and type(statement.get('deal_reply')) is not dict:
+        raise ValueError('native_event requires a per-statement deal projection (deal_reply); otherwise use ui_derived')
     return facts.PROPOSAL_DEAL_ACTION
 
 
