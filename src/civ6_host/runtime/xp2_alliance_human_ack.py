@@ -18,15 +18,22 @@ import json
 from . import xp2_alliance_human_reception_source as facts
 
 
-# Reception: session identity + official open condition + TestValid + the
-# locked alliance items via the v7 non-terminal inventory_source().
-def reception_source(prefix, pid, target):
-    """Eval establishing pair/sens/phase/validity and reading the incoming term."""
+# Reception: session identity + official open condition + PROPOSED-from-peer
+# provenance + TestValid + the locked alliance items via the v7 non-terminal
+# inventory_source().
+def reception_source(prefix, pid, target, deal_action=4):
+    """Eval establishing pair/sens/phase/provenance/validity + incoming term.
+
+    deal_action is the received statement's DealAction; a received offer must
+    be PROPOSED (4) from the peer (native source 557445ff: INITIAL alone
+    proves neither PROPOSED nor an incoming item).
+    """
     if (type(pid) is not int or not 0 <= pid < 64 or type(target) is not int
-            or not 0 <= target < 64 or pid == target):
+            or not 0 <= target < 64 or pid == target
+            or type(deal_action) is not int or not 0 <= deal_action < (1 << 32)):
         raise ValueError('Invalid human reception identity')
     from . import xp2_alliance_deal_terms as terms
-    return (prefix + b'\nlocal me,other=%d,%d\n' % (pid, target)
+    return (prefix + b'\nlocal me,other,dealAction=%d,%d,%d\n' % (pid, target, deal_action)
             + b"""
 assert(Game.GetLocalPlayer()==me and Game.GetLocalObserver()==me,'Reception crossed its player')
 assert(Players[other] and Players[other]:IsMajor() and Players[me]:GetDiplomacy():HasMet(other),
@@ -43,6 +50,9 @@ assert(type(DiplomacyResponseTypes)=='table','Missing native response enum')
 local rt=info.ResponseType
 assert(rt==DiplomacyResponseTypes.INITIAL or rt==DiplomacyResponseTypes.ACKNOWLEDGE,
  'Received statement is not an initial/acknowledge proposal')
+-- Native provenance (557445ff): the offer must be PROPOSED from the peer.
+assert(dealAction==DealProposalAction.PROPOSED and DealProposalAction.PROPOSED==4,
+ 'Received offer is not an authenticated PROPOSED from the peer')
 -- MakeDeal_TestValid (2611): FromPlayer==other requires a valid non-empty
 -- INCOMING working deal.
 local deal=DealManager.GetWorkingDeal(DealDirection.INCOMING,me,other)
@@ -53,7 +63,8 @@ assert(deal~=nil and deal:GetItemCount()>0 and deal:IsValid()==true,
             + b"\nreadAllianceItem(deal,me,'outgoing')\nreadAllianceItem(deal,other,'incoming')\n"
             + b"""
 return '{"session_id":'..tostring(sessionID)..',"from":'..tostring(other)..',"to":'..tostring(me)..
- ',"response_type":'..tostring(rt)..',"terms":['..table.concat(allianceTerms,',')..']}'
+ ',"response_type":'..tostring(rt)..',"deal_action":'..tostring(dealAction)..
+ ',"terms":['..table.concat(allianceTerms,',')..']}'
 """)
 
 
@@ -76,7 +87,8 @@ _ACK = b"""
 assert(DealProposalAction.ACCEPTED==1 and DealProposalAction.REJECTED==2 and
  DealProposalAction.ADJUSTED==3 and DealProposalAction.PROPOSED==4,
  'Native deal action enum changed')
-assert(type(DealProposalAction.CLOSED)=='number','Native CLOSED action unavailable')
+assert(DealProposalAction.CLOSED==8 and DealProposalAction.REJECTED_PERMANENT==12,
+ 'Native CLOSED/REJECTED_PERMANENT enum changed (support source e29ed1c3)')
 assert(Players[other]:IsHuman()==true,'Human answer path requires a human counterparty')
 local sessionID=DiplomacyManager.FindOpenSessionID(me,other)
 if sessionID==nil then return '{"session_id":null,"sent":false}' end

@@ -53,9 +53,25 @@ UI_DROP_SHA256 = '44a357d2957dc50a8c4e7ca0be1340b7d6738dee8134fa0bb937ba1a953efc
 UI_MANIFEST_SHA256 = '3195e4b127b42c2997739e4bb8177042ea749f4a0383daa2e009d1a7c833599f'
 UI_DROP_ROOT = 'C:/civ6-private/alliances-ui-drop/3195e4b127b4'
 
-# DealProposalAction enum pinned by the deal pipeline (deal_gold._SEND):
+# DealProposalAction enum pinned by the deal pipeline (deal_gold._SEND) plus
+# the support native source (e29ed1c3): CLOSED=8, REJECTED_PERMANENT=12.
 DEAL_ACTIONS = {'ACCEPTED': 1, 'REJECTED': 2, 'ADJUSTED': 3, 'PROPOSED': 4,
-                'DEMANDED': 5, 'EQUALIZE': 6, 'INSPECT': 7, 'EQUALIZE_FAILED': 10}
+                'DEMANDED': 5, 'EQUALIZE': 6, 'INSPECT': 7, 'EQUALIZE_FAILED': 10,
+                'CLOSED': 8, 'REJECTED_PERMANENT': 12}
+
+# Native human-branch facts from the support source (557445ff/e29ed1c3):
+# RequestSession (rva 0x6952cc) transmits payload NIL; the MAKE_DEAL
+# constructor zeroes the actions, so INITIAL only opens the conversation and
+# proves neither PROPOSED nor an incoming item. SendWorkingDeal chain
+# 0x693be0 -> 0x6d1e80 -> 0x58bfb0; the human branch emits archive kind
+# 0xf06250e4 for actions {1,2,8,12} carrying action/from/to/deal WITHOUT sid;
+# runner 0xfc731e25 closes by retained sid BEFORE publishing. A received
+# offer must therefore be tied to an authenticated PROPOSED-from-peer plus a
+# real valid INCOMING deal, never to session existence alone.
+REQUEST_SESSION_RVA = 0x6952CC
+SEND_WORKING_DEAL_CHAIN = (0x693BE0, 0x6D1E80, 0x58BFB0)
+HUMAN_ARCHIVE_KIND = 0xF06250E4
+RUNNER_CLOSE_RVA = 0xFC731E25
 
 # Handler registration in DiplomacyActionView.lua (VIEW_SHA256):
 #   2627: SetDefaultHandlers("MAKE_DEAL")
@@ -75,5 +91,7 @@ DEAL_SUBTYPES = ('AI_ACCEPT_DEAL', 'AI_REFUSE_DEAL',
 #          -> SendWorkingDeal(ACCEPTED) (emits POSITIVE natively); deals
 #          differ -> ADJUSTED; otherwise re-PROPOSE. Refuse = session found
 #          BEFORE any send, HasPendingDeal -> CLOSED, else REJECTED only if
-#          initiator ~= local, then CloseSession.
+#          initiator ~= local, then CloseSession. A received offer is valid
+#          only with DealAction==PROPOSED from the peer (native source
+#          557445ff: INITIAL alone proves nothing).
 ANSWER_ACTIONS = ('ACCEPTED', 'REJECTED', 'REJECTED_PERMANENT', 'CLOSED', 'ADJUSTED')
