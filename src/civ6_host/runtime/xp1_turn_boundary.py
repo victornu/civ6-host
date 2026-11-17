@@ -7,6 +7,8 @@ from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 
 class SavedTurnBoundary:
+    borrowed_xp2 = False
+
     def __init__(self, core_sha256=XP1_CORE_SHA256):
         if core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
             raise ValueError('Unknown saved turn engine')
@@ -34,10 +36,14 @@ class SavedTurnBoundary:
             turn=session['turn'],active=row['active'],active_complete=row['active_complete'],
             can_unready=row['can_unready'],timer_elapsed=read(saved.backend,core_sha256=self.core_sha256))
 
-    def refusal(self,saved,action,before,player_id):
+    def gates(self, saved, player_id, turn):
         self._check(saved)
         from .xp1_turn_ui_profile import read
-        gates=read(saved,player_id,before['turn'],active=True)
+        options = {'borrowed_xp2': True} if self.borrowed_xp2 else {}
+        return read(saved, player_id, turn, active=True, **options)
+
+    def refusal(self,saved,action,before,player_id):
+        gates = self.gates(saved, player_id, before['turn'])
         saved.emit('xp1_turn_request_ui_revalidated',action=action,**gates)
         value=gates['turn_availability'][action['kind']]
         if value is not True:
@@ -74,7 +80,7 @@ class SavedTurnBoundary:
             return None
         self._check(saved)
         from .xp2_turn_segment import read
-        return read(saved, player_id, turn)
+        return read(saved, player_id, turn, **({'borrowed_xp2': True} if self.borrowed_xp2 else {}))
 
     def reactivation_owner(self,saved):
         from .control_input_service import ControlInputService

@@ -10,6 +10,7 @@ from unittest.mock import patch
 from civ6_host.runtime import xp2_unit_orders_source as selected
 from civ6_host.runtime import xp2_initial_choice_source as status
 from civ6_host.runtime.configuration_profiles import _source,_copy,XP1_CORE_SHA256,XP2_CORE_SHA256
+from civ6_host.runtime.execution_images import _PROFILE as INSTALLED_XP2
 from civ6_host.runtime.native.native_official_load import OfficialLoadBackend
 from civ6_host.runtime.native import native_saved_unit_orders as shared
 from test_xp2_action_transport import Memory
@@ -38,8 +39,9 @@ class XP2UnitOrdersSourceTests(unittest.TestCase):
         cls.proof=selected.source();cls.transport=_source(selected.TRANSPORT_SOURCE)
 
     def test_registered_pairs_and_archive_slots_match_independent_disk_pe(self):
-        raw=Path(self.proof['image']['path']).read_bytes()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),XP2_CORE_SHA256)
+        self.assertEqual(self.proof['image']['sha256'],INSTALLED_XP2.reference_core_sha256)
+        raw=Path(INSTALLED_XP2.path).read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),INSTALLED_XP2.image_sha256)
         pe=struct.unpack_from('<I',raw,0x3c)[0];sections=struct.unpack_from('<H',raw,pe+6)[0]
         section_at=pe+24+struct.unpack_from('<H',raw,pe+20)[0]
         def disk(rva,size):
@@ -64,7 +66,8 @@ class XP2UnitOrdersSourceTests(unittest.TestCase):
         self.assertEqual(dict(self.proof['contracts']['manager_slots']),dict(convert=0x90,can_start=0x48,execute=0x58,deserialize=0x98))
 
     def test_pins_include_ui_chain_prior_interval_and_selected_existing_services(self):
-        pins=selected.source_dependencies()
+        pins=selected.source_dependencies(execution_image=INSTALLED_XP2)
+        self.assertEqual(pins[str(Path(INSTALLED_XP2.path).resolve())],INSTALLED_XP2.image_sha256)
         for digest in (selected.SOURCE[1],selected.TRANSPORT_SOURCE[1],selected.UI_SOURCE[1]):self.assertIn(digest,pins.values())
         self.assertTrue(any('xp2-action-transport' in path for path in pins))
         self.assertTrue(any('xp2-aux-map' in path for path in pins))

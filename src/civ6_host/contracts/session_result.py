@@ -1,6 +1,7 @@
 """Player-visible result projection; no runtime, rules, rewards or private data."""
 
 SCHEMA = 'civ6-host.player-result.v1'
+PLAYER_STATUS_SCHEMA = 'civ6-host.player-status.v1'
 POLICY_ID = 'first-official-native-victory-v1'
 
 
@@ -15,6 +16,25 @@ def require_same_terminal_result(previous, current):
     fields = ('current_game_turn', 'winning_team', 'victory_type')
     if any(before[field] != after[field] for field in fields):
         raise ValueError('Official result changed within the episode')
+
+
+def project_inactive_player(outcome, *, episode_id, game_generation, player_id, turn):
+    """Expose an exact formerly alive player while the game has no winner."""
+    native = outcome.get('native_victory')
+    if (outcome.get('terminated') is not False or type(native) is not dict
+            or native.get('is_alive') is not False or native.get('was_ever_alive') is not True):
+        return None
+    if (native.get('schema') != 'civ6rl.native_victory_episode.observation.v1'
+            or native.get('policy_id') != POLICY_ID
+            or native.get('episode_id') != episode_id
+            or native.get('game_generation') != game_generation
+            or type(native.get('player_id')) is not int or native['player_id'] != player_id
+            or type(native.get('current_game_turn')) is not int or native['current_game_turn'] != turn
+            or native.get('episode_terminated') is not False
+            or native.get('winner_present') is not False):
+        raise ValueError('Native player status belongs to another actor/boundary or is inconsistent')
+    return dict(schema=PLAYER_STATUS_SCHEMA, player_id=player_id, turn=turn,
+                is_alive=False, was_ever_alive=True)
 
 
 def project_terminal_result(outcome, *, episode_id, game_generation, player_id, turn):

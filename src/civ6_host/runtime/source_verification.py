@@ -62,6 +62,20 @@ def file_sha256(path):
     return digest
 
 
+def verify_pinned_json_bytes(path, expected):
+    """Verify an exact JSON dependency whose parsed data is not used here."""
+    if not path.is_file():
+        raise ValueError('Missing or oversized configuration source')
+    before = _identity(path)
+    if not 0 < before[2] <= 8 * 1024 * 1024:
+        raise ValueError('Missing or oversized configuration source')
+    actual = file_sha256(path)
+    if actual != expected:
+        raise RuntimeError(f'pinned JSON SHA-256 mismatch for {path}: {actual}')
+    if _identity(path) != before:
+        raise RuntimeError(f'pinned JSON changed while being read: {path}')
+
+
 def pinned_json(path, expected, load):
     sources = _ACTIVE.get()
     if sources is None:

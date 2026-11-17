@@ -59,15 +59,26 @@ def validate_action(action):
     return action
 COMMON = "\nlocal function integer(v,label,low,high)\n assert(type(v)=='number' and v%1==0 and v>=low and v<=high,'invalid purchase '..label);return v\nend\nlocal function bool(v,label) assert(type(v)=='boolean','invalid purchase '..label);return v end\nlocal function n(v) return string.format('%.0f',v) end\nlocal function bits(v) integer(v,'hash',-2147483648,2147483647);return v<0 and v+4294967296 or v end\nlocal function ready()\n assert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid and Game.GetCurrentGameTurn()==turn,'stale purchase perspective')\n local p=Players[pid]\n assert(p and p:IsAlive()==true and p:IsTurnActive()==true and p:IsTurnActiveComplete()==true,'purchase player not ready')\n return p\nend\nlocal player=ready()\nlocal city,seen,count=nil,{},0\nfor _,c in player:GetCities():Members() do\n count=count+1;assert(count<=4096 and c:GetOwner()==pid,'purchase city collection')\n local id=integer(c:GetID(),'city',0,4294967295);assert(not seen[id],'duplicate purchase city');seen[id]=true\n if id==cityID then city=c end\nend\nassert(city,'purchase city missing')\nassert(CityManager and type(CityManager.CanStartCommand)=='function' and type(CityManager.RequestCommand)=='function','purchase API missing')\nlocal cc=CityCommandTypes\nfor _,name in ipairs({'PURCHASE','PARAM_UNIT_TYPE','PARAM_BUILDING_TYPE','PARAM_YIELD_TYPE','PARAM_MILITARY_FORMATION_TYPE'}) do\n integer(cc[name],name,-2147483648,2147483647)\nend\nassert(MilitaryFormationTypes,'military formation table missing')\nlocal standard=MilitaryFormationTypes.STANDARD_MILITARY_FORMATION\nif standard~=nil then integer(standard,'formation',-2147483648,2147483647) end\n-- Preserve a nil official UI expression, including omission from the request\n-- table. STANDARD_FORMATION is a different key and must not be substituted.\nlocal gold=city:GetGold()\nlocal function definition(kind,row)\n local name=row[kind=='unit' and 'UnitType' or 'BuildingType']\n assert(type(name)=='string' and #name<=109 and string.match(name,kind=='unit' and '^UNIT_[A-Z0-9_]+$' or '^BUILDING_[A-Z0-9_]+$'),'purchase type')\n integer(row.Index,'index',0,4294967295);bits(row.Hash);return name\nend\nlocal function availableCurrency(kind,row,currency)\n if currency=='YIELD_GOLD' then return row.PurchaseYield==currency end\n if row.PurchaseYield==currency then return true end\n if kind=='unit' then return bool(gold:IsUnitFaithPurchaseEnabled(row.Hash),'unit faith enabled') end\n return bool(gold:IsBuildingFaithPurchaseEnabled(row.Hash),'building faith enabled')\nend\nlocal function quote(kind,row,currency)\n if not availableCurrency(kind,row,currency) then return nil end\n local yield=GameInfo.Yields[currency];assert(yield,'purchase yield missing')\n local params={};params[kind=='unit' and cc.PARAM_UNIT_TYPE or cc.PARAM_BUILDING_TYPE]=row.Hash\n params[cc.PARAM_YIELD_TYPE]=integer(yield.Index,'yield index',0,2147483647)\n -- The UI tests visibility and legality before adding standard formation to\n -- the submitted unit request. Preserve that argument order and distinction.\n local visible=bool(CityManager.CanStartCommand(city,cc.PURCHASE,true,params,false),'visibility')\n if not visible then return nil end\n local legal=bool(CityManager.CanStartCommand(city,cc.PURCHASE,false,params,true),'legality')\n local wallet=currency=='YIELD_GOLD' and player:GetTreasury() or player:GetReligion()\n local afford=bool(wallet:CanAfford(cityID,row.Hash),'affordability')\n local cost\n if kind=='unit' then cost=gold:GetPurchaseCost(yield.Index,row.Hash,standard)\n else cost=gold:GetPurchaseCost(yield.Index,row.Hash) end\n assert(type(cost)=='number' and cost==cost and cost>=0 and cost<=9007199254740992,'invalid purchase price')\n return {price=string.format('%.17g',cost),legal=legal,afford=afford,params=params}\nend\n"
 
-def preamble(pid, city_id, turn):
+def preamble(pid, city_id, turn, *, include_items=True):
     verify_source()
     uint(pid, 'player', 63)
     uint(city_id, 'city')
     uint(turn, 'turn', 2147483647)
-    return f'local pid,cityID,turn={pid},{city_id},{turn}\n'.encode() + COMMON.encode()
+    if type(include_items) is not bool:
+        raise ValueError('Purchase item preamble flag must be Boolean')
+    context = COMMON
+    if not include_items:
+        city_context, marker, _ = COMMON.partition('local cc=CityCommandTypes\n')
+        if not marker:
+            raise RuntimeError('Purchase city context changed')
+        context = city_context + marker + 'local gold=city:GetGold()\n'
+    return f'local pid,cityID,turn={pid},{city_id},{turn}\n'.encode() + context.encode()
 
-def catalog_source(pid, city_id, turn):
-    return preamble(pid, city_id, turn) + "\nlocal out={'purchase-v1|'..n(pid)..'|'..n(turn)..'|'..n(cityID)}\nlocal total=0\nfor _,kind in ipairs({'unit','building'}) do\n local rows=kind=='unit' and GameInfo.Units or GameInfo.Buildings\n local count,seen=0,{}\n for row in rows() do\n  count=count+1;assert(count<=4096,'purchase definitions bound')\n  local name=definition(kind,row);assert(not seen[row.Index],'duplicate purchase definition');seen[row.Index]=true\n  for _,currency in ipairs({'YIELD_GOLD','YIELD_FAITH'}) do\n   local q=quote(kind,row,currency)\n   if q then\n    total=total+1;assert(total<=4096,'purchase catalogue bound')\n    out[#out+1]=table.concat({kind,n(row.Index),n(bits(row.Hash)),name,currency,q.price,q.legal and '1' or '0',q.afford and '1' or '0'},'|')\n   end\n  end\n end\nend\nready();return table.concat(out,'\\n')\n".encode()
+def catalog_source(pid, city_id, turn, *, gold_only=False):
+    if type(gold_only) is not bool:
+        raise ValueError('Gold-only purchase catalogue flag must be Boolean')
+    currencies = "{'YIELD_GOLD'}" if gold_only else "{'YIELD_GOLD','YIELD_FAITH'}"
+    return preamble(pid, city_id, turn) + ("\nlocal out={'purchase-v1|'..n(pid)..'|'..n(turn)..'|'..n(cityID)}\nlocal total=0\nfor _,kind in ipairs({'unit','building'}) do\n local rows=kind=='unit' and GameInfo.Units or GameInfo.Buildings\n local count,seen=0,{}\n for row in rows() do\n  count=count+1;assert(count<=4096,'purchase definitions bound')\n  local name=definition(kind,row);assert(not seen[row.Index],'duplicate purchase definition');seen[row.Index]=true\n  for _,currency in ipairs(" + currencies + ") do\n   local q=quote(kind,row,currency)\n   if q then\n    total=total+1;assert(total<=4096,'purchase catalogue bound')\n    out[#out+1]=table.concat({kind,n(row.Index),n(bits(row.Hash)),name,currency,q.price,q.legal and '1' or '0',q.afford and '1' or '0'},'|')\n   end\n  end\n end\nend\nready();return table.concat(out,'\\n')\n").encode()
 
 def parse_catalog(raw, pid, city_id, turn):
     uint(pid, 'player', 63)
@@ -116,10 +127,10 @@ def validate_catalog(value, pid, turn):
 def actions(catalog):
     return [row['action'] for row in catalog['offers'] if row['command_legal'] and row['can_afford']]
 
-def catalog(prefix, city_id, turn, *, player_id=0, include_plots=False):
+def catalog(prefix, city_id, turn, *, player_id=0, include_plots=False, gold_only=False):
     if type(include_plots) is not bool:
         raise ValueError('Exact plot purchase diagnostic flag required')
-    raw = prefix.runtime.evaluate_text(prefix.ui_child, catalog_source(player_id, city_id, turn), b'@explicit_purchase_catalog', capacity=LIMIT + 1)
+    raw = prefix.runtime.evaluate_text(prefix.ui_child, catalog_source(player_id, city_id, turn, gold_only=gold_only), b'@explicit_purchase_catalog', capacity=LIMIT + 1)
     value = parse_catalog(raw, player_id, city_id, turn)
     if include_plots:
         from civ6_host.runtime.native import native_plot_purchases
@@ -141,15 +152,22 @@ def building_source(action, pid, turn):
         raise ValueError('Expected building purchase')
     return selected_source(action, pid, turn) + b"return bool(city:GetBuildings():HasBuilding(row.Hash),'building possession') and 'present' or 'absent'\n"
 
-def apply(owner, prefix, action, turn, before, *, player_id=0):
+def apply(owner, prefix, action, turn, before, *, player_id=0, archive_validator=None,
+          allow_faith=False, verified_stage='xp1_explicit_city_purchase_verified'):
     validate_action(action)
     pid = player_id
+    if archive_validator is not None:
+        from civ6_host.contracts.plot_purchases import validate_city_action
+        validate_city_action(action, allow_faith=allow_faith)
+        if prefix.actions.pending:
+            raise RuntimeError('City purchase cannot overtake pending native actions')
     if 'plot_id' in action:
         if getattr(owner, 'city_management_diagnostic', False) is not True and (not gate_admitted(owner, 'plot_purchase')):
             raise RuntimeError('Plot purchase requires an admitted UI profile or explicit city-management diagnostic')
         from civ6_host.runtime.native import native_plot_purchases
         return native_plot_purchases.apply(owner, prefix, action, turn, before, player_id=pid)
-    fresh = catalog(prefix, action['city_id'], turn, player_id=pid)
+    fresh = catalog(prefix, action['city_id'], turn, player_id=pid,
+                    gold_only=archive_validator is not None and not allow_faith)
     if action not in actions(fresh):
         raise RuntimeError('Purchase no longer offered at its quoted price')
     building_before = None
@@ -160,6 +178,9 @@ def apply(owner, prefix, action, turn, before, *, player_id=0):
     submitted = prefix.runtime.evaluate_text(prefix.ui_child, request_source(action, pid, turn), b'@explicit_purchase_request')
     if submitted != b'submitted' or len(prefix.actions.pending) != 1:
         raise RuntimeError('Purchase did not enqueue exactly one native command')
+    archive_sha = None
+    if archive_validator is not None:
+        archive_sha = archive_validator(prefix.actions.pending[0], pid, action)
     prefix.actions.deliver_one()
     prefix.deferred_events.drain_empty_receivers()
     prefix.view_publisher.publish()
@@ -178,5 +199,18 @@ def apply(owner, prefix, action, turn, before, *, player_id=0):
         if not created:
             raise RuntimeError('Purchased unit absent after native delivery')
     currency = 'gold' if action['currency'] == 'YIELD_GOLD' else 'faith'
-    owner.emit('official_explicit_purchase_effect', action=action, created_units=created, building_before=None if building_before is None else building_before.decode(), building_after=None if building_after is None else building_after.decode(), quoted_cost=price(action['price_token']), net_currency_debit=before['economy'][currency] - after['economy'][currency], observation_before=before, observation_after=after, automatic_choices_applied=False, strategic_training_ready=False)
-    return after
+    debit = before['economy'][currency] - after['economy'][currency]
+    if archive_validator is not None:
+        if debit != price(action['price_token']):
+            raise RuntimeError('City item treasury debit differs from the native quote')
+        if action['category'] == 'unit' and (len(created) != 1 or created[0]['owner'] != pid):
+            raise RuntimeError('Native unit purchase did not create exactly one owned unit')
+    owner.emit('official_explicit_purchase_effect', action=action, created_units=created, building_before=None if building_before is None else building_before.decode(), building_after=None if building_after is None else building_after.decode(), quoted_cost=price(action['price_token']), net_currency_debit=debit, observation_before=before, observation_after=after, automatic_choices_applied=False, strategic_training_ready=False)
+    if archive_validator is None:
+        return after
+    receipt = dict(action=action, native_item_confirmed=True, exact_treasury_debit_verified=True,
+                   native_archive_sha256=archive_sha)
+    receipt[currency + '_debit'] = debit
+    owner.emit(verified_stage, receipt=receipt,
+               created_unit_ids=[unit['id'] for unit in created])
+    return dict(observation=after, receipt=receipt)

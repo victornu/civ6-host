@@ -8,15 +8,56 @@ BUILD_FIELDS = COMMON_FIELDS | {'index', 'hash', 'item_type', 'selector'}
 ADJACENT_FIELDS = BUILD_FIELDS | {'source_x', 'source_y', 'source_plot_id'}
 OP_FIELDS = COMMON_FIELDS | {'operation', 'hash'}
 NETWORK_ACTION_FIELDS = {'build_improvement': BUILD_FIELDS, 'terrain_operation': OP_FIELDS}
+ADJACENT_KIND = 'build_improvement_adjacent'
+BUILD_ROUTE = 'build_route'
+ROUTE_FIELDS = {'kind', 'unit_id', 'plot_id', 'x', 'y', 'route_type'}
+ADJACENT_NETWORK_ACTION_FIELDS = {**NETWORK_ACTION_FIELDS, ADJACENT_KIND: ADJACENT_FIELDS}
 NETWORK_GAPS = {
     'build_improvement': ('adjacent_improvements',),
     'terrain_operation': ('additional_terrain_operation_routes',),
 }
 
+def network_gaps(*, adjacent):
+    if not adjacent:
+        return NETWORK_GAPS
+    return dict(NETWORK_GAPS, build_improvement=(), build_improvement_adjacent=())
+
+
+def network_families(catalogue, rows, *, adjacent, unavailable_reason):
+    result = {}
+    for kind, gaps in network_gaps(adjacent=adjacent).items():
+        if catalogue is None:
+            result[kind] = dict(status='unqualified', reason=unavailable_reason)
+        else:
+            ids = [row['candidate_id'] for row in rows if row['action']['kind'] == kind]
+            result[kind] = (dict(status='queried_partial', unqualified=list(gaps), candidate_ids=ids)
+                            if gaps else dict(status='queried_complete', candidate_ids=ids))
+    return result
+
+
 def uint(v, name, maximum=4294967295):
     if type(v) is not int or not 0 <= v <= maximum:
         raise ValueError('Invalid unit work ' + name)
     return v
+
+
+def validate_route(action, observation=None):
+    if (type(action) is not dict or action.keys() != ROUTE_FIELDS or action['kind'] != BUILD_ROUTE
+            or type(action['route_type']) is not str
+            or re.fullmatch(r'ROUTE_[A-Z0-9_]{1,100}', action['route_type']) is None):
+        raise ValueError('Invalid route construction choice')
+    uint(action['unit_id'], 'route constructor')
+    for key in ('plot_id', 'x', 'y'):
+        uint(action[key], key, 16383)
+    if observation is not None:
+        x, y = action['x'], action['y']
+        if (x >= observation['width'] or y >= observation['height']
+                or action['plot_id'] != y * observation['width'] + x
+                or not any((unit['owner'], unit['id'], unit['x'], unit['y']) ==
+                           (observation['player_id'], action['unit_id'], x, y)
+                           for unit in observation['units'])):
+            raise ValueError('Route construction requires its own unit and current tile')
+    return action
 
 def moves(token):
     if type(token) is not str or len(token) > 32 or (not re.fullmatch('[0-9]+(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?', token)):
@@ -88,8 +129,8 @@ def actions(value):
     return [r['action'] for r in value['offers'] if r['legal']]
 
 
-def validate_network_catalog(value, player_id, turn, *, observation=None):
-    """Bind the current-tile work offers to the observed public actor."""
+def validate_network_catalog(value, player_id, turn, *, observation=None, adjacent=False):
+    """Bind native work offers to the public actor and visible plots."""
     validate_catalog(value, player_id, turn)
     if not value['enabled']:
         raise ValueError('Unavailable unit work must be represented by null')
@@ -99,16 +140,21 @@ def validate_network_catalog(value, player_id, turn, *, observation=None):
              if observation is not None else None)
     for offer in value['offers']:
         action = offer['action']
-        if action['kind'] not in NETWORK_ACTION_FIELDS:
+        fields = ADJACENT_NETWORK_ACTION_FIELDS if adjacent else NETWORK_ACTION_FIELDS
+        if action['kind'] not in fields:
             raise ValueError('Unqualified unit-work route in the network catalogue')
         if units is None:
             continue
         unit = units.get(action['unit_id'])
         plot = plots.get(action['plot_id'])
+        source = plots.get(action.get('source_plot_id', action['plot_id']))
+        source_xy = (action.get('source_x', action['x']), action.get('source_y', action['y']))
         if (unit is None or plot is None or plot['visible'] is not True
+                or source is None or source['visible'] is not True
                 or unit['owner'] != player_id
-                or (unit['x'], unit['y']) != (action['x'], action['y'])
+                or (unit['x'], unit['y']) != source_xy
+                or (source['x'], source['y']) != source_xy
                 or (plot['x'], plot['y']) != (action['x'], action['y'])):
-            raise ValueError('Unit-work offer differs from its visible own-unit tile')
+            raise ValueError('Unit-work offer differs from its visible source or target')
     return value
 

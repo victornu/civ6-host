@@ -1,5 +1,6 @@
 """Paid policy-window control through the official XP2 player operation."""
 from math import isfinite
+from struct import pack
 
 from civ6_host.contracts import policy_unlock as contract
 from .configuration_profiles import XP2_CORE_SHA256
@@ -65,7 +66,7 @@ def _operation(saved, player_id, *, submit):
         core_sha256=XP2_CORE_SHA256, submit=submit, allow_empty=True)
 
 
-def read(saved, observation):
+def snapshot(saved, observation):
     raw = _raw(saved, observation)
     native = _operation(saved, raw['player_id'], submit=False)
     reason = ('already_changed' if raw['changed'] else 'no_cost' if raw['cost'] == 0
@@ -74,25 +75,45 @@ def read(saved, observation):
     public = dict(player_id=raw['player_id'], turn=raw['turn'], cost=raw['cost'],
                   currency=raw['currency'], reason=reason, can_unlock=reason == 'available')
     contract.validate(public, observation['player_id'], observation['turn'])
+    return raw, public
+
+
+def read(saved, observation):
+    raw, public = snapshot(saved, observation)
     saved.continuation.explicit_policy_unlock = public
     # Exact wallet precision is administrative evidence, never a public feature.
     saved.continuation.explicit_policy_unlock_raw = raw
     return public
 
 
-def apply(saved, action, before):
+def validate_archive(payload, player_id):
+    policy._player_id(player_id)
+    expected = pack('<5I', 0xc45de12f, player_id, UNLOCK_POLICIES, 2, 0)
+    if type(payload) is not bytes or payload != expected:
+        raise ValueError('Paid policy unlock archive differs from its actor or operation')
+
+
+def apply(saved, action, before, *, borrowed=None):
     from .native.native_player_observation import observe_player
     contract.validate_action(action)
-    fresh = read(saved, before)
+    if borrowed is None:
+        fresh = read(saved, before)
+    else:
+        prior, fresh = snapshot(saved, before)
+        if fresh != borrowed:
+            raise RuntimeError('Paid policy window changed before native delivery')
     if contract.actions(fresh) != [action]:
         raise RuntimeError('Native paid policy window no longer offers this cost/currency')
-    prior = dict(saved.continuation.explicit_policy_unlock_raw)
+    if borrowed is None:
+        prior = dict(saved.continuation.explicit_policy_unlock_raw)
     prefix = saved.prefix
     if prefix.actions.pending:
         raise RuntimeError('Policy unlock cannot share an unrelated pending archive')
     result = _operation(saved, before['player_id'], submit=True)
     if not result['request_invoked'] or len(prefix.actions.pending) != 1:
         raise RuntimeError('Policy unlock did not enqueue exactly one native request')
+    if borrowed is not None:
+        validate_archive(prefix.actions.pending[0], before['player_id'])
     saved.emit('xp2_policy_unlock_submitted', action=action, result=result,
                source_proof_sha256=SOURCE[1], native_effect_verified=False)
     prefix.actions.deliver_one()

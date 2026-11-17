@@ -13,6 +13,13 @@ FIELDS = {'kind', 'unit_id', 'operation', 'input_route', 'plot_id', 'x', 'y'}
 UNIT_FIELDS = {'unit_id', 'unit_type', 'x', 'y', 'damage', 'moves', 'attacks_remaining'}
 CITY_FIELDS = {'owner', 'city_id', 'district_id', 'plot_id', 'x', 'y', 'garrison_damage', 'garrison_max', 'outer_damage', 'outer_max', 'defense_strength'}
 ACTION_FIELDS={'unit_attack':frozenset(FIELDS)}
+HOTSEAT_COMBAT_SCHEMAS = frozenset((
+    'civ6rl.saved_decisions999.v1',
+    'civ6rl.saved_decisions1000.v1',
+    'civ6rl.saved_decisions.city_management.v1',
+))
+HOTSEAT_COMBAT_FIELDS = ('combat_units', 'combat_relationships', 'combat_cities',
+                         'candidates', 'queued_orders')
 UNQUALIFIED_UNIT_ATTACKS=('war_confirmation','air_attacks','nonadjacent_enemy_flag_melee',
     'world_plot_unit_targeting','coastal_raid_and_swap','other_unit_attack_operations',
     'operation_lifecycle_only_readback','native_legal_targets_without_visible_witness')
@@ -213,3 +220,17 @@ def project_public(value,*,observation=None,queued_orders=None):
     result['cities']=project_cities(value['cities'],value['width'],value['height'])
     return validate_public_catalog(result,result['player_id'],result['turn'],
                                   observation=observation,queued_orders=queued_orders)
+
+
+def project_hotseat(decisions, observation):
+    """Join the Base combat columns to the same public contract as LAN."""
+    if (decisions.get('schema') not in HOTSEAT_COMBAT_SCHEMAS
+            or any(decisions.get(field) is None for field in HOTSEAT_COMBAT_FIELDS)):
+        raise ValueError('Hotseat combat requires its qualified native catalogue')
+    value = dict(player_id=decisions['player_id'], turn=decisions['turn'],
+                 width=observation['width'], height=observation['height'],
+                 units=decisions['combat_units'], relationships=decisions['combat_relationships'],
+                 cities=decisions['combat_cities'],
+                 offers=[row['action'] for row in decisions['candidates']
+                         if row['action']['kind'] == 'unit_attack'])
+    return project_public(value, observation=observation, queued_orders=decisions['queued_orders'])

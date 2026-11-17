@@ -26,8 +26,7 @@ def enable(owner, backend):
             or getattr(backend, '_xp1_commands_requested', False) is not True):
         raise ValueError('Foundation callbacks require the original idle saved command owner')
     from .foundation_event_profile import event_profile, verify_project_live, verify_pillage_live
-    image = (getattr(backend.core, '_civ6_host_execution_image', None)
-             if core_sha256 == XP2_CORE_SHA256 else None)
+    image = getattr(backend.core, '_civ6_host_execution_image', None)
     execution_options = {'execution_image': image} if image is not None else {}
     profile = event_profile(core_sha256=core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
@@ -40,6 +39,16 @@ def enable(owner, backend):
     from .paths import resource_root
     verify_xp1_once(backend.core, backend.core._handle, owner.read, resource_root(),
                     core_sha256=core_sha256)
+    if core_sha256 == XP1_CORE_SHA256 and image is not None:
+        from .xp1_capture_followup import verify_live as verify_capture_followup
+        from .xp1_city_transfer import verify_live as verify_city_transfer
+        from .xp1_great_work_source import verify_live as verify_great_work
+        from .xp1_wmd_fallout_visibility import verify_live as verify_wmd_visibility
+        verify_great_work(backend.core, owner.read)
+        verify_city_transfer(backend.core, owner.read)
+        verify_capture_followup(backend.core, owner.read)
+        verify_project_live(backend.core._handle, owner.read, xp1_image=image)
+        verify_wmd_visibility(backend.core, owner.read)
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_wmd_fallout_visibility import verify_live as verify_wmd_visibility
         from .xp2_wonder_completion import verify_live as verify_wonder_completion
@@ -90,11 +99,11 @@ def _active_profile(owner):
 
 
 def enable_history_events(owner, backend):
-    """Install only XP2 History/Era/Era-score callbacks on the saved owner."""
+    """Install the selected expansion history callbacks on the saved owner."""
     owner._check()
     backend.check_thread()
     core_sha256=backend.load_abi.core_sha256
-    if (core_sha256!=XP2_CORE_SHA256
+    if (core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256)
             or owner.history_event_profile is not None
             or owner._foundation_backend not in (None,backend)
             or owner._foundation_borrow is not None
@@ -106,20 +115,25 @@ def enable_history_events(owner, backend):
             or backend.host is not owner.arguments.host
             or backend.core is not owner.deferred.core
             or backend.context!=owner.deferred.context
-            or owner.deferred.cache_core_sha256!=XP2_CORE_SHA256
-            or owner.arguments.reader.core_sha256!=XP2_CORE_SHA256
+            or owner.deferred.cache_core_sha256!=core_sha256
+            or owner.arguments.reader.core_sha256!=core_sha256
             or owner.normalizer_transform_present is not False):
-        raise ValueError('History callbacks require the exact idle prepared XP2 command owner')
-    from .xp2_history_event_profile import event_profile,bind_owner
+        raise ValueError('History callbacks require the exact idle prepared expansion command owner')
     image = getattr(backend.core, '_civ6_host_execution_image', None)
-    execution_options = {'execution_image': image} if image is not None else {}
-    profile=event_profile(core_sha256=core_sha256, **execution_options)
+    if core_sha256 == XP1_CORE_SHA256:
+        from .xp1_governors_source import history_profile
+        profile = history_profile(backend, owner.read)
+    else:
+        from .xp2_history_event_profile import event_profile,bind_owner
+        execution_options = {'execution_image': image} if image is not None else {}
+        profile = event_profile(core_sha256=core_sha256, **execution_options)
     if any(owner.handles_kind(kind) for kind in profile.record_types_by_kind):
         raise ValueError('History callbacks overlap an installed A0 family')
     for kind,size in profile.record_sizes.items():
         record=bytearray(size);struct.pack_into('<II',record,0,size,kind)
-        validate_empty_profile_record(record,**owner.empty_receiver_state)
-    bind_owner(backend,backend.core,owner.read)
+        validate_empty_profile_record(record, **owner.empty_receiver_state, execution_image=image)
+    if core_sha256 == XP2_CORE_SHA256:
+        bind_owner(backend,backend.core,owner.read)
     owner.history_event_profile=owner._history_event_profile=profile
     owner._foundation_backend=backend
     return owner
@@ -226,26 +240,47 @@ def dispatch(owner, kind, fields, borrowed_argument=None):
         # flags. A failed check must never become a synthetic gate-off branch.
         from .xp1_visibility_cache_gate import require_internal_cache
         require_internal_cache(token)
-        if kind==0x8cbda9f3 and b.load_abi.core_sha256==XP2_CORE_SHA256:
-            from .xp2_wmd_fallout_visibility import dispatch as dispatch_wmd_visibility
-            return dispatch_wmd_visibility(owner,fields)
-        if kind == 0x1a71e9f0 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
-            from .xp2_great_work import dispatch as dispatch_great_work
+        if kind == 0xd5243371 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
+            from .xp2_national_park_visibility import dispatch as dispatch_park_visibility
+            return dispatch_park_visibility(owner, fields)
+        if kind == 0x8cbda9f3:
+            if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                from .xp1_wmd_fallout_visibility import dispatch as dispatch_wmd_visibility
+            else:
+                from .xp2_wmd_fallout_visibility import dispatch as dispatch_wmd_visibility
+            return dispatch_wmd_visibility(owner, fields)
+        if kind == 0x1a71e9f0:
+            if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                from .xp1_great_work_source import dispatch as dispatch_great_work
+            else:
+                from .xp2_great_work import dispatch as dispatch_great_work
             return dispatch_great_work(owner, fields)
+        if kind == 0x9648f000:
+            from .xp2_great_work import dispatch_moved
+            return dispatch_moved(owner, fields)
         if kind == 0xb39c906a and b.load_abi.core_sha256 == XP2_CORE_SHA256:
             from .xp2_feature_events import dispatch_added
             return dispatch_added(owner, fields)
-        if kind == 0xe05ec908 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
-            from .xp2_city_occupation_event import dispatch as dispatch_occupation
+        if kind == 0xe05ec908:
+            if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                from .xp1_city_transfer import dispatch as dispatch_occupation
+            else:
+                from .xp2_city_occupation_event import dispatch as dispatch_occupation
             return dispatch_occupation(owner, fields)
-        if kind == 0xe074eef4 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
-            from .xp2_building_removal import dispatch as dispatch_removal
+        if kind == 0xe074eef4:
+            if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                from .xp1_capture_followup import dispatch_building as dispatch_removal
+            else:
+                from .xp2_building_removal import dispatch as dispatch_removal
             return dispatch_removal(owner, fields)
         if kind == 0xad6c0a71 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
             from .xp2_player_restored import dispatch as dispatch_restored
             return dispatch_restored(owner, fields)
-        if kind == 0xa0a8f479 and b.load_abi.core_sha256 == XP2_CORE_SHA256:
-            from .xp2_player_can_construct_event import dispatch as dispatch_construct
+        if kind == 0xa0a8f479:
+            if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                from .xp1_capture_followup import dispatch_player as dispatch_construct
+            else:
+                from .xp2_player_can_construct_event import dispatch as dispatch_construct
             return dispatch_construct(owner, fields)
         return SharedHostEventDispatch._dispatch_fields(owner, kind, fields,
                                                         borrowed_argument=borrowed_argument)
@@ -264,11 +299,11 @@ def dispatch_history(owner,kind,fields):
     token=getattr(backend,'_xp1_continuation',None) if backend is not None else None
     if (type(token) is not SavedContinuation or token.owner is not backend
             or owner._foundation_borrow is not None or owner.active_kind!=kind
-            or backend.load_abi.core_sha256!=XP2_CORE_SHA256
+            or backend.load_abi.core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256)
             or owner.history_event_profile is None
             or owner.history_event_profile is not owner._history_event_profile
             or kind not in owner.history_event_profile.record_types_by_kind):
-        raise ValueError('History callback lacks its exact XP2 continuation and family')
+        raise ValueError('History callback lacks its exact expansion continuation and family')
     token.check(active=True)
     owner._foundation_borrow=token
     try:
@@ -282,9 +317,11 @@ def dispatch_history(owner,kind,fields):
 def dispatch_project_completion(owner, fields):
     from .native import native_event_3182bc8e_project as project
     from .native.native_retained_game_getter import read_retained_game_value
-    from .foundation_event_profile import PROJECT_KIND, PROJECT_SOURCE
+    from .foundation_event_profile import PROJECT_KIND, PROJECT_SOURCE, XP1_PROJECT_SOURCE
 
     token = require_borrow(owner)
+    core_sha256 = token.owner.load_abi.core_sha256
+    source = XP1_PROJECT_SOURCE if core_sha256 == XP1_CORE_SHA256 else PROJECT_SOURCE
 
     if len(owner.pending) + 3 > owner.limit or not 0 <= owner._sequence < 0x7ffffffd:
         raise RuntimeError('Project completion requires three FIFO entries')
@@ -294,18 +331,20 @@ def dispatch_project_completion(owner, fields):
 
     def retained_value():
         token.lease.require(token.lease.backend, facades)
-        return read_retained_game_value(facades, owner.read, core_sha256=XP2_CORE_SHA256)
+        return read_retained_game_value(facades, owner.read, core_sha256=core_sha256)
 
     records = project.iter_records(
         owner._sequence + 1, decoded, retained_value, empty_receiver_profile=True,
         padding_policy=project.STACK_POLICY,
-        normalizer_transform_present=owner.normalizer_transform_present)
+        normalizer_transform_present=owner.normalizer_transform_present,
+        thread_hook_present=owner.per_thread_hook_present,
+        writer_metadata_callback_present=owner.writer_metadata_callback_present)
     for record in records:
         owner._enqueue(record)
         record_type = struct.unpack_from('<I', record, 4)[0]
         owner.emit('native_deferred_host_event_enqueued', dispatch_kind=hex(PROJECT_KIND),
             queue_type=hex(record_type), record_hex=record.hex(), pending_count=len(owner.pending),
-            source_proof_sha256=PROJECT_SOURCE[1], empty_receiver_state_verified=True,
+            source_proof_sha256=source[1], empty_receiver_state_verified=True,
             extended_branch_entered=True, eligible_for_training=False, native_dispatch_return=0)
     return 0
 

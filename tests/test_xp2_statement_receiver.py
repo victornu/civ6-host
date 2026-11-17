@@ -188,6 +188,207 @@ class XP2StatementReceiverTests(unittest.TestCase):
         self.assertEqual(len(self.deferred.pending), 1)
         self.assertTrue(self.deferred.combat_map_registry.entries)
 
+    def test_deal_acknowledgement_preserves_the_owned_map_and_never_projects_its_pointer(self):
+        from civ6_host.runtime.xp2_deal_draft import project_statement_fields, statement_scope
+
+        extensions = {
+            0x26f0905f: struct.pack('<H6xQII', 0x16, 0xD20000, 0, 0x41000000),
+            0x3c255a0b: scalar(3, 0),
+            0xfe1e2e5d: scalar(3, 0),
+        }
+        self.map_fields.update(extensions)
+        for key, tag, value in (('StatementType', 3, 0x84e9dc8a),
+                                ('StatementSubType', 3, 0xb6fa1284),
+                                ('ResponseType', 3, 0xcaff10c3),
+                                ('FromPlayer', 2, 1), ('ToPlayer', 2, 0)):
+            self.map_fields[codec.NAMES[key]] = scalar(tag, value)
+        token = self.saved.continuation
+        with statement_scope(token, 0, 1):
+            scope = token._xp2_deal_statement_scope
+            self.assertIs(project_statement_fields(self.map_fields, None), self.map_fields)
+            for field, variant in ((0xfe1e2e5d, scalar(3, 1)),
+                                   (0x26f0905f, scalar(0x16, 0)),
+                                   (codec.NAMES['FromPlayer'], scalar(2, 0)),
+                                   (0x11111111, scalar(3, 0))):
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    project_statement_fields({**self.map_fields, field: variant}, scope)
+            self.assertEqual(self.dispatch(), 0)
+            self.assertEqual(self.clone_fields[0x700000], self.map_fields)
+            self.assertEqual(self.deferred.drain(), 1)
+        self.assertFalse(hasattr(token, '_xp2_deal_statement_scope'))
+        choice, = self.deferred.pending_diplomacy_statements
+        self.assertEqual(choice['fields']['StatementType'], 0x84e9dc8a)
+        self.assertEqual(set(choice['fields']), set(codec.NAMES))
+        self.assertEqual(self.deferred.combat_map_registry.entries, {})
+
+    def test_gold_inspection_response_is_joined_in_its_active_request_only(self):
+        from civ6_host.runtime.xp2_deal_draft import project_statement_fields, statement_scope
+
+        self.map_fields.update({
+            0x26f0905f: struct.pack('<H6xQII', 0x16, 0xD20000, 0, 0x41000000),
+            0x3c255a0b: scalar(3, 1),
+            0xfe1e2e5d: scalar(3, 7),
+        })
+        for key, tag, value in (('StatementType', 3, 0x84e9dc8a),
+                                ('StatementSubType', 3, 0x988a4fb4),
+                                ('ResponseType', 3, 0x7332f7d6),
+                                ('FromPlayer', 2, 1), ('ToPlayer', 2, 0)):
+            self.map_fields[codec.NAMES[key]] = scalar(tag, value)
+        token = self.saved.continuation
+        with statement_scope(token, 0, 1, operation='propose'):
+            with self.assertRaisesRegex(ValueError, 'current proposal'):
+                project_statement_fields(self.map_fields, token._xp2_deal_statement_scope)
+        with statement_scope(token, 0, 1, operation='inspect'):
+            self.assertEqual(self.dispatch(), 0)
+            self.assertEqual(self.deferred.drain(), 1)
+        choice, = self.deferred.pending_diplomacy_statements
+        self.assertEqual(choice['deal_reply'], dict(operation='inspect', outcome='accepted'))
+        self.assertEqual(set(choice['fields']), set(codec.NAMES))
+        self.assertEqual(self.deferred.combat_map_registry.entries, {})
+
+    def test_equalize_replies_require_the_exact_native_action_and_statement_pair(self):
+        from civ6_host.runtime.xp2_deal_draft import project_statement_fields, statement_scope
+
+        self.map_fields.update({
+            0x26f0905f: struct.pack('<H6xQII', 0x16, 0xD20000, 0, 0x41000000),
+            0xfe1e2e5d: scalar(3, 6),
+        })
+        self.map_fields[codec.NAMES['StatementType']] = scalar(3, 0x84e9dc8a)
+        self.map_fields[codec.NAMES['FromPlayer']] = scalar(2, 1)
+        self.map_fields[codec.NAMES['ToPlayer']] = scalar(2, 0)
+        token = self.saved.continuation
+        with statement_scope(token, 0, 1, operation='equalize'):
+            scope = token._xp2_deal_statement_scope
+            for action, subtype, response, outcome in (
+                    (3, 0x7332f7d6, 0x7332f7d6, 'adjusted'),
+                    (10, 0xb6fa1284, 0, 'equalize_failed'),
+                    (2, 0x6dce22fe, 0x164480cd, 'rejected')):
+                with self.subTest(action=action):
+                    fields = {**self.map_fields, 0x3c255a0b: scalar(3, action),
+                              codec.NAMES['StatementSubType']: scalar(3, subtype),
+                              codec.NAMES['ResponseType']: scalar(3, response)}
+                    reply = {}
+                    projected = project_statement_fields(fields, scope, reply=reply)
+                    self.assertEqual(reply, dict(operation='equalize', outcome=outcome))
+                    self.assertNotIn(0xfe1e2e5d, projected)
+                    for changed in ({0xfe1e2e5d: scalar(3, 7)},
+                                    {codec.NAMES['ResponseType']: scalar(3, response ^ 1)}):
+                        with self.assertRaisesRegex(ValueError, 'Unknown native negotiation reply'):
+                            project_statement_fields({**fields, **changed}, scope)
+
+    def test_gold_transaction_and_positive_statement_must_agree_before_delivery(self):
+        from civ6_host.runtime.xp2_deal_gold import validate_acceptance
+
+        pid, target, sid, amount, per_turn = 2, 4, 5, 19, 6
+
+        def item(duration, value, giver=pid, receiver=target):
+            return struct.pack('<I24xIII16xI', 0x05eb0df7, duration, giver, receiver, value)
+
+        def archives(*items):
+            terms = struct.pack('<I15xI', 5, len(items)) + b''.join(items)
+            deal = struct.pack('<IIII', 0xf06250e4, 1, pid, target) + terms
+            confirm = (struct.pack('<III', 0xa4172391, pid, sid) + encoded + terms).ljust(455+60*len(items),b'\x00')
+            return deal, confirm, terms
+        values = ((0xbaef29be, 3, 0x84e9dc8a), (0x1226a98f, 3, 0xc20ef7ff),
+                  (0x9bba1fc1, 3, 0x7332f7d6), (0x9c594aff, 2, pid),
+                  (0x18383f56, 2, target), (0x3c255a0b, 3, 1), (0xfe1e2e5d, 3, 0))
+        encoded = b''.join(struct.pack('<II8xI', *value) for value in values)
+        deal, confirm, terms = archives(item(0,amount))
+        validate_acceptance([deal, confirm], pid, target, sid, amount)
+        changed = confirm.replace(terms, terms[:-1]+b'\x01')
+        for pair in ([confirm,deal], [deal,changed], [deal], [deal,confirm,confirm]):
+            with self.subTest(count=len(pair)), self.assertRaises(RuntimeError):
+                validate_acceptance(pair, pid, target, sid, amount)
+        with self.assertRaisesRegex(RuntimeError, 'different terms'):
+            validate_acceptance([deal,confirm], pid, target, sid, amount+1)
+        recurring = item(30,per_turn)
+        deal, confirm, _ = archives(recurring,item(0,amount))
+        validate_acceptance([deal,confirm], pid, target, sid, amount, per_turn)
+        deal, confirm, _ = archives(recurring)
+        validate_acceptance([deal,confirm], pid, target, sid, 0, per_turn)
+        incoming = item(0,7,target,pid)
+        deal, confirm, _ = archives(recurring,incoming)
+        validate_acceptance([deal,confirm], pid, target, sid, 0, per_turn, requested=(7,0))
+        with self.assertRaisesRegex(RuntimeError, 'different terms'):
+            validate_acceptance([deal,confirm], pid, target, sid, 7, per_turn)
+        for invalid in (item(29,per_turn), item(30,per_turn,giver=target), item(30,per_turn+1), item(0,per_turn)):
+            deal, confirm, _ = archives(item(0,amount),invalid)
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(RuntimeError, 'different terms'):
+                validate_acceptance([deal,confirm], pid, target, sid, amount, per_turn)
+
+    def test_gold_confirmation_echo_joins_only_the_active_acceptance(self):
+        from civ6_host.runtime.xp2_deal_draft import project_statement_fields, statement_scope
+
+        self.map_fields.update({
+            0x26f0905f: struct.pack('<H6xQII', 0x16, 0xD20000, 0, 0x41000000),
+            0x3c255a0b: scalar(3, 0),
+            0xfe1e2e5d: scalar(3, 0),
+        })
+        for key, tag, value in (('StatementType', 3, 0x84e9dc8a),
+                                ('StatementSubType', 3, 0xc20ef7ff),
+                                ('ResponseType', 3, 0x7332f7d6),
+                                ('FromPlayer', 2, 1), ('ToPlayer', 2, 0)):
+            self.map_fields[codec.NAMES[key]] = scalar(tag, value)
+        token = self.saved.continuation
+        with statement_scope(token, 0, 1, operation='inspect'):
+            with self.assertRaises(ValueError):
+                project_statement_fields(self.map_fields, token._xp2_deal_statement_scope)
+        with statement_scope(token, 0, 1, operation='accept'):
+            self.assertEqual(self.dispatch(), 0)
+            self.assertEqual(self.deferred.drain(), 1)
+        choice, = self.deferred.pending_diplomacy_statements
+        self.assertEqual(choice['deal_reply'], dict(operation='accept', outcome='accepted'))
+        self.assertEqual(self.deferred.combat_map_registry.entries, {})
+
+    def test_saved_control_reads_only_one_settled_diplomacy_statement(self):
+        from civ6_host.runtime import captured_saved_load
+        from civ6_host.runtime.control_input_service import ControlInputService
+        from civ6_host.runtime.saved_load_services import SavedLoadServices
+        from civ6_host.runtime.xp1_action_transport import SavedActionTransport
+
+        # Drive the actual XP2 A0 and DeferredService before exercising the
+        # captured Load guard. The bundle hash and native endpoints are fixtures.
+        self.dispatch()
+        self.assertEqual(self.deferred.drain(), 1)
+        deferred = self.deferred
+        backend = self.backend
+        backend.captured_bundle = object()
+        services = SavedLoadServices.__new__(SavedLoadServices)
+        controller = ControlInputService.__new__(ControlInputService)
+        controller.deferred, controller.local_player_id, controller._check = deferred, 0, Mock()
+        controller._a0_event_owner = self.owner
+        controller.turn_begin_state = self.owner.turn_begin_state = object()
+        self.owner.controller_owner = controller
+        transport = SavedActionTransport.__new__(SavedActionTransport)
+        transport.services, transport.pending, transport.check = services, [], Mock()
+        services.backend, services.host = backend, self.host
+        services.core_sha256, services.check = XP2_CORE_SHA256, Mock()
+        services.deferred_events, services.control_inputs = deferred, controller
+        services.event_arguments, services.actions = self.arguments, transport
+        services.events = NS(_check=Mock(), dispatch_depth=0, script_arguments=NS(live_count=0))
+        services.contexts = NS(check=Mock(), receiver=321, depth=0, lock_depth=0)
+        services.map_arguments = NS(check=Mock(), live={})
+        backend.prefix = services
+
+        with patch.object(captured_saved_load, '_sha', return_value=XP2_CORE_SHA256):
+            def inspect(**flags):
+                return captured_saved_load.control_snapshot(backend, empty=True, **flags)
+
+            with self.assertRaisesRegex(RuntimeError, 'unanswered diplomacy'):
+                inspect()
+            ledger = deferred.pending_diplomacy_statements
+            statement = ledger[0]
+            self.assertEqual(inspect(allow_diplomacy=True)['consumed'], statement['event_sequence'])
+            self.assertEqual(ledger, [statement])
+            with self.assertRaisesRegex(ValueError, 'action/interrupted-turn'):
+                inspect(allow_diplomacy=True, pending_round_actor=0)
+            deferred.statement_consumer.poisoned = True
+            with self.assertRaisesRegex(RuntimeError, 'poisoned'):
+                inspect(allow_diplomacy=True)
+            deferred.statement_consumer.poisoned = False
+            ledger.clear()
+            self.assertEqual(inspect(allow_diplomacy=True), inspect())
+
     def test_foreign_registry_refuses_before_choice_delivery(self):
         from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
         from civ6_host.runtime.native.native_combat_map_owner import CombatMapRegistry

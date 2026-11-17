@@ -118,14 +118,14 @@ class PlotPurchaseCatalogueTests(unittest.TestCase):
 
 class PlotPurchaseOwnerTests(unittest.TestCase):
     def test_live_binding_uses_the_composed_query_and_action_boundaries(self):
-        from test_xp2_checkpoint_composition import Fixture
+        from test_xp2_human_perspective import PerspectiveFixture
         from civ6_host.runtime.xp1_continuation import ACTIVE, READY
         from civ6_host.runtime.xp2_plot_purchases import _bind, _source
 
-        fixture = Fixture.__new__(Fixture)
+        fixture = PerspectiveFixture.__new__(PerspectiveFixture)
         self.addCleanup(fixture.close)
         fixture.__init__()
-        self.assertIsNot(fixture.prefix.runtime, fixture.backend.runtime)
+        self.assertIsNot(fixture.saved.prefix.runtime, fixture.backend.runtime)
         base = fixture.backend.core._handle
         for table, slot, target in _source()[1]['tables'].values():
             fixture.memory.q(base + table + slot, base + target)

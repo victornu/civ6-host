@@ -10,7 +10,7 @@ import unittest
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
-from civ6_host.runtime.execution_images import known_path, select
+from civ6_host.runtime.execution_images import _BASE_PROFILE, known_path, select
 from civ6_host.runtime.native import native_app_ownership as ownership
 from civ6_host.runtime.native import native_host_capability_status as abi
 from civ6_host.runtime.native.native_session_resume import plain
@@ -31,6 +31,17 @@ def _inventory_proofs():
 
 
 class AppOwnershipCurrentInventoryTests(unittest.TestCase):
+    def test_installed_base_uses_same_reviewed_inventory_on_its_own_installation(self):
+        host, producer, original = _inventory_proofs()
+        root = Path(_BASE_PROFILE.path).parents[3]
+        current = ownership._read_current_xp2_fixed_inventory(
+            root, original, None, host, producer, base_execution_image=_BASE_PROFILE)
+        self.assertEqual(len(current), 65)
+        self.assertEqual(sum(row['present'] for row in current), 35)
+        with self.assertRaisesRegex(ValueError, 'different installations'):
+            ownership._read_current_xp2_fixed_inventory(
+                root / 'Base', original, None, host, producer, base_execution_image=_BASE_PROFILE)
+
     def test_exact_current_xp2_inventory_is_admitted_and_legacy_stays_strict(self):
         profile = _selected_profile()
         host, producer, original = _inventory_proofs()

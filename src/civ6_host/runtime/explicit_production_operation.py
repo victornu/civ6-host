@@ -6,7 +6,7 @@ offer; legality, request, placement and effect remain official Core operations.
 from .configuration_profiles import BASE_CORE_SHA256
 
 
-def apply(owner, p, action, turn, *, player_id, core_sha256=BASE_CORE_SHA256):
+def apply(owner, p, action, turn, *, player_id, core_sha256=BASE_CORE_SHA256, archive_guard=None):
     from .native import native_production_catalog as production
     from .native import native_city_production_observation as queues
     from .native.native_player_observation import observe_player
@@ -33,6 +33,8 @@ def apply(owner, p, action, turn, *, player_id, core_sha256=BASE_CORE_SHA256):
     submitted = p.runtime.evaluate_text(p.ui_child, request, b'@explicit_production_request')
     if submitted != b'submitted' or len(p.actions.pending) != 1:
         raise RuntimeError('Expected one native production request')
+    if archive_guard is not None:
+        archive_guard(p.actions.pending[0], choice)
     p.actions.deliver_one()
     p.deferred_events.drain_empty_receivers()
     p.view_publisher.publish()

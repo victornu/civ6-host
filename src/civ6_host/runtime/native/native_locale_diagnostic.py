@@ -18,6 +18,7 @@ from civ6_host.runtime.native.native_locale_cases import LOCALE_KEYS
 from civ6_host.runtime.native.native_script_parameters import lua_string
 from civ6_host.runtime.native.native_script_runtime import NativeScriptRuntime
 _LOOKUP = '?Lookup@Localization@@YA?AVString@1@PEBD@Z'
+_CONSTRUCT_STRING = '??0String@Localization@@QEAA@PEBDI@Z'
 _PUSH_STRING = '?PushArgument@String@Localization@@QEAA_NPEBD@Z'
 _TO_UTF8 = '?toUTF8@String@Localization@@QEAAPEBDAEAIH@Z'
 _DESTROY = '??1String@Localization@@UEAA@XZ'
@@ -26,17 +27,33 @@ _LOOKUP_MAX_BYTES = 1048576
 
 def _native_lookup(library, key: bytes, arguments: tuple[bytes, ...]=(), *, explicit_length=False) -> bytes:
     """Call the DLL String ABI directly as an independent Lua-bridge oracle."""
-    if not isinstance(key, bytes) or not key or b'\x00' in key or (len(key) > 65536) or (len(arguments) > 16) or any((not isinstance(arg, bytes) or b'\x00' in arg or len(arg) > 65536 for arg in arguments)):
-        raise ValueError('Native Locale lookup oracle input outside diagnostic bounds')
+    return _native_string_bytes(library, key, arguments, explicit_length=explicit_length)
+
+
+def _native_string_bytes(library, key: bytes, arguments: tuple[bytes, ...], *,
+                         explicit_length, constructor_rva=None) -> bytes:
+    if not isinstance(key, bytes) or not key or b'\x00' in key or len(key) > 65536 or len(arguments) > 16 or any(
+            not isinstance(arg, bytes) or b'\x00' in arg or len(arg) > 65536 for arg in arguments):
+        raise ValueError('Native Localization String input outside bounded byte domain')
     base = library._handle
     functions = {}
-    for name, rva in _EXPORT_RVAS.items():
+    if constructor_rva is None:
+        constructor = _LOOKUP
+        exports = _EXPORT_RVAS
+    else:
+        constructor = _CONSTRUCT_STRING
+        exports = {name: rva for name, rva in _EXPORT_RVAS.items() if name != _LOOKUP}
+        exports[constructor] = constructor_rva
+    for name, rva in exports.items():
         function = getattr(library, name)
         if C.cast(function, C.c_void_p).value != base + rva:
             raise ValueError(f'Unverified Localization export {name}')
         functions[name] = function
-    lookup = functions[_LOOKUP]
-    lookup.argtypes, lookup.restype = ([C.c_void_p, C.c_char_p], C.c_void_p)
+    start = functions[constructor]
+    start.argtypes = [C.c_void_p, C.c_char_p]
+    if constructor_rva is not None:
+        start.argtypes = [*start.argtypes, C.c_uint]
+    start.restype = C.c_void_p
     push = functions[_PUSH_STRING]
     push.argtypes, push.restype = ([C.c_void_p, C.c_char_p], C.c_ubyte)
     to_utf8 = functions[_TO_UTF8]
@@ -49,9 +66,9 @@ def _native_lookup(library, key: bytes, arguments: tuple[bytes, ...]=(), *, expl
     object_arg = C.c_void_p(object_pointer)
     initialized = False
     try:
-        returned = lookup(object_arg, key)
+        returned = start(object_arg, key) if constructor_rva is None else start(object_arg, key, len(key))
         if returned != object_pointer:
-            raise RuntimeError('Native Localization::Lookup violated its hidden-return ABI')
+            raise RuntimeError('Native Localization String creation returned a foreign object')
         initialized = True
         for argument in arguments:
             push(object_arg, argument)

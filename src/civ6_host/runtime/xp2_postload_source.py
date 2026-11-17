@@ -2,6 +2,9 @@
 import hashlib
 import struct
 from .configuration_profiles import XP2_CORE_SHA256,_source
+from .paths import resource_root
+from .resource_resolution import resolve_path
+from .source_verification import verify_pinned_json_bytes
 
 SOURCE=('work/host-extensions/xp2-postload160-static/source-profile-v1.json',
         '1ec775a5195ce5bab1a6a5e7da17737d7bd80763e552c3f2b24200b54bd6eb7e')
@@ -58,7 +61,8 @@ def source():
                 or b['boundary_method'] not in ('complete-runtime-function-chained-unwind-root-v2',
                                                'complete-reachable-leaf-cfg-v1')):
             raise ValueError('XP2 post160 CFG is incomplete: '+name)
-    for ref in p['references']:_source((ref['path'],ref['sha256']))
+    for ref in p['references']:
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     return p
 
 
@@ -97,7 +101,8 @@ def active_source():
                 or b['boundary_method'] not in ('complete-runtime-function-chained-unwind-root-v2',
                                                'complete-reachable-leaf-cfg-v1')):
             raise ValueError('XP2 post160 active CFG is incomplete: '+name)
-    for ref in p['references']:_source((ref['path'],ref['sha256']))
+    for ref in p['references']:
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     return p
 
 

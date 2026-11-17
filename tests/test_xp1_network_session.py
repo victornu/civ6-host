@@ -20,7 +20,9 @@ from civ6_host.contracts import network_turn
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
 from civ6_host.runtime.native.network_session import NativeNetworkSession, xp1_loaded_close_evidence
 from civ6_host.runtime.native.native_action_session import NativeActionSession
-from civ6_host.runtime.native.native_saved_session import ROOT, MEMORY_LIMIT
+from civ6_host.runtime.native.native_saved_session import (
+    MIN_EXPANSION_MEMORY_RESERVE_MIB, ROOT, MEMORY_LIMIT, RUNNING_MEMORY_FLOOR_BYTES,
+)
 from civ6_host.runtime.native.native_saved_session_protocol import outcome
 from civ6_host.runtime.native.native_victory_episode import POLICY_ID
 from civ6_host.runtime.network_protocol import SCHEMA, validate_network_response
@@ -146,6 +148,104 @@ class Fixture:
 
 
 class XP1NetworkSessionTests(unittest.TestCase):
+    def test_unrouted_human_never_reaches_the_native_command_pipe(self):
+        from civ6_host.runtime.backend import NetworkBackend
+        session = NativeNetworkSession.__new__(NativeNetworkSession)
+        session._owner = Mock()
+        session.finished = False
+        session.protocol = NS(session={'local_player_id': 0, 'human_player_ids': [0, 1]})
+        backend = NetworkBackend.__new__(NetworkBackend)
+        backend._session = session
+        self.assertEqual(backend.controllable_player_ids, (0,))
+        with patch.object(NativeActionSession, 'request', return_value='accepted') as dispatch:
+            with self.assertRaisesRegex(ValueError, 'only routes its captured local player'):
+                backend.request({'player_id': 1, 'operation': 'observe'})
+            dispatch.assert_not_called()
+            request = {'player_id': 0, 'operation': 'observe'}
+            self.assertEqual(backend.request(request), 'accepted')
+            dispatch.assert_called_once_with(request)
+
+    def test_reduced_reserve_preflight_checks_both_system_counters_and_parent(self):
+        session = NativeNetworkSession.__new__(NativeNetworkSession)
+        session.memory_reserve_mib = MIN_EXPANSION_MEMORY_RESERVE_MIB
+        session.reset_started = 0
+        session.reset_timings_seconds = {}
+        session.reset_resource_samples = []
+        required = MEMORY_LIMIT + MIN_EXPANSION_MEMORY_RESERVE_MIB * 1024 ** 2
+        session.win = NS(
+            available=Mock(return_value=dict(physical_available_bytes=required,
+                                             commit_available_bytes=required)),
+            memory=Mock(return_value=dict(private_bytes=MEMORY_LIMIT)),
+        )
+        session._check_reset_resources('before_preflight')
+        self.assertTrue(session.reset_resource_samples[-1]['admitted'])
+        self.assertEqual(session.reset_resource_samples[-1]['required_available_bytes'], required)
+        for counter in ('physical_available_bytes', 'commit_available_bytes'):
+            with self.subTest(counter=counter):
+                session.win.available.return_value[counter] -= 1
+                with self.assertRaisesRegex(RuntimeError, '1280 MiB reserve'):
+                    session._check_reset_resources('before_spawn')
+                self.assertFalse(session.reset_resource_samples[-1]['admitted'])
+                session.win.available.return_value[counter] += 1
+        session.win.memory.return_value['private_bytes'] += 1
+        with self.assertRaisesRegex(RuntimeError, 'Python supervisor exceeds'):
+            session._check_reset_resources('after_preflight')
+
+    def test_live_game_can_remove_formerly_alive_actors_catalogue(self):
+        with Fixture() as f:
+            session = f.session()
+            initial = session.reset()
+            protocol = session.protocol
+            request = {k: initial[k] for k in ('schema', 'nonce', 'episode_id', 'game_generation')}
+            request.update(sequence=1, operation='observe', player_id=0)
+            reply = deepcopy(initial)
+            reply.update(sequence=1, operation='observe', observation=None, decisions=None)
+            reply['session']['active_human_player_ids'] = []
+            reply['outcome']['native_victory'].update(is_alive=False, was_ever_alive=True)
+            self.assertIn(0, protocol.catalogues)
+
+            active = deepcopy(reply)
+            active['session']['active_human_player_ids'] = [0]
+            leaks_board = dict(reply, observation=initial['observation'], decisions=initial['decisions'])
+            for invalid in (active, leaks_board):
+                with self.assertRaisesRegex(ValueError, 'Inactive player cannot'):
+                    validate_network_response(invalid, protocol, 'observe', request=request)
+            never_alive = deepcopy(reply)
+            never_alive['outcome']['native_victory']['was_ever_alive'] = False
+            with self.assertRaisesRegex(ValueError, 'Live LAN reply needs both'):
+                validate_network_response(never_alive, protocol, 'observe', request=request)
+
+            protocol.commit_reply(request, reply)
+            protocol.accept_response(reply)
+            self.assertFalse(protocol.ended)
+            self.assertNotIn(0, protocol.catalogues)
+            self.assertNotIn(0, protocol.observations)
+            self.assertIsNone(protocol.decisions)
+
+    def test_running_reduced_reserve_records_and_stops_for_pressure(self):
+        session = NativeNetworkSession.__new__(NativeNetworkSession)
+        session.supervisor_memory = {'runtime_samples': 0}
+        session._fail = Mock()
+        floor = RUNNING_MEMORY_FLOOR_BYTES
+        session.win = NS(
+            available=Mock(return_value=dict(physical_available_bytes=floor,
+                                             commit_available_bytes=floor)),
+            memory=Mock(return_value=dict(private_bytes=MEMORY_LIMIT, peak_commit_bytes=MEMORY_LIMIT)),
+        )
+        self.assertTrue(session._check_running_memory())
+        session._fail.assert_not_called()
+        session.win.available.return_value['commit_available_bytes'] -= 1
+        self.assertFalse(session._check_running_memory())
+        self.assertEqual(session._fail.call_args.args[0], 'system_memory_pressure')
+        self.assertEqual(session.supervisor_memory['minimum_available_bytes'], floor - 1)
+        session.win.available.return_value['commit_available_bytes'] += 1
+        session.win.memory.return_value.update(private_bytes=MEMORY_LIMIT + 1,
+                                               peak_commit_bytes=MEMORY_LIMIT + 1)
+        self.assertFalse(session._check_running_memory())
+        self.assertEqual(session._fail.call_args.args[0], 'parent_memory_pressure')
+        self.assertEqual(session.supervisor_memory['peak_parent_commit_bytes'], MEMORY_LIMIT + 1)
+        self.assertEqual(session.supervisor_memory['runtime_samples'], 3)
+
     def test_v5_cancel_offer_and_waiting_null_orders_cross_actual_parent_admission(self):
         from test_capability_world_contract import value as world_value
         from test_capability_unit_orders import extend
@@ -188,8 +288,9 @@ class XP1NetworkSessionTests(unittest.TestCase):
             session = f.session()
             self.assertIs(session.protocol_class, NativeNetworkSession.protocol_class)
             for change in (dict(input_profile='xp2'), dict(prepared_capture=None),
-                           dict(lifetime_seconds=1501), dict(checkpoint_on_close=1),
+                           dict(lifetime_seconds=3601), dict(checkpoint_on_close=1),
                            dict(city_management_diagnostic=True), dict(world_input_diagnostic=True),
+                           dict(reduced_memory_reserve=1), dict(reduced_memory_reserve=True),
                            dict(_admitted_bundle=object()), dict(privileged_critic_diagnostic=True)):
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     f.session(**change)
@@ -324,15 +425,19 @@ class XP1NetworkSessionTests(unittest.TestCase):
                 (session.run/'supervisor.json').write_text(json.dumps(session.report), encoding='utf-8')
                 prior_run, prior_pins, prior_nonce = session.run, session.pins, session.nonce
                 prior_report, prior_last = session.report, session.last
+                prior_samples = session.reset_resource_samples
+                sample = {'phase': 'after_preflight', 'admitted': True}
                 if failed_phase == 'private_fixture':
                     def fail_copy(*args):
                         f.prepare(*args)
+                        session.reset_resource_samples.append(sample)
                         raise OSError('fixture copy interrupted')
                     injection = patch.object(inputs, 'prepare_private_fixture', side_effect=fail_copy)
                 else:
                     original = session._write_private_closure
                     def fail_closure(*args, **kwargs):
                         original(*args, **kwargs)
+                        session.reset_resource_samples.append(sample)
                         raise OSError('closure preparation interrupted')
                     injection = patch.object(session, '_write_private_closure', side_effect=fail_closure)
                 with injection, self.assertRaisesRegex(OSError, 'interrupted'):
@@ -344,6 +449,7 @@ class XP1NetworkSessionTests(unittest.TestCase):
                 self.assertEqual(session.nonce, prior_nonce)
                 self.assertIs(session.report, prior_report)
                 self.assertIs(session.last, prior_last)
+                self.assertIs(session.reset_resource_samples, prior_samples)
                 failure = session.last_preparation_failure
                 failed_run = Path(failure['run_directory'])
                 record = json.loads((failed_run/'parent-preparation-failure.json').read_bytes())
@@ -351,6 +457,8 @@ class XP1NetworkSessionTests(unittest.TestCase):
                 self.assertEqual(record['previous_supervised_run'], str(prior_run))
                 self.assertIs(record['native_process_started'], False)
                 self.assertIs(record['supervisor_report_created'], False)
+                self.assertEqual(record['reset_resource_samples'], [sample])
+                self.assertEqual(failure['reset_resource_samples'], [sample])
                 self.assertTrue((failed_run/'private'/'gameplay.sqlite').is_file())
                 self.assertFalse((failed_run/'supervisor.json').exists())
                 resumed = session.reset()

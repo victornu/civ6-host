@@ -1,5 +1,6 @@
 """Caller-selected ordinary government changes on the existing saved owner."""
 from civ6_host.contracts import government as contract
+from .configuration_profiles import XP1_CORE_SHA256
 from .native import native_government_actions as native
 from .native import native_government_consideration as consideration
 from .native.native_saved_government import catalog as shared_catalog
@@ -23,27 +24,44 @@ def project(raw,player_id,turn):
     return public
 
 
-def read(saved,observation):
-    bind_owner(saved)
+def snapshot(saved,observation):
+    if saved.backend.load_abi.core_sha256 == XP1_CORE_SHA256:
+        from .xp1_government_policy_source import bind_owner as bind_xp1
+        bind_xp1(saved)
+    else:
+        bind_owner(saved)
     pid,turn=observation['player_id'],observation['turn']
     raw=shared_catalog(saved.prefix,turn,player_id=pid)
     public=project(raw,pid,turn)
+    return raw,public
+
+
+def read(saved,observation):
+    raw,public=snapshot(saved,observation)
     saved.continuation.explicit_government_raw=raw
     saved.continuation.explicit_government=public
     return public
 
 
-def apply(saved,action,before):
+def apply(saved,action,before,*,borrowed=None):
     from .native.native_player_observation import observe_player
     pid,turn=before['player_id'],before['turn']
-    expected=saved.continuation.explicit_government
-    fresh=read(saved,before)
+    if borrowed is None:
+        expected=saved.continuation.explicit_government
+        fresh=read(saved,before)
+    else:
+        expected=borrowed
+        raw,fresh=snapshot(saved,before)
+    source = SOURCE
+    if getattr(saved, 'xp1_government', False) is True:
+        from .xp1_government_policy_source import SOURCE as source
     if fresh!=expected or action not in contract.actions(fresh):
         raise RuntimeError('Government choice is stale or not offered')
+    if borrowed is None:
+        raw=saved.continuation.explicit_government_raw
     p=saved.prefix
     if p.actions.pending or p.deferred_events.pending:
         raise RuntimeError('Government choice requires drained owned queues')
-    raw=saved.continuation.explicit_government_raw
     if action['kind']=='government':
         choice=native.choose(raw['catalog'],action['index'])
         if choice['selected_hash']&0xffffffff!=action['hash']:
@@ -54,7 +72,7 @@ def apply(saved,action,before):
             raise RuntimeError('Government request does not match its single native archive')
         native.validate_native_archive(p.actions.pending[0],choice)
         saved.emit('xp2_government_request_submitted',action=action,submitted=submitted,
-                   source_proof_sha256=SOURCE[1],native_effect_verified=False)
+                   source_proof_sha256=source[1],native_effect_verified=False)
         p.actions.deliver_one()
         p.deferred_events.drain()
         p.view_publisher.publish()
@@ -75,14 +93,15 @@ def apply(saved,action,before):
     else:
         raise ValueError('Unsupported government decision')
     observed=observe_player(p.runtime,p.ui_child,pid)
-    after=read(saved,observed)
+    after=read(saved,observed) if borrowed is None else snapshot(saved,observed)[1]
     if observed['turn']!=turn or after['current_index']!=action['index']:
         raise RuntimeError('Government transition changed its turn or target')
     if action['kind']=='retain_government' and (not after['considered'] or after['consideration_blocker']):
         raise RuntimeError('Government consideration did not clear its native blocker')
-    from .xp2_policies import read as read_policies
-    policies=read_policies(saved,observed)
+    from . import xp2_policies
+    policies=(xp2_policies.read(saved,observed) if borrowed is None
+              else xp2_policies.snapshot(saved,observed))
     saved.emit('xp2_government_effect_verified',action=action,before=fresh,after=after,
         policy_slot_count=len(policies['slots']),effect=effect,
-        source_proof_sha256=SOURCE[1],automatic_choices_applied=False)
+        source_proof_sha256=source[1],automatic_choices_applied=False)
     return dict(observation=observed,effect=effect)

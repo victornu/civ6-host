@@ -1,11 +1,10 @@
 """Source admission and retained owner for the current XP2 occupation choices."""
 
-from copy import deepcopy
 import hashlib
 from pathlib import Path
 
-from civ6_host.contracts import captured_city
 from .a0_policy_unlock_current import CURRENT_CORE_SHA256, _require_image
+from .captured_city_session import BINDINGS
 from .configuration_profiles import _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
@@ -13,12 +12,6 @@ from .resource_resolution import resolve_path
 
 SOURCE = ('evidence/host-xp2-captured-city-source.json',
           '22f1e528c29113dc29d9eeb9fdb72d207890933c2da8dc1b05e93e6e2c25a4b7')
-_BINDINGS = frozenset((
-    'City.CanRaze', 'City.GetJustConqueredFrom', 'City.GetOriginalOwner',
-    'City.GetOwnerBeforeOccupation', 'CityManager.CanStartCommand',
-    'CityManager.RequestCommand', 'Diplomacy.CanLiberateCityTo',
-    'PlayerCities.GetNextCapturedCity',
-))
 
 
 def source(image):
@@ -28,7 +21,7 @@ def source(image):
             or proof['image']['profile_id'] != image.id
             or proof['image']['sha256'] != image.image_sha256
             or resolve_path(Path(proof['image']['path'])).resolve() != Path(image.path).resolve()
-            or frozenset(proof['bindings']) != _BINDINGS
+            or frozenset(proof['bindings']) != BINDINGS
             or {name: row['value'] for name, row in proof['directives'].items()} !=
                 dict(LIBERATE_FOUNDER=0, LIBERATE_PREVIOUS_OWNER=1, KEEP=2, RAZE=3)
             or proof['popup'] != dict(
@@ -84,39 +77,3 @@ def bind(saved):
         if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
             raise ValueError('Live XP2 captured-city binding differs at ' + span['start_rva'])
     continuation.captured_city_core = core
-
-
-def read(saved, observation, *, controls, actions_closed):
-    from civ6_host.contracts.network_turn import is_waiting
-    from .native import native_saved_captured_city as native
-
-    c = saved.continuation
-    c.explicit_captured_city = None
-    if (actions_closed or is_waiting(controls)
-            or getattr(c, 'captured_city_core', None) is None):
-        return None
-    core = saved.backend.core
-    if c.captured_city_core is not core or observation != c.observation:
-        raise ValueError('XP2 captured-city query lost its retained Core or observation')
-    pid, turn = observation['player_id'], observation['turn']
-    value = native.catalog(c.prefix, turn, player_id=pid,
-                           execution_image=core._civ6_host_execution_image)
-    public = captured_city.project_public(value, observation=observation)
-    c.explicit_captured_city = deepcopy(value)
-    return public
-
-
-def apply(saved, action, before):
-    from .native import native_saved_captured_city as native
-
-    c = saved.continuation
-    c.check(active=True)
-    core = saved.backend.core
-    if (getattr(c, 'captured_city_core', None) is not core
-            or before != c.observation or c.explicit_captured_city is None):
-        raise ValueError('XP2 captured-city choice lacks its retained Core and catalogue')
-    after = native.apply(c, c.prefix, action, before['turn'], before,
-                         player_id=before['player_id'],
-                         execution_image=core._civ6_host_execution_image)
-    c.explicit_captured_city = None
-    return dict(status='completed', observation=after, action=deepcopy(action))

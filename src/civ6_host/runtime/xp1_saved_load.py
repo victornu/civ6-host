@@ -10,6 +10,7 @@ import hashlib
 from pathlib import Path
 
 from .saved_load_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256, profile_for_sha
+from .source_verification import file_sha256
 from .configuration_profiles import (
     _source, _body, codec_source, context_copy_source,
 )
@@ -191,7 +192,7 @@ def validate_private_bootstrap(manifest, expected, *, private_root):
     expected_size = expected['icu_data'].get('bytes')
     if expected_size is not None and (type(expected_size) is not int or path.stat().st_size != expected_size):
         raise ValueError('XP1 private ICU byte count differs')
-    if hashlib.sha256(path.read_bytes()).hexdigest() != expected['icu_data']['sha256']:
+    if file_sha256(path) != expected['icu_data']['sha256']:
         raise ValueError('XP1 private ICU bytes changed')
     return True
 

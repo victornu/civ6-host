@@ -27,6 +27,7 @@ class Fixture(SpySession):
             pe.relocate_image(self.base)
             Fixture.mapped = pe.get_memory_mapped_image()
         self.memory, self.native_calls, self.native_reads = {}, [], []
+        self.actor = 0
         self.call_hook = self.read_hook = None
         self.lookup_override = None
         self.backend.core._handle = self.base
@@ -67,7 +68,7 @@ class Fixture(SpySession):
         for index, (sender, target, definition) in enumerate(rows):
             address = self.vector + index * 0x140
             self.put(address + 0x118, '<i', sender)
-            if sender == 0:  # Foreign target/type memory deliberately unavailable.
+            if sender == self.actor:  # Foreign target/type memory deliberately unavailable.
                 self.put(address + 0xc, '<i', target)
                 self.put(address + 0x138, '<i', definition)
 
@@ -97,7 +98,7 @@ class Fixture(SpySession):
             assert arg_types == () and args == ()
             return self.manager
         if rva == 0x26c770:
-            assert arg_types == (C.c_int32,) and args == (0,)
+            assert arg_types == (C.c_int32,) and args == (self.actor,)
             return self.player
         if rva == 0x7d08c0:
             assert arg_types == () and args == ()
@@ -121,7 +122,7 @@ class Fixture(SpySession):
         return self.snapshot()
 
 
-def attach_memory(graph):
+def attach_memory(graph, *, actor=0):
     """Add only native bytes/calls to an existing real CycleTests.graph owner.
 
     Caller retains its owner/reference/mode setup. Existing memory and all
@@ -132,6 +133,7 @@ def attach_memory(graph):
         graph.saved, graph.backend, graph.prefix, graph.continuation)
     f.image = graph.backend.core._civ6_host_execution_image
     f.base = graph.backend.core._handle
+    f.actor = actor
     f.memory, f.native_calls, f.native_reads = {}, [], []
     f.call_hook = f.read_hook = f.lookup_override = None
     original_call = getattr(graph.backend.runtime, 'call', None)

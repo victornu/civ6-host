@@ -20,6 +20,41 @@ WAIT='{"stage":"empty_job_set_waited","export":"EXP_JobManager_Wait","first_argu
 
 
 class StdoutProfiles(unittest.TestCase):
+    def test_rebuilt_base_host_keeps_the_pinned_wait_grammar(self):
+        from civ6_host.runtime.source_build_identity import BASE_CURRENT_HOST_REFERENCE
+
+        core = profiles.BASE_INSTALLED_CORE_SHA256
+        host = BASE_CURRENT_HOST_REFERENCE[1]
+        profile = profiles.selected_profile(core, host)
+        line = (PREFIX + WAIT + '\n').encode()
+        event, record = profiles.decode_record(line, profile, line_number=3)
+        self.assertEqual(event, json.loads(WAIT))
+        self.assertEqual(record['source_sha256'], profiles.BASE_CURRENT_HOST_PROOF[1])
+        with self.assertRaises(ValueError):
+            profiles.selected_profile(profiles.BASE_CORE_SHA256, host)
+        for path, digest in profiles.source_dependencies(core_sha256=core).items():
+            self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(), digest)
+
+    def test_installed_base_transport_preserves_the_event_and_uses_its_own_proof(self):
+        core, host = profiles.BASE_INSTALLED_CORE_SHA256, profiles.BASE_HOST
+        line = (PREFIX + WAIT + '\n').encode()
+        profile = profiles.selected_profile(core, host)
+        event, record = profiles.decode_record(line, profile, line_number=3)
+        self.assertEqual(event, json.loads(WAIT))
+        self.assertEqual(record['source_sha256'], profiles.BASE_INSTALLED_SOURCE[1])
+        self.assertEqual(record['raw_sha256'], hashlib.sha256(line).hexdigest())
+        text = decoder.decode_stdout(line.decode(), core_sha256=core, host_sha256=host)
+        self.assertEqual(text['events'], [event])
+        self.assertFalse(text['semantic_validation_replaced'])
+        with self.assertRaises(ValueError):
+            profiles.selected_profile(core, profiles.XP1_HOST)
+        with tempfile.TemporaryDirectory() as directory:
+            wrong = Path(directory) / 'proof.json'
+            wrong.write_bytes(b'{}')
+            with self.assertRaises(ValueError):
+                decoder.decode_stdout(line.decode(), core_sha256=core, host_sha256=host,
+                                      source_path=wrong)
+
     def test_xp2_selects_its_own_producer_and_host_without_extending_grammar(self):
         proof=profiles.verify_xp2()
         self.assertFalse(proof['native_execution'])

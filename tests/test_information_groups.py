@@ -105,8 +105,8 @@ def work_decisions():
 
 class InformationGroupsTests(unittest.TestCase):
     def test_public_group_names_and_required_fields(self):
-        self.assertEqual(information.PUBLIC_GROUPS, ('economy', 'production', 'growth', 'unit_work',
-            'combat', 'display', 'strategic_resources', 'diplomacy', 'trade'))
+        self.assertCountEqual(information.PUBLIC_GROUPS, information._REQUIRED_FIELDS.keys())
+        self.assertEqual(information.required_fields('captured_city'), ('captured_city',))
         from civ6_host.contracts.network_turn import CAPABILITY_UNIT_WORK_STATE_SCHEMA
         self.assertEqual(information.required_fields('unit_work'),
                          ('unit_work_state', 'unit_work_info', 'unit_work'))

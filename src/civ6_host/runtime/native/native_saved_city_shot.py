@@ -34,10 +34,14 @@ def verify_source():
 
 LUA = "\nlocal function integer(v,label,max)\n assert(type(v)=='number' and v%1==0 and v>=0 and v<=max,'invalid city shot '..label);return v\nend\nlocal function boolean(v,label) assert(type(v)=='boolean','invalid city shot '..label);return v end\nlocal function n(v) return string.format('%.0f',v) end\nlocal function ready()\n assert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid and Game.GetCurrentGameTurn()==turn,'city shot perspective changed')\n local p=Players[pid];assert(p and p:IsAlive() and p:IsTurnActive() and p:IsTurnActiveComplete(),'city shot actor not ready')\n return p\nend\nlocal player=ready()\nlocal width,height=Map.GetGridSize()\ninteger(width,'width',16384);integer(height,'height',16384)\nassert(width>0 and height>0 and width*height==Map.GetPlotCount() and width*height<=16384,'city shot map outside bound')\nlocal command=CityCommandTypes.RANGE_ATTACK\nassert(command==-1967338303 and CityCommandResults.PLOTS==1933683541 and CityCommandResults.MODIFIER_IS_TARGET==889110605,'city shot enums changed')\nassert(type(CityCommandResults.MODIFIERS)=='number' and UnitOperationTypes.PARAM_X and UnitOperationTypes.PARAM_Y,'city shot result/coordinate keys missing')\nlocal objects,seen={},{}\nfor _,c in player:GetCities():Members() do\n assert(#objects<4096 and c:GetOwner()==pid,'city shot roster unbounded or foreign')\n local id=integer(c:GetID(),'city',4294967295);assert(not seen[id],'duplicate city');seen[id]=true\n local did=integer(c:GetDistrictID(),'center district',4294967295)\n local district=player:GetDistricts():FindID(did)\n local x,y=integer(c:GetX(),'source x',width-1),integer(c:GetY(),'source y',height-1)\n assert(district and district:GetOwner()==pid and district:GetID()==did and district:GetX()==x and district:GetY()==y,'city center identity differs')\n objects[#objects+1]={id=id,did=did,x=x,y=y,city=c,district=district}\nend\ntable.sort(objects,function(a,b)return a.id<b.id end)\nlocal function snapshot()\n local out={'city-shot-v1|'..n(pid)..'|'..n(turn)..'|'..n(width)..'|'..n(height)}\n local choices={}\n for _,c in ipairs(objects) do\n  -- The banner is gated on its center district; the clicked order uses city.\n  local allowed=boolean(CityManager.CanStartCommand(c.district,command),'banner legality')\n  out[#out+1]=table.concat({'C',n(c.id),n(c.did),n(c.x),n(c.y),allowed and '1' or '0'},'|')\n  if allowed then\n   -- Banner SetInterfaceMode has no arguments. Never fabricate a mode value.\n   local results=CityManager.GetCommandTargets(c.city,command,{})\n   assert(type(results)=='table','city shot target result unavailable')\n   local plots,mods=results[CityCommandResults.PLOTS],results[CityCommandResults.MODIFIERS]\n   if plots~=nil then\n    assert(type(plots)=='table' and type(mods)=='table' and #plots<=16384 and #plots==#mods,'city shot target arrays differ')\n    local targets,used={},{}\n    for i,modifier in ipairs(mods) do\n     local id=integer(plots[i],'target index',width*height-1)\n     if modifier==CityCommandResults.MODIFIER_IS_TARGET then\n      assert(not used[id],'duplicate native target');used[id]=true\n      local p=Map.GetPlotByIndex(id);assert(p and p:GetIndex()==id,'native target plot absent')\n      local x,y=integer(p:GetX(),'target x',width-1),integer(p:GetY(),'target y',height-1)\n      assert(id==y*width+x,'native target coordinates differ')\n      local params={[UnitOperationTypes.PARAM_X]=x,[UnitOperationTypes.PARAM_Y]=y}\n      if boolean(CityManager.CanStartCommand(c.city,command,params),'target legality') then\n       targets[#targets+1]={id=id,x=x,y=y,params=params}\n      end\n     end\n    end\n    table.sort(targets,function(a,b)return a.id<b.id end)\n    for _,t in ipairs(targets) do\n     assert(#choices<4096,'city shot choices exceed bound')\n     local wire=table.concat({'T',n(c.id),n(t.id),n(t.x),n(t.y)},'|')\n     out[#out+1]=wire;choices[#choices+1]={wire=wire,city=c.city,parameters=t.params}\n    end\n   end\n  end\n end\n ready();return table.concat(out,'\\n'),choices\nend\n"
 
-def source(pid, turn):
+def source(pid, turn, *, execution_image=None):
     uint(pid, 'player', 63)
     uint(turn, 'turn', 2147483647)
-    verify_source()
+    if execution_image is None:
+        verify_source()
+    else:
+        from civ6_host.runtime.xp1_city_shot import source as verify_xp1_source
+        verify_xp1_source(execution_image)
     return f'local pid,turn={pid},{turn}\n'.encode() + LUA.encode()
 
 
@@ -72,17 +76,19 @@ def parse(raw, pid, turn):
         raise ValueError('Noncanonical city-shot wire')
     return v
 
-def catalog(prefix, turn, *, player_id=0):
-    raw = prefix.runtime.evaluate_text(prefix.ui_child, source(player_id, turn) + b'local text=snapshot();return text', b'@explicit_city_shots', capacity=524289)
+def catalog(prefix, turn, *, player_id=0, execution_image=None):
+    raw = prefix.runtime.evaluate_text(prefix.ui_child,
+        source(player_id, turn, execution_image=execution_image) + b'local text=snapshot();return text',
+        b'@explicit_city_shots', capacity=524289)
     return parse(raw, player_id, turn)
 
 
-def request_source(a, v):
+def request_source(a, v, *, execution_image=None):
     validate_action(a, v['width'], v['height'])
     if a not in actions(v):
         raise ValueError('City-shot choice outside native catalogue')
     selected = f"T|{a['city_id']}|{a['plot_id']}|{a['x']}|{a['y']}"
-    return source(v['player_id'], v['turn']) + f"\nlocal text,choices=snapshot();assert(text=={json.dumps(wire(v))},'city-shot catalogue stale')\nlocal found=nil;for _,c in ipairs(choices) do if c.wire=={json.dumps(selected)} then assert(not found);found=c end end\nassert(found,'city shot no longer offered');ready()\nassert(CityManager.CanStartCommand(found.city,command,found.parameters)==true,'native city shot veto')\nCityManager.RequestCommand(found.city,command,found.parameters)\nreturn 'submitted'\n".encode()
+    return source(v['player_id'], v['turn'], execution_image=execution_image) + f"\nlocal text,choices=snapshot();assert(text=={json.dumps(wire(v))},'city-shot catalogue stale')\nlocal found=nil;for _,c in ipairs(choices) do if c.wire=={json.dumps(selected)} then assert(not found);found=c end end\nassert(found,'city shot no longer offered');ready()\nassert(CityManager.CanStartCommand(found.city,command,found.parameters)==true,'native city shot veto')\nCityManager.RequestCommand(found.city,command,found.parameters)\nreturn 'submitted'\n".encode()
 
 def effect(a, before, after, old, new, old_defenses, new_defenses):
     compare_own_cities(old, before)
@@ -103,14 +109,16 @@ def effect(a, before, after, old, new, old_defenses, new_defenses):
 
 def execute(owner, prefix, a, turn, before, *, player_id, expected_catalogue,
             expected_defenses, validate, read_catalogue, compare, offers,
-            request, verify_effect, shooter, proof_sha):
+            request, verify_effect, shooter, proof_sha, defense_core_sha256=None):
     """Execute against the caller's retained player catalogue and defense snapshot."""
     validate(a, before['width'], before['height'])
     old = read_catalogue(prefix, turn, player_id=player_id)
     compare(old, before)
     if old != expected_catalogue or a not in offers(old):
         raise RuntimeError(f'Stale {shooter}-shot decision')
-    old_defenses = defenses.catalog(prefix, turn, player_id=player_id, collect=False)['cities']
+    defense_options = {} if defense_core_sha256 is None else {'core_sha256': defense_core_sha256}
+    old_defenses = defenses.catalog(prefix, turn, player_id=player_id, collect=False,
+                                    **defense_options)['cities']
     if old_defenses != expected_defenses:
         raise RuntimeError('Stale visible city defenses')
     if prefix.actions.pending or prefix.deferred_events.pending:
@@ -127,7 +135,8 @@ def execute(owner, prefix, a, turn, before, *, player_id, expected_catalogue,
         raise RuntimeError(f'{shooter.capitalize()}-shot transport did not drain')
     after = observe_player(prefix.runtime, prefix.ui_child, player_id)
     new = read_catalogue(prefix, turn, player_id=player_id)
-    new_defenses = defenses.catalog(prefix, turn, player_id=player_id, collect=False)['cities']
+    new_defenses = defenses.catalog(prefix, turn, player_id=player_id, collect=False,
+                                    **defense_options)['cities']
     receipt = verify_effect(a, before, after, old, new, old_defenses, new_defenses)
     owner.emit(f'official_explicit_{shooter}_shot_effect', action=a, effect=receipt,
                observation_before=before, observation_after=after, catalogue_before=old,

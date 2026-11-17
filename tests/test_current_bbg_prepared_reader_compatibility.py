@@ -195,6 +195,10 @@ class CurrentBBGPreparedReaderCompatibilityTests(unittest.TestCase):
                         self.assertEqual(
                             (digest, self.consumer['runtime_sources'][name]),
                             admission._XP1_HANDOFF_CANDIDATE_DELTA)
+                    elif name == 'runtime/native/native_localization.py':
+                        self.assertTrue(admission._matches_expansion_reader(
+                            name, digest, self.consumer['runtime_sources'][name]))
+                        self.assertFalse(admission._matches_expansion_reader(name, digest, '0' * 64))
                     else:
                         self.assertEqual(self.consumer['runtime_sources'][name], digest)
 

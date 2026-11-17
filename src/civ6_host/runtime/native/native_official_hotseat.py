@@ -11,8 +11,6 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from civ6_host.runtime.native.native_diagnostic_roster import validate_player
-from civ6_host.runtime.native.native_ui_profile import FORCE_TURN_DELIVERY_PATH
-from civ6_host.runtime.native.native_ui_profile import FORCE_TURN_DELIVERY_SHA256
 from civ6_host.runtime.native.native_ui_profile import gate_admitted
 PLAYERS = (0, 1, 2, 3)
 REFERENCE = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_official_hotseat.py')))).resolve().parents[1] / 'evidence/phase2-hotseat-resets/run.json'
@@ -128,7 +126,7 @@ def _finish_round(prefix, turn, *, stop_on_victory=False):
         _publish(prefix)
 
 def prepare_interactive(owner):
-    """Retain the loaded four-human context at its first actual decision phase."""
+    """Retain the loaded four-human context at the saved owner's decision phase."""
     from civ6_host.runtime.native.native_official_load import HOTSEAT_FOUR_PROFILE
     from civ6_host.runtime.native.native_official_postload import validate_owner
     from civ6_host.runtime.native.native_official_postload import compare_public_own_fields
@@ -138,7 +136,7 @@ def prepare_interactive(owner):
     from civ6_host.runtime.native.native_victory_diagnostic import NativeVictoryReached
     inputs = validate_owner(owner, stage='post160-observed-awaiting-controlled-stop')
     if inputs.profile is not HOTSEAT_FOUR_PROFILE or getattr(owner, 'hotseat_round_attempted', False):
-        raise RuntimeError('Interactive hotseat requires the exact untouched official four-human save')
+        raise RuntimeError('Interactive hotseat requires the exact admitted four-human save')
     owner.hotseat_round_attempted = True
     owner.busy = True
     try:
@@ -151,18 +149,19 @@ def prepare_interactive(owner):
         owner.native_controller_code = (NativeControllerCode() if execution_image is None else
                                        NativeControllerCode(execution_image=execution_image))
         p.deferred_events.turn_begin_state = NativeControllerTurnState(owner.native_controller_code, owner.emit)
-        turn = 3
+        turn, player = 3, 0
         if inputs.official_bundle is not None:
             bundle = getattr(owner, 'captured_bundle', None)
             if bundle is None or bundle.inputs is not inputs or owner.loaded_readback['turn'] != bundle.initial_turn:
                 raise ValueError('Captured Hotseat initial boundary differs')
             turn = bundle.initial_turn
+            player = validate_player(owner.loaded_readback['player_id'], PLAYERS)
         p.view_publisher.publish()
-        _ready(p, turn, 0, stop_on_victory=True)
-        observation = observe_player(p.runtime, p.ui_child, 0)
+        _ready(p, turn, player, stop_on_victory=True)
+        observation = observe_player(p.runtime, p.ui_child, player)
         compare_public_own_fields(observation, owner.loaded_readback)
         owner.control(empty=True)
-        owner.hotseat_actor = 0
+        owner.hotseat_actor = player
         owner.hotseat_turn = turn
         owner.stage = 'official-hotseat-decision-ready'
         owner.busy = False
@@ -269,6 +268,8 @@ def run_explicit_actor_turn(owner, *, turn, player_id, user_forced=False):
     if type(user_forced) is not bool:
         raise ValueError('Exact forced turn flag required')
     force_ui_admitted = user_forced and gate_admitted(owner, 'force_end_turn')
+    force_source = (dict(owner.ui_profile_admission['evidence']['forced_turn_delivery'])
+                    if force_ui_admitted else None)
     if user_forced and getattr(owner, 'forced_endturn_diagnostic', False) is not True and (not force_ui_admitted):
         raise RuntimeError('UserForced is not enabled outside the explicit diagnostic')
     inputs = validate_owner(owner, stage='official-hotseat-decision-ready')
@@ -291,7 +292,7 @@ def run_explicit_actor_turn(owner, *, turn, player_id, user_forced=False):
         owner.explicit_turn_reactivation = None
         reactivation = getattr(owner, 'host_turn_reactivation', None)
         reactivation_count = reactivation.completed_count if reactivation is not None else None
-        owner.emit('official_hotseat_explicit_turn_verified', player_id=player_id, turn=turn, blockers=blockers, gate=gate, automatic_choices_applied=False, user_forced=user_forced, tutorial_gate_qualified=bool(force_ui_admitted) if user_forced else None, forced_turn_availability_source={'path': FORCE_TURN_DELIVERY_PATH, 'sha256': FORCE_TURN_DELIVERY_SHA256} if force_ui_admitted else None)
+        owner.emit('official_hotseat_explicit_turn_verified', player_id=player_id, turn=turn, blockers=blockers, gate=gate, automatic_choices_applied=False, user_forced=user_forced, tutorial_gate_qualified=bool(force_ui_admitted) if user_forced else None, forced_turn_availability_source=force_source)
         if user_forced:
             p.actions.request_end_turn(player_id, player_ids=PLAYERS, user_forced=True)
         else:

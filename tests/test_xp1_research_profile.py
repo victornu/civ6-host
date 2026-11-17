@@ -69,8 +69,9 @@ class RequestFixture:
         # Only caller-owned ctypes allocations reach here in this fixture.
         if address>=self.base and address<self.base+0x1000000:raise AssertionError('Uncaptured fixture module read')
         return C.string_at(address,size)
-    def invoke(self,**kwargs):
-        return self.module.request_player_operation(SimpleNamespace(_handle=self.base),self.context,0,
+    def invoke(self,execution_image=None,**kwargs):
+        core=SimpleNamespace(_handle=self.base,_civ6_host_execution_image=execution_image)
+        return self.module.request_player_operation(core,self.context,0,
             1848062833,{347601064:2498335618,2888817673:2550048198},read=self.read,
             native_api=self.api,core_sha256=self.core,**kwargs)
 
@@ -121,6 +122,21 @@ class ResearchProfileTests(unittest.TestCase):
         f=RequestFixture(self.request,BASE);result=f.invoke()
         self.assertEqual(result['native_parameter_vtable_rva'],'0x81d838')
         self.assertEqual(result['source_sha256'],profile.BASE_REQUEST_SOURCE)
+
+    def test_installed_xp1_profile_retains_all_operation_byte_and_slot_checks(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+
+        live = RequestFixture(self.request)
+        self.assertTrue(live.invoke(execution_image=_XP1_PROFILE)['request_invoked'])
+        foreign = RequestFixture(self.request)
+        with self.assertRaisesRegex(ValueError, 'exact installed XP1'):
+            foreign.invoke(execution_image=object())
+        self.assertEqual(foreign.calls, [])
+        drift = RequestFixture(self.request)
+        drift.memory[drift.base + 0x4be350] ^= 1
+        with self.assertRaisesRegex(ValueError, 'native body differs'):
+            drift.invoke(execution_image=_XP1_PROFILE)
+        self.assertEqual(drift.calls, [])
 
     def test_false_legality_or_read_only_does_not_submit(self):
         for allowed,submit in ((0,True),(1,False)):

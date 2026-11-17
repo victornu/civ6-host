@@ -37,7 +37,11 @@ def bind_gate_fixture(f):
     """
     from civ6_host.runtime.native.native_official_bundle import PreparedBundle
     from civ6_host.runtime.xp1_saved_load import REFERENCE
+    from civ6_host.runtime.execution_images import _XP1_PROFILE, known_path, select
     inputs=_captured_inputs();b=f.backend
+    image = select(_XP1_PROFILE.id, core_path=known_path(_XP1_PROFILE.id))
+    b.core._civ6_host_execution_image = image
+    b.core._name = image.path
     bundle=PreparedBundle(REFERENCE,inputs,1,Path(profile.verify_source()['image']['path']),{}, {},
         dict(turn=1,width=74,height=46,player_id=0),dict(engine=dict(gamecore_sha256=profile.XP1_CORE_SHA256)))
     b.inputs=f.saved.inputs=f.token.lease.inputs=inputs

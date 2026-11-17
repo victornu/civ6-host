@@ -43,6 +43,22 @@ CITY_CAPTURE_LISTENER_SOURCE = (
     '457b32250afb749a40cd9bbf6e7e4f3f2bff4d72e107ef145a7cd7ee528997dd',
 )
 CITY_CAPTURE_LISTENER_PREFIX = CITY_LISTENER_PREFIX[:4] + ('0x144325', '0x151b0c')
+HATTUSA_ACHIEVEMENT_SOURCE = (
+    'evidence/host-xp2-bbg-pantheon-native-frontier.json',
+    '0a032155e4f76b808ca66e904bb8ddf08a82a5ce9506337c18527c50d3d01f1f',
+)
+HATTUSA_ACHIEVEMENT_PREFIX = ('0x17f098', '0x1784fe', '0x360440', '0x31e62e', '0x2ebf5f')
+_HATTUSA_ACHIEVEMENT_DATA = (
+    (0x9cf220, b'CIVILIZATION_HATTUSA\0'),
+    (0x9cf238, b'NEW_ACHIEVEMENT_3_0\0'),
+)
+_HATTUSA_DELEGATE_SLOT = 0x9d0c90
+_HATTUSA_DELEGATE_TARGET = 0x17ff70
+ACHIEVEMENT_4_17_SOURCE = (
+    'evidence/host-xp2-major-peace-t63-achievement-source.json',
+    'a80043fe637455c44ab1ff9430cf55129453ba63368f55260203d8b3fa99263f',
+)
+ACHIEVEMENT_4_17_PREFIX = ('0x17f098', '0x17445a', '0x226ed4', '0x142484', '0x2653ad')
 NATIVE02_PREFIX = ("0x17f098", "0x17feda", "0x2e9e8c")
 NATIVE02_OBSERVED_CHAIN = ("0x17f098", "0x17feda", "0x2e9e8c", "0x2eda33", "0x2ead5b",
     "0x2eadb4", "0x447ffe", "0x447dc8", "0x447e33", "0x42e2c6", "0x401537",
@@ -450,6 +466,54 @@ def city_capture_listener_source(execution_image):
     return proof
 
 
+def hattusa_achievement_source(execution_image):
+    from .a0_policy_unlock_current import _require_image
+
+    _require_image(execution_image)
+    proof = _source(HATTUSA_ACHIEVEMENT_SOURCE)
+    contract = proof['optional_platform_contract']
+    extents = {name: (row['rva'], row['bytes']) for name, row in contract['spans'].items()}
+    if (proof['schema'] != 'civ6-host.xp2-bbg-pantheon-native-frontier.v1'
+            or proof['image']['sha256'] != execution_image.image_sha256
+            or proof['refusal']['slot'] != '0x20'
+            or proof['refusal']['core_return_stack'][:len(HATTUSA_ACHIEVEMENT_PREFIX)] != HATTUSA_ACHIEVEMENT_PREFIX
+            or contract['delegate_slot'] != dict(rva=hex(_HATTUSA_DELEGATE_SLOT),
+                target_rva=hex(_HATTUSA_DELEGATE_TARGET), relocatable=True)
+            or contract['shared_helper_null_branch'] != '0x17f09e -> 0x17f0f1'
+            or contract['delegate_virtual_slot'] != '0x10'
+            or contract['listener_ignores_helper_return'] is not True
+            or contract['producer_applies_native_delta_after_delegate'] is not True
+            or contract['platform_success_reported'] is not False
+            or extents != {
+                'optional_svc_helper': ('0x17f060', 167),
+                'hattusa_platform_listener': ('0x178430', 242),
+                'listener_tail_thunk': ('0x17ff70', 15),
+                'delegate_dispatcher': ('0x3603d0', 333),
+                'delegate_then_native_update': ('0x31e5f0', 96),
+                'positive_delta_join': ('0x2ebf49', 31),
+            }):
+        raise ValueError('Current XP2 Hattusa achievement source differs')
+    return contract
+
+
+def achievement_4_17_source(execution_image):
+    from .a0_policy_unlock_current import _require_image
+
+    _require_image(execution_image)
+    proof = _source(ACHIEVEMENT_4_17_SOURCE)
+    if (proof['schema'] != 'civ6-host.xp2-achievement-new-4-17.static.v1'
+            or proof['image']['sha256'] != execution_image.image_sha256
+            or proof['core_return_prefix'] != ACHIEVEMENT_4_17_PREFIX
+            or proof['slot'] != '0x20' or proof['optional_null_exit'] != 0x17F0F1
+            or proof['native_result_consumed'] is not False
+            or proof['listener_literal'] != dict(rva=0x9CFD70, text='NEW_ACHIEVEMENT_4_17')
+            or proof['delegate_table'] != dict(rva=0x9D0870, target_rva=0x17FCB0)
+            or tuple((row['rva'], row['size']) for row in proof['spans']) != (
+                (0x174340,0x14F), (0x17FCB0,0xC), (0x226EB7,0x2C), (0x142467,0x25), (0x2653A8,0xE))):
+        raise ValueError('Current XP2 achievement 4_17 source differs')
+    return proof
+
+
 def source_dependencies(*, execution_image=None) -> dict[str, str]:
     """Return immutable proof and source references required by the adapter."""
     proof = source()
@@ -473,6 +537,10 @@ def source_dependencies(*, execution_image=None) -> dict[str, str]:
         refs.append(dict(path=RAF35_SOURCE[0], sha256=RAF35_SOURCE[1]))
         city_capture_listener_source(execution_image)
         refs.append(dict(path=CITY_CAPTURE_LISTENER_SOURCE[0], sha256=CITY_CAPTURE_LISTENER_SOURCE[1]))
+        hattusa_achievement_source(execution_image)
+        refs.append(dict(path=HATTUSA_ACHIEVEMENT_SOURCE[0], sha256=HATTUSA_ACHIEVEMENT_SOURCE[1]))
+        achievement_4_17_source(execution_image)
+        refs.append(dict(path=ACHIEVEMENT_4_17_SOURCE[0], sha256=ACHIEVEMENT_4_17_SOURCE[1]))
         current_refs = [*congress['references'], *congress['images'].values()]
     pins: dict[str, str] = {}
     for ref in refs:
@@ -576,6 +644,34 @@ def verify_live(base: int, read, *, host_pointer: int, execution_image=None) -> 
             count += len(body)
             spans += 1
         current_receipt['city_capture_listener_source_sha256'] = CITY_CAPTURE_LISTENER_SOURCE[1]
+        for row in hattusa_achievement_source(execution_image)['spans'].values():
+            body = _read_exact(read, base + int(row['rva'], 16), row['bytes'])
+            if hashlib.sha256(body).hexdigest() != row['sha256']:
+                raise ValueError('XP2 Hattusa achievement live source differs at ' + row['rva'])
+            count += len(body)
+            spans += 1
+        for rva, expected in (*_HATTUSA_ACHIEVEMENT_DATA,
+                (_HATTUSA_DELEGATE_SLOT, (base + _HATTUSA_DELEGATE_TARGET).to_bytes(8, 'little'))):
+            if _read_exact(read, base + rva, len(expected)) != expected:
+                raise ValueError('XP2 Hattusa achievement live data differs')
+            count += len(expected)
+            spans += 1
+        current_receipt['hattusa_achievement_source_sha256'] = HATTUSA_ACHIEVEMENT_SOURCE[1]
+        achievement = achievement_4_17_source(execution_image)
+        for row in achievement['spans']:
+            body = _read_exact(read, base + row['rva'], row['size'])
+            if hashlib.sha256(body).hexdigest() != row['sha256']:
+                raise ValueError('XP2 achievement 4_17 live listener differs')
+            count += len(body)
+            spans += 1
+        literal, delegate = achievement['listener_literal'], achievement['delegate_table']
+        for rva, expected in ((literal['rva'], literal['text'].encode('ascii') + b'\0'),
+                              (delegate['rva'], (base + delegate['target_rva']).to_bytes(8, 'little'))):
+            if _read_exact(read, base + rva, len(expected)) != expected:
+                raise ValueError('XP2 achievement 4_17 live listener data differs')
+            count += len(expected)
+            spans += 1
+        current_receipt['achievement_4_17_source_sha256'] = ACHIEVEMENT_4_17_SOURCE[1]
     count += len(_ERA_TRANSITION_LITERAL) + len(_RAF30_LITERAL) + len(_CITY_LISTENER_LITERAL)
     spans += 3
     return {**current_receipt, "source_sha256": SOURCE[1], "native02_source_sha256": NATIVE02_SOURCE[1],
@@ -604,6 +700,10 @@ def select_contract(frames, *, service_installed: bool = False, execution_image=
         raise ValueError("Unproved XP2 optional achievement caller chain")
     returns = tuple(frame["rva"] for frame in core_frames)
     if execution_image is not None:
+        from .xp2_host_victory_history import select_achievement_source
+        victory = select_achievement_source(returns, execution_image)
+        if victory is not None:
+            return victory
         congress_source(execution_image)
         if returns[:len(CONGRESS_PREFIX)] == CONGRESS_PREFIX:
             return CONGRESS_SOURCE[1]
@@ -613,6 +713,12 @@ def select_contract(frames, *, service_installed: bool = False, execution_image=
         if returns[:len(CITY_CAPTURE_LISTENER_PREFIX)] == CITY_CAPTURE_LISTENER_PREFIX:
             city_capture_listener_source(execution_image)
             return CITY_CAPTURE_LISTENER_SOURCE[1]
+        if returns[:len(HATTUSA_ACHIEVEMENT_PREFIX)] == HATTUSA_ACHIEVEMENT_PREFIX:
+            hattusa_achievement_source(execution_image)
+            return HATTUSA_ACHIEVEMENT_SOURCE[1]
+        if returns[:len(ACHIEVEMENT_4_17_PREFIX)] == ACHIEVEMENT_4_17_PREFIX:
+            achievement_4_17_source(execution_image)
+            return ACHIEVEMENT_4_17_SOURCE[1]
     if returns[:len(ACCEPTED_CORE_RETURN_PREFIX)] == ACCEPTED_CORE_RETURN_PREFIX:
         return SOURCE[1]
     if returns[:len(NATIVE02_PREFIX)] == NATIVE02_PREFIX:

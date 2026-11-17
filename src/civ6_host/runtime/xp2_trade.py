@@ -1,4 +1,4 @@
-"""Saved-load adapter for the current XP2 native trade catalogues.
+"""Saved-load adapter for the native trade catalogues.
 
 The route and origin algorithms, Lua sources and native validators remain in
 the established official-source adapters. This module binds them to one saved
@@ -9,12 +9,36 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+from struct import pack
 
-from .configuration_profiles import XP2_CORE_SHA256
+from civ6_host.contracts import trade
+
+from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 from .xp1_world_input import _owner
 
 _ACCESSORS = ('work/trade-common-client/xp2-current-trade-accessors.json',
               '2c858af05f78ce1763c163995cfbacd5c2a1175b11073e8ca7dc0a69b34edd0f')
+FIELDS = {'make_trade_route': 'trade_routes', 'change_trade_origin': 'trade_origins'}
+
+
+def borrowed_enabled(saved, requested=None):
+    enabled = (getattr(saved, 'standard_trade', False) is True
+               or getattr(saved, 'trade_diagnostic', False) is True)
+    if requested is None:
+        return enabled
+    if type(requested) is not bool or (requested and not enabled):
+        raise ValueError('Borrowed trade requires the admitted Gathering Storm trade option')
+    return requested
+
+
+def validate_action(action, catalogue):
+    if type(catalogue) is not dict:
+        raise ValueError('Trade action requires its published native catalogue')
+    width, height = catalogue['width'], catalogue['height']
+    if action['kind'] == 'make_trade_route':
+        trade.validate_route_action(action, width, height)
+    else:
+        trade.validate_origin_action(action, width, height)
 
 
 def source_dependencies(*, execution_image=None):
@@ -124,30 +148,26 @@ def catalogue(saved, observation, *, include_origins=True):
     if type(include_origins) is not bool:
         raise ValueError('Trade origin reader selection must be Boolean')
     from .execution_images import ExecutionImageProfile
-    from .native import native_saved_trade as routes
-    from .native import native_saved_trade_origin as origins
     b, c, p, identity = _owner(saved, active=False)
-    if b.load_abi.core_sha256 != XP2_CORE_SHA256:
-        raise ValueError('XP2 trade catalogues require the current XP2 engine')
     if type(observation) is not dict or observation != c.observation:
         raise ValueError('Trade catalogue requires the current observation')
     image = getattr(b.core, '_civ6_host_execution_image', None)
-    if type(image) is not ExecutionImageProfile:
-        raise ValueError('Current XP2 execution image profile is unavailable')
-    source_dependencies(execution_image=image)
+    if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+        from .xp1_trade_source import supports
+        if (getattr(saved, 'xp1_trade', False) is not True or not include_origins
+                or not supports(b.captured_bundle.reference, image)):
+            raise ValueError('Rise and Fall trade requires its exact stock route and origin readers')
+    else:
+        if b.load_abi.core_sha256 != XP2_CORE_SHA256 or type(image) is not ExecutionImageProfile:
+            raise ValueError('Trade requires a supported expansion execution image')
+        source_dependencies(execution_image=image)
     c._xp2_trade_catalogue = None
     c.explicit_trade_routes = c.explicit_trade_origins = None
     before, sequence = deepcopy(observation), c.sequence
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     bbg_display = _bbg_display(saved, b)
-    route_state = routes.catalog(p, before['turn'], player_id=before['player_id'],
-                                 bbg_display=bbg_display)
-    origin_state = (origins.catalog(p, before['turn'], player_id=before['player_id'])
-                    if include_origins else None)
-    routes.compare_own(route_state, before)
-    if origin_state is not None:
-        origins.compare_own(origin_state, before)
+    route_state, origin_state = _read_native(p, before, bbg_display, include_origins)
     actual = _owner(saved, active=False)
     if (any(x is not y for x, y in zip(actual, (b, c, p, identity)))
             or c.sequence != sequence or c.observation != before):
@@ -162,17 +182,94 @@ def catalogue(saved, observation, *, include_origins=True):
     return {'trade_routes': deepcopy(route_state), 'trade_origins': deepcopy(origin_state)}
 
 
+def _read_native(prefix, observation, bbg_display, include_origins):
+    from .native import native_saved_trade as routes
+    from .native import native_saved_trade_origin as origins
+
+    pid, turn = observation['player_id'], observation['turn']
+    route_state = routes.catalog(prefix, turn, player_id=pid, bbg_display=bbg_display)
+    origin_state = origins.catalog(prefix, turn, player_id=pid) if include_origins else None
+    routes.compare_own(route_state, observation)
+    if origin_state is not None:
+        origins.compare_own(origin_state, observation)
+    return route_state, origin_state
+
+
+def _borrowed_record(saved, observation, *, include_origins):
+    from .xp1_session_view import _borrowed_xp2_reference
+
+    _borrowed_xp2_reference(saved, observation['player_id'])
+    b, c, p, identity = _owner(saved, active=True)
+    image = getattr(b.core, '_civ6_host_execution_image', None)
+    source_dependencies(execution_image=image)
+    sequence = c.sequence
+    c.transport.require_empty_native_queue()
+    b.control(empty=True)
+    display = _bbg_display(saved, b)
+    routes, origins = _read_native(p, observation, display, include_origins)
+    if (any(a is not b for a, b in zip(_owner(saved, active=True), (b, c, p, identity)))
+            or c.sequence != sequence):
+        raise RuntimeError('Borrowed trade crossed its native decision boundary')
+    c.transport.require_empty_native_queue()
+    b.control(empty=True)
+    return _Catalogue(saved, b, c, p, identity, sequence, observation, routes, origins, display)
+
+
+def read_borrowed(saved, observation, *, ready, strategic_allowed):
+    if not ready:
+        return dict(trade_routes=None, trade_origins=None)
+    record = _borrowed_record(saved, observation, include_origins=strategic_allowed)
+    return dict(trade_routes=record.routes, trade_origins=record.origins)
+
+
+def apply_borrowed(saved, action, observation, *, expected, enabled, ready, strategic_allowed):
+    refusal = dict(status='refused', requested_action=action)
+    is_route = action['kind'] == 'make_trade_route'
+    if not enabled or not ready or (not is_route and not strategic_allowed):
+        return dict(refusal, reason='native_trade_acting_boundary_unavailable'), None
+    record = _borrowed_record(saved, observation, include_origins=strategic_allowed)
+    current = record.routes if is_route else record.origins
+    if current != expected:
+        return dict(refusal, reason='native_trade_choice_changed'), None
+    actions = trade.route_actions(current) if is_route else trade.origin_actions(current)
+    if action not in actions:
+        return dict(refusal, reason='native_trade_choice_unavailable'), None
+    effect = _apply(saved, action, record, borrowed=True)
+    return dict(status='completed', reason=None, requested_action=action), effect['observation']
+
+
+def verify_borrowed_archive(payload, player_id, action):
+    """Check the native UnitOperation serializer before delivery."""
+    head = (0x8c0f3f36, player_id, 1, action['unit_id'])
+    if action['kind'] == 'make_trade_route':
+        expected = pack('<IHH12I', *head, 18, 0xffffffff, 0, 1, 0,
+                        action['x0'], action['y0'], action['x1'], action['y1'], 0xffffffff, 0)
+    elif action['kind'] == 'change_trade_origin':
+        expected = pack('<IHH9I', *head, 51, 0xffffffff, 0, 1, action['x'], action['y'], 0, 0)
+    else:
+        raise ValueError('Unsupported borrowed trade archive')
+    if type(payload) is not bytes or payload != expected:
+        raise RuntimeError('Trade archive differs from the native sender, unit or destination')
+
+
 def apply(saved, action, before):
     """Submit one offered trade command, flush script feedback, then verify readback."""
+    _, c, _, _ = _owner(saved, active=True)
+    record = getattr(c, '_xp2_trade_catalogue', None)
+    _, c, _, _ = _current(saved, record, active=True)
+    if before != record.observation:
+        raise ValueError('Trade action was not offered at this observation')
+    return _apply(saved, action, record)
+
+
+def _apply(saved, action, record, *, borrowed=False):
     from .native import native_saved_trade as routes
     from .native import native_saved_trade_origin as origins
     from .native.native_player_observation import observe_player
-    _, c, _, _ = _owner(saved, active=True)
-    record = getattr(c, '_xp2_trade_catalogue', None)
-    b, c, p, _ = _current(saved, record, active=True)
-    if before != record.observation:
-        raise ValueError('Trade action was not offered at this observation')
-    standard = getattr(saved, 'standard_trade', False) is True
+
+    b, c, p, before = record.backend, record.continuation, record.prefix, record.observation
+    flag = 'xp1_trade' if b.load_abi.core_sha256 == XP1_CORE_SHA256 else 'standard_trade'
+    standard = getattr(saved, flag, False) is True
     if standard and c.trade_feedback is not None:
         raise ValueError('Standard trade cannot use the BBG feedback owner')
     kind = action.get('kind') if type(action) is dict else None
@@ -186,7 +283,7 @@ def apply(saved, action, before):
         expected_stage = 'official_explicit_trade_origin_effect'
     else:
         raise ValueError('Unsupported XP2 trade action')
-    if getattr(c, field) != state or action not in module.actions(state):
+    if (not borrowed and getattr(c, field) != state) or state is None or action not in module.actions(state):
         raise ValueError('Trade action was not offered by the current native catalogue')
     c.transport.require_empty_native_queue()
     b.control(empty=True)
@@ -200,6 +297,8 @@ def apply(saved, action, before):
         b'@xp2_trade_route_request' if kind == 'make_trade_route' else b'@xp2_trade_origin_request')
     if raw != b'submitted' or len(p.actions.pending) != 1:
         raise RuntimeError('Native trade request did not enqueue exactly one action')
+    if borrowed:
+        verify_borrowed_archive(p.actions.pending[0], player_id, action)
     archive_sha256 = hashlib.sha256(p.actions.pending[0]).hexdigest()
     p.actions.deliver_one()
     p.deferred_events.drain_empty_receivers()
@@ -212,12 +311,10 @@ def apply(saved, action, before):
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     after = observe_player(p.runtime, p.ui_child, player_id)
-    refreshed_routes = routes.catalog(p, turn, player_id=player_id, bbg_display=record.bbg_display)
-    refreshed_origins = (origins.catalog(p, turn, player_id=player_id)
-                         if record.origins is not None else None)
-    routes.compare_own(refreshed_routes, after)
-    if refreshed_origins is not None:
-        origins.compare_own(refreshed_origins, after)
+    if (after['player_id'], after['turn']) != (player_id, turn):
+        raise RuntimeError('Trade effect crossed the native player or turn')
+    refreshed_routes, refreshed_origins = _read_native(
+        p, after, record.bbg_display, record.origins is not None)
     if kind == 'make_trade_route':
         expected = {key: action[key] for key in ('unit_id', 'origin_owner', 'origin_city',
                                                   'destination_owner', 'destination_city')}
@@ -239,8 +336,9 @@ def apply(saved, action, before):
                'trade_feedback': deepcopy(feedback),
                'trade_routes_after': refreshed_routes,
                'trade_origins_after': refreshed_origins}
-    c._xp2_trade_catalogue = None
-    c.explicit_trade_routes = c.explicit_trade_origins = None
+    if not borrowed:
+        c._xp2_trade_catalogue = None
+        c.explicit_trade_routes = c.explicit_trade_origins = None
     saved.emit(expected_stage, action=deepcopy(action), observation_before=deepcopy(before),
                observation_after=deepcopy(after), catalogue_routes_before=deepcopy(record.routes),
                catalogue_origins_before=deepcopy(record.origins),

@@ -110,11 +110,14 @@ def support_source():
 
 
 def operation_parameters(action):
+    return encode_operation(action, source()['constants'])
+
+
+def encode_operation(action, values):
     from civ6_host.contracts.governors import validate_action
     validate_action(action)
     if action['kind'] == 'consider_governor_titles':
         raise ValueError('Title consideration has no native player-operation request')
-    values = source()['constants']
     ids = {key: row['unsigned32'] for key, row in values.items()}
     parameters = {ids['PARAM_GOVERNOR_TYPE']: action['governor_index']}
     kind = action['kind']

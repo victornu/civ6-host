@@ -120,12 +120,11 @@ def _verify_reference(row):
     path = _private_path(row['path'])
     before = path.stat()
     _require(before.st_size == size, 'Script binding reference size changed')
-    with path.open('rb') as stream:
-        raw = stream.read(size + 1)
+    from .source_verification import file_sha256
+    digest = file_sha256(path)
     after = path.stat()
     identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-    _require(identity(before) == identity(after) and len(raw) == size
-             and hashlib.sha256(raw).hexdigest() == sha, 'Script binding reference bytes changed')
+    _require(identity(before) == identity(after) and digest == sha, 'Script binding reference bytes changed')
     return SourceReference(row['path'], size, sha)
 
 

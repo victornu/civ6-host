@@ -40,11 +40,12 @@ def _digest(path):
             result.update(block)
     return result.hexdigest()
 
-def verify_source():
+def verify_capture_contract():
+    """Verify the retained source contract and UI files used by its observations."""
     _require(_digest(SOURCE) == SOURCE_SHA, 'source contract changed')
     value = json.loads(_resolve_resource_path(SOURCE).read_text(encoding='utf8'))
     _require(value.get('schema') == 'civ6rl.ui_local_state.source.v1' and value.get('runtime_context_sources_verified') is False and (value.get('headless_qualified') is False), 'unsupported source contract')
-    for row in [value['havok'], *value['official_ui']]:
+    for row in value['official_ui']:
         path = _resolve_resource_path(Path(row['path']))
         _require(_resolve_resource_path(path).stat().st_size == row['bytes'] and _digest(path) == row['sha256'], 'installed source file changed: ' + path.name)
     previous = value['previous_route']
@@ -52,6 +53,15 @@ def verify_source():
     for kind, (context, fn, names) in CONTRACTS.items():
         contract = value['contracts'][kind]
         _require(contract['context'] == context and contract['function'] == fn and (set(contract['upvalues']) == set(names)), 'upvalue contract differs')
+    return value
+
+
+def verify_source():
+    value = verify_capture_contract()
+    row = value['havok']
+    path = _resolve_resource_path(Path(row['path']))
+    _require(path.stat().st_size == row['bytes'] and _digest(path) == row['sha256'],
+             'installed source file changed: ' + path.name)
     return value
 
 def _request(player_id, turn, timeout_seconds):

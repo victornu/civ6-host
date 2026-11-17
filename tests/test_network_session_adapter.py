@@ -51,6 +51,10 @@ class FakeNativeActionSession:
 
 
 def load_adapter():
+    from civ6_host.runtime.native.native_saved_session import (
+        DEFAULT_MEMORY_RESERVE_MIB, MIN_EXPANSION_MEMORY_RESERVE_MIB,
+    )
+
     protocol_module = ModuleType('civ6_host.runtime.network_protocol')
     protocol_module.CLOSURE_SCHEMA = 'civ6-host.session.closure.v1'
     protocol_module.SCHEMA = 'civ6-host.session.v1'
@@ -67,6 +71,8 @@ def load_adapter():
     saved_module = ModuleType('civ6_host.runtime.native.native_saved_session')
     saved_module.ROOT = ROOT
     saved_module.MAX_STANDARD_STDOUT = 256 * 1024 * 1024
+    saved_module.DEFAULT_MEMORY_RESERVE_MIB = DEFAULT_MEMORY_RESERVE_MIB
+    saved_module.MIN_EXPANSION_MEMORY_RESERVE_MIB = MIN_EXPANSION_MEMORY_RESERVE_MIB
     name = '_isolated_network_session_adapter_test'
     spec = importlib.util.spec_from_file_location(name, SOURCE)
     module = importlib.util.module_from_spec(spec)
@@ -76,7 +82,11 @@ def load_adapter():
         'civ6_host.runtime.native.native_saved_session': saved_module,
     })
     patcher.start()
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        patcher.stop()
+        raise
     return module, patcher
 
 

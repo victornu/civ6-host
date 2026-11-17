@@ -60,6 +60,8 @@ def validate(value, player_id, turn, *, observation=None, work_catalog=None, inc
             raise ValueError('Unit-work catalogue identity differs')
         for row in work_catalog['offers']:
             action = row['action']; state = units.get(action['unit_id'])
-            if state is None or any(action[k] != state[k] for k in ('plot_id','charges','moves_token')):
+            plot = action.get('source_plot_id', action['plot_id'])
+            if (state is None or plot != state['plot_id']
+                    or any(action[key] != state[key] for key in ('charges', 'moves_token'))):
                 raise ValueError('Unit-work action refers to another charge/movement state')
     return value

@@ -7,6 +7,8 @@ from .action_budget import ORDINARY_ACTION_LIMIT
 
 ACTION_FIELDS = {'unit_order': frozenset(('kind', 'unit_id', 'route', 'item_type', 'hash'))}
 SKIP_TURN = 'UNITOPERATION_SKIP_TURN'
+EXTENDED_OPERATIONS = ('UNITOPERATION_ALERT', 'UNITOPERATION_AUTOMATE_EXPLORE')
+EXTENSION_SCHEMA = 'civ6-host.unit-order-extensions.v1'
 NAMES = {
     'command': ('UNITCOMMAND_WAKE', 'UNITCOMMAND_CANCEL'),
     'operation': ('UNITOPERATION_SLEEP', 'UNITOPERATION_FORTIFY',
@@ -24,7 +26,8 @@ def validate_action(action):
             or action['kind'] != 'unit_order' or not _uint(action['unit_id'])
             or not _uint(action['hash']) or type(action['route']) is not str
             or action['route'] not in NAMES or type(action['item_type']) is not str
-            or action['item_type'] not in NAMES[action['route']]):
+            or action['item_type'] not in NAMES[action['route']] +
+               (EXTENDED_OPERATIONS if action['route'] == 'operation' else ())):
         raise ValueError('Invalid parameterless unit-order action')
     return action
 
@@ -41,12 +44,16 @@ def validate_catalog(value, pid, turn, *, observation=None, unavailable=False, a
         if value is not None:
             raise ValueError('Unavailable unit orders must be null')
         return value
-    if (type(value) is not dict or set(value) != {'player_id', 'turn', 'units', 'offers'}
+    base_fields = {'player_id', 'turn', 'units', 'offers'}
+    if (type(value) is not dict or set(value) not in (base_fields, base_fields | {'extensions'})
             or type(value['player_id']) is not int or value['player_id'] != pid
             or type(value['turn']) is not int or value['turn'] != turn
             or any(type(value[k]) is not list or len(value[k]) > ORDINARY_ACTION_LIMIT
                    for k in ('units', 'offers'))):
         raise ValueError('Invalid public unit-order catalogue')
+    extended = 'extensions' in value
+    if extended and value['extensions'] != extension_metadata():
+        raise ValueError('Unsupported unit-order extensions')
     ids = []
     for row in value['units']:
         if (type(row) is not dict or set(row) != {'unit_id', 'activity_type', 'fortify_turns', 'ready'}
@@ -70,6 +77,8 @@ def validate_catalog(value, pid, turn, *, observation=None, unavailable=False, a
                 or type(row['legal']) is not bool):
             raise ValueError('Invalid native unit-order offer')
         action = validate_action(row['action'])
+        if action['item_type'] in EXTENDED_OPERATIONS and not extended:
+            raise ValueError('Additional unit order lacks its explicit source extension')
         if action['item_type'] == SKIP_TURN and not allow_skip:
             raise ValueError('Skip-turn order requires the v19 catalogue')
         key = _key(action)
@@ -77,6 +86,10 @@ def validate_catalog(value, pid, turn, *, observation=None, unavailable=False, a
             raise ValueError('Foreign or duplicate native unit-order offer')
         seen.add(key)
     return value
+
+
+def extension_metadata():
+    return dict(schema=EXTENSION_SCHEMA, operations=list(EXTENDED_OPERATIONS))
 
 
 def actions(value):

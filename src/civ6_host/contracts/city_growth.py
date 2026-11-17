@@ -2,18 +2,22 @@
 import math
 
 SCHEMA='civ6-host.city-growth.v1'
+EXPANSION_SCHEMA='civ6-host.city-growth.v2'
 TEXT_FIELDS=('FoodPerTurnNum','FoodConsumption','NetFoodPerTurn','GrowthLongLabel',
     'FoodNeededForGrowth','OccupationMultiplier','HappinessBonus','OtherGrowthBonuses',
     'HousingMultiplier','TurnsUntilBornLost','FoodSurplusDeficitLabel',
     'ModifiedGrowthFoodPerTurn','TotalFoodSurplus')
+EXPANSION_TEXT_FIELDS=(*TEXT_FIELDS,'OccupationLabel')
 
 
 def validate(value, player_id, turn, *, observation=None):
     if (type(value) is not dict or set(value)!={'schema','player_id','turn','cities'}
-            or value['schema']!=SCHEMA or type(value['player_id']) is not int or value['player_id']!=player_id
+            or value['schema'] not in (SCHEMA, EXPANSION_SCHEMA)
+            or type(value['player_id']) is not int or value['player_id']!=player_id
             or type(value['turn']) is not int or value['turn']!=turn
             or type(value['cities']) is not list or len(value['cities'])>4096):
         raise ValueError('Foreign or unbounded public city growth')
+    text_fields = EXPANSION_TEXT_FIELDS if value['schema'] == EXPANSION_SCHEMA else TEXT_FIELDS
     seen={}
     for row in value['cities']:
         if (type(row) is not dict or set(row)!={'city_id','population','occupied','housing','amenities','amenities_needed','happiness','display','starving','growth_icon'}
@@ -26,9 +30,9 @@ def validate(value, player_id, turn, *, observation=None):
             if type(row[key]) not in (int,float) or not math.isfinite(row[key]) or abs(row[key])>1e12:
                 raise ValueError('Invalid public city growth amount')
         display=row['display']
-        if type(display) is not dict or set(display)!=set(TEXT_FIELDS)|{'GrowthLongNum'}:
+        if type(display) is not dict or set(display)!=set(text_fields)|{'GrowthLongNum'}:
             raise ValueError('Incomplete public growth display')
-        for key in TEXT_FIELDS:
+        for key in text_fields:
             v=display[key]
             if type(v) is not str or len(v.encode('utf-8'))>4096 or '\x00' in v:
                 raise ValueError('Invalid public growth text')

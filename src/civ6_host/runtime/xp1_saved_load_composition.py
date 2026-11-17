@@ -169,6 +169,15 @@ def compose_saved_load_services(backend):
         if xp2:
             from .xp2_host_achievement_service import install as install_achievements
             install_achievements(backend)
+            from .execution_images import _PROFILE
+            if getattr(backend.core, '_civ6_host_execution_image', None) is _PROFILE:
+                from .xp2_host_victory_history import install as install_victory_history
+                install_victory_history(backend)
+        else:
+            from .execution_images import _XP1_PROFILE
+            if getattr(backend.core, '_civ6_host_execution_image', None) is _XP1_PROFILE:
+                from .xp2_host_achievement_service import install_xp1 as install_achievements
+                install_achievements(backend)
     services = SavedLoadServices(backend, runtime, child, registry,
         core_sha256=core_sha256, script_hashes=script_hashes, bootstrap=bootstrap,
         saved_map_values=backend.inputs.map_values,
@@ -196,7 +205,8 @@ def compose_saved_load_services(backend):
         pre_turn_immediate_state=dict(EMPTY_RECEIVER_STATE), entity_listener_count=0)
     consumer.emit = emit
     consumer.enable_controller_events(controller)
-    consumer.enable_notification_scopes()
+    consumer.enable_notification_scopes(capture_reference=backend.captured_bundle.reference,
+                                        script_hashes=script_hashes)
     if xp2 and not getattr(backend,'_xp2_postload_requested',False):
         # Initial saved Load only. The retained XP1 raw-Load interval did not
         # consume C0/player-query/cache-publication/post160 callbacks. Their XP2
@@ -227,9 +237,17 @@ def compose_saved_load_services(backend):
         enable_foundation(consumer, backend)
         from .a0_foundation_events import enable_turn_units
         enable_turn_units(consumer, backend)
+        if getattr(backend.core, '_civ6_host_execution_image', None) is not None:
+            consumer.enable_district_events()
+        from .xp1_governors_source import supports as supports_xp1_governors
+        if supports_xp1_governors(backend.inputs.official_bundle,
+                                 getattr(backend.core, '_civ6_host_execution_image', None)):
+            from .a0_foundation_events import enable_history_events
+            enable_history_events(consumer, backend)
+            from . import xp1_wmd_fallout_source
+            from .empty_presentation_events import enable as enable_empty_presentation
+            enable_empty_presentation(consumer, backend, xp1_wmd_fallout_source)
         if xp2:
-            if getattr(backend.core, '_civ6_host_execution_image', None) is not None:
-                consumer.enable_district_events()
             from .xp2_world_unit_event_source import bind_owner as bind_input_event_sources
             bind_input_event_sources(backend,backend.core,backend.runtime.read)
             from .xp2_production_queue_event_source import bind_owner as bind_queue_event_sources
@@ -250,6 +268,8 @@ def compose_saved_load_services(backend):
                 enable_empty_presentation(consumer, backend, xp2_congress_presentation)
                 from . import xp2_wmd_fallout_source
                 enable_empty_presentation(consumer, backend, xp2_wmd_fallout_source)
+                from . import xp2_rock_concert_source
+                enable_empty_presentation(consumer, backend, xp2_rock_concert_source)
                 from . import xp2_congress_notice_source
                 enable_empty_presentation(consumer, backend, xp2_congress_notice_source)
                 if review_requested:

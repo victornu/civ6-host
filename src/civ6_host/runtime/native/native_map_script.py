@@ -131,7 +131,10 @@ class NativeMapScriptPrefix(NativeGameEventCallbacks):
         if len(self.map_source) > 16 * 1024 * 1024:
             raise ValueError('Installed map source exceeds admitted bound')
         path = host.dll_directory / 'HavokScript_FinalRelease.dll'
-        if sha256(path) != HAVOK_SHA256:
+        shared = getattr(host, '_civ6_host_shared_dependencies', None)
+        if shared is not None:
+            path = shared.verify_library_path('HavokScript_FinalRelease.dll', path)
+        elif sha256(path) != HAVOK_SHA256:
             raise ValueError('Unverified HavokScript module')
         kernel = C.WinDLL('kernel32', use_last_error=True)
         kernel.GetModuleHandleW.argtypes, kernel.GetModuleHandleW.restype = ([C.c_wchar_p], C.c_void_p)
@@ -140,7 +143,8 @@ class NativeMapScriptPrefix(NativeGameEventCallbacks):
         self.telemetry = NativeTelemetryProfile(executable, emit)
         from civ6_host.runtime.native.native_core_lock import NativeCoreLock
         self.core_lock = NativeCoreLock(host, executable)
-        self.runtime = NativeScriptRuntime(C.WinDLL(str(path)), executable, emit)
+        self.runtime = NativeScriptRuntime(C.WinDLL(str(path)), executable, emit,
+                                           shared_dependency_profile=shared)
         from civ6_host.runtime.native.native_include_registry import collect_lua_sources
         self.runtime.set_include_sources(collect_lua_sources((host.dll_directory.parents[1] / 'Assets/Maps',)))
         self.runtime.bind_core_services(host, context)
@@ -833,51 +837,9 @@ class NativeMapScriptPrefix(NativeGameEventCallbacks):
         self.emit('native_policy_change_effect_verified', **effect, native_rules_used=True, eligible_for_training=False)
 
     def inspect_pantheon_choice(self, player_id, *, selected_index=None):
-        """Submit a source-backed pantheon choice; keep the final turn gate strict."""
-        import struct
-        from civ6_host.runtime.native.native_pantheon_actions import catalog_source
-        from civ6_host.runtime.native.native_pantheon_actions import parse_catalog
-        from civ6_host.runtime.native.native_pantheon_actions import choose
-        from civ6_host.runtime.native.native_pantheon_actions import revalidate_choice_source
-        from civ6_host.runtime.native.native_pantheon_actions import parse_revalidated_choice
-        from civ6_host.runtime.native.native_pantheon_actions import effect_source
-        from civ6_host.runtime.native.native_pantheon_actions import parse_effect
-        from civ6_host.runtime.native.native_pantheon_actions import guard_case
-        from civ6_host.runtime.native.native_player_operation_request import request_player_operation
-        if self.ui_child is None or self.actions.pending or self.deferred_events.pending:
-            raise RuntimeError('Pantheon choice requires a published UI view and drained queues')
-        if not getattr(self, '_pantheon_guard_verified', False):
-            if self.runtime.evaluate_text(self.ui_child, guard_case(), b'@native_pantheon_guards') != b'pantheon-guards-ok':
-                raise RuntimeError('Native HKS pantheon choice guards failed')
-            self._pantheon_guard_verified = True
-            self.emit('native_hks_pantheon_guards_verified', scope='Protected candidate/revalidation/effect collectors against Lua doubles', native_pantheon_founded=False, eligible_for_training=False)
-        turn = int(self.runtime.evaluate_text(self.ui_child, b'return tostring(Game.GetCurrentGameTurn())', b'@native_pantheon_turn'))
-        catalog = parse_catalog(self.runtime.evaluate_text(self.ui_child, catalog_source(player_id, turn), b'@native_pantheon_catalog', capacity=131072), player_id, turn)
-        self.emit('native_pantheon_catalog_observed', **catalog, eligible_for_training=False)
-        if catalog['status'] == 'not_due':
-            if selected_index is not None:
-                raise RuntimeError('Explicit pantheon choice is not currently due')
-            self.emit('native_pantheon_choice_not_due', player_id=player_id, current_game_turn=turn, reason=catalog['reason'], request_invoked=False, endturn_gate_still_required=True, eligible_for_training=False)
-            return
-        if not catalog['choices']:
-            raise RuntimeError('Native pantheon creation is due but no selectable belief exists')
-        candidate = choose(catalog, catalog['choices'][0]['index'] if selected_index is None else selected_index)
-        self.emit('native_pantheon_candidate', **candidate, eligible_for_training=False)
-        checked = parse_revalidated_choice(self.runtime.evaluate_text(self.ui_child, revalidate_choice_source(candidate), b'@native_pantheon_revalidation'), candidate)
-        result = request_player_operation(self.core, self.context, player_id, checked['operation'], checked['parameters'])
-        self.emit('native_player_operation_request_returned', kind='pantheon', **result)
-        if not result['can_start'] or not result['request_invoked']:
-            raise RuntimeError('Native CanStartPlayerOperation refused pantheon creation')
-        if len(self.actions.pending) != 1 or self.actions.pending[0][:4] != struct.pack('<I', 3294486831):
-            raise RuntimeError('Pantheon request did not emit exactly one native operation archive')
-        self.actions.deliver_one()
-        self.deferred_events.drain_empty_receivers()
-        self.view_publisher.publish()
-        after = parse_effect(self.runtime.evaluate_text(self.ui_child, effect_source(candidate), b'@native_pantheon_effect'), candidate)
-        if not after['confirmed']:
-            raise RuntimeError(f'Native pantheon effect differs after delivery: {after!r}')
-        self.emit('native_pantheon_effect_verified', player_id=player_id, current_game_turn=turn, selected_index=candidate['selected_index'], selected_hash=candidate['selected_hash'], after=after, native_rules_used=True, eligible_for_training=False)
-        return after
+        """Use the shared orchestration with the historical Base profile."""
+        from civ6_host.runtime.native.native_saved_pantheon import inspect_choice
+        return inspect_choice(self, player_id, selected_index=selected_index)
 
     def inspect_great_person_choice(self, player_id, *, selected_individual=None):
         """Recruit a native-admitted individual and observe its grant transition."""
@@ -1369,21 +1331,30 @@ class NativeMapScriptPrefix(NativeGameEventCallbacks):
         from civ6_host.runtime.native.native_religion_diagnostic import develop_religion
         return develop_religion(self, player_id)
 
+    def inspect_prophet_activation_choice(self, player_id, *, selected_unit_id,
+            expected_x, expected_y, expected_type_index, expected_turn):
+        from civ6_host.runtime.native.native_religion_diagnostic import activate_prophet
+        from civ6_host.runtime.native.native_prophet_activation import _validate_choice, OPERATION_HASH
+        choice = dict(player_id=player_id, current_game_turn=expected_turn,
+            unit_id=selected_unit_id, x=expected_x, y=expected_y,
+            prophet_type_index=expected_type_index, operation=OPERATION_HASH)
+        _validate_choice(choice)
+        return activate_prophet(self, player_id, selected_unit_id=selected_unit_id, expected_choice=choice)
+
+    def inspect_religion_founding_choice(self, player_id, *, selected_index, selected_hash):
+        from civ6_host.runtime.native.native_religion_diagnostic import found_religion
+        return found_religion(self, player_id, selected_index=selected_index,
+            expected_hash=selected_hash)
+
+    def inspect_religion_belief_choice(self, player_id, *, selected_index, selected_hash, selected_class):
+        from civ6_host.runtime.native.native_religion_diagnostic import add_belief
+        return add_belief(self, player_id, selected_index=selected_index,
+            expected_hash=selected_hash, expected_class=selected_class)
+
     def inspect_own_religion_snapshot(self, player_id):
-        """Read only the acting player's religion, after native cache publication."""
-        from civ6_host.runtime.native import native_religion_observation as observation
-        if self.ui_child is None or self.actions.pending or self.deferred_events.pending:
-            raise RuntimeError('Religion readback requires drained queues and a current player view')
-        if not getattr(self, '_religion_observation_guards_verified', False):
-            marker = self.runtime.evaluate_text(self.ui_child, observation.guard_case(), b'@religion_observation_guards')
-            if marker != b'native-religion-observation-guards-ok':
-                raise RuntimeError('Native HKS religion observation guards failed')
-            self._religion_observation_guards_verified = True
-            self.emit('native_hks_religion_observation_guards_verified', native_gameplay_mutated=False, eligible_for_training=False)
-        turn = int(self.runtime.evaluate_text(self.ui_child, b'return string.format("%.0f",Game.GetCurrentGameTurn())', b'@native_religion_observation_turn'))
-        result = observation.parse_observation(self.runtime.evaluate_text(self.ui_child, observation.build_source(player_id, turn), b'@native_own_religion_observation', capacity=observation.MAX_RESPONSE), player_id, turn)
-        self.emit('native_own_religion_observed', observation=result, native_gameplay_mutated=False, eligible_for_training=False)
-        return result
+        """Use the shared read-only orchestration with the historical Base profile."""
+        from civ6_host.runtime.native.native_religion_observation import inspect_snapshot
+        return inspect_snapshot(self, player_id)
 
     def inspect_wonder_completion(self, player_id, turn):
         """Read native building membership after visibility/ownership checks.

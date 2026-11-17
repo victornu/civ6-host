@@ -16,8 +16,9 @@ from typing import Mapping
 from civ6_host.runtime.native.native_source_cache import load_pinned_json
 from civ6_host.runtime.native.native_shared_dependency_profiles import NativeSharedDependencyProfile
 from civ6_host.runtime.native.native_shared_dependency_profiles import profile_for_shared_dependencies
-from civ6_host.runtime.execution_images import ExecutionImageProfile
+from civ6_host.runtime.execution_images import ExecutionImageProfile, _BASE_PROFILE
 from civ6_host.runtime.execution_images import select as _select_execution_image
+from civ6_host.runtime.execution_images import verify_base_context_correspondence
 _ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_core_context_profiles.py')))).resolve().parents[1]
 _CONTEXT_PROOF_SHA = '6f808ce7420c461ee4e0b7cb1cab46d90c7df4b4c1120cf2958c3477f0773cc1'
 _CTOR_PROOF_SHA = '127fdfff335b79415a665c57bb76e2f44a253d42aec27445f6d5fd970269591d'
@@ -51,6 +52,8 @@ class NativeCoreContextProfile:
 
     @property
     def executable(self) -> bool:
+        if self.execution_image is _BASE_PROFILE and self.mode != 'init':
+            return False
         return self.execution_image is None or bool(self.execution_image.executable)
 
 
@@ -63,6 +66,8 @@ def require_executable_profile(profile: NativeCoreContextProfile) -> None:
         return
     if type(image) is not ExecutionImageProfile:
         raise ValueError('Context profile has an invalid execution-image identity')
+    if image is _BASE_PROFILE and profile.mode != 'init':
+        raise ValueError('Installed Base execution is scoped to the official Init/Load worker')
     if (image.image_sha256 != profile.core_sha256
             or image.reference_core_sha256 != profile.source_core_sha256
             or _normalized(image.path) != _normalized(profile.core_path)):
@@ -76,8 +81,7 @@ def require_executable_profile(profile: NativeCoreContextProfile) -> None:
     try:
         verification = _verify_execution_image(image)
     except ValueError as exc:
-        raise ValueError('Execution image lacks required static correspondence: '
-                         + ', '.join(getattr(exc, 'missing_groups', ()))) from exc
+        raise ValueError('Execution image lacks required static correspondence: ' + str(exc)) from exc
     if not verification.executable:
         raise ValueError('Execution image is not admitted for native execution')
 
@@ -146,8 +150,10 @@ def profile_for_core(gamecore_path: str | os.PathLike[str], *, mode: str, shared
         reference_sha = execution_image.reference_core_sha256
         selected = next(((ruleset, entry) for ruleset, entry in context['images'].items()
                          if entry['sha256'] == reference_sha), None)
-        if selected is None or selected[0] not in ('xp1', 'xp2'):
-            raise ValueError('Selected execution image has no matching expansion context ABI')
+        if selected is None:
+            raise ValueError('Selected execution image has no matching context ABI')
+        if selected[0] == 'base':
+            verify_base_context_correspondence(execution_image)
     ruleset, image = selected
     if _normalized(requested_core) != _normalized(image['path']):
         raise ValueError('GameCore path does not match the path pinned for this image')

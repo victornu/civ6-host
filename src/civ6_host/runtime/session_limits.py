@@ -1,9 +1,10 @@
 """Standard supervised lifetime ceilings, independent of learner budgets.
 
-XP1's instrumented saved Load can exceed 90 seconds before its first reply.
-The instrumented persistence smoke test took about 400 seconds to load, play
-one turn and save. Allow an explicit 1500-second bound for a multi-turn XP1
-continuation that produces a unit without restarting between turns.
+The independent Rise and Fall levy checkpoint restored the turn-24 observation
+and choices in 1084 seconds. Its next AI turn was still progressing when the
+1800-second watchdog stopped the worker at poll 16. Allow an explicit
+3600-second bound for a slow checkpoint replay, decision window and Save in
+the same process. The caller must request the larger budget.
 XP2's retained placement preparation costs about 130 seconds to start and found
 a city, then about 59 seconds per instrumented turn. Its explicit multi-turn
 qualification originally needed a 900-second ceiling. The retained current-image
@@ -13,7 +14,7 @@ bound for a useful lifecycle continuation and Save/Destroy in the same process.
 Session defaults remain unchanged; this is not a throughput qualification.
 The shared 512 MiB Job and output limits remain unchanged.
 """
-XP1_MAX_SECONDS = 1500
+XP1_MAX_SECONDS = 3600
 XP2_MAX_SECONDS = 1800
 
 

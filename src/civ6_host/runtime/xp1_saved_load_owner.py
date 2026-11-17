@@ -259,12 +259,26 @@ class SavedLoadOwner:
 
     def execute(self, action):
         self._check('commands', requested='unit_commands_candidate')
-        from .xp1_continuation import validate_command
-        validate_command(action, observation=self.continuation.observation)
+        from .xp1_continuation import validate_command, _purchase_allows_faith
+        validate_command(action, observation=self.continuation.observation,
+                         allow_faith=_purchase_allows_faith(self.continuation, self))
         with self._attempt():
             result = self.continuation.execute(action,session=self)
             self._finish('commands')
         return result
+
+    def read_xp2_human_view(self, player_id, *, include_wars=False):
+        """Read a captured LAN human's view without handing over command routing."""
+        from .xp2_human_perspective import collect
+        return collect(self, player_id, include_wars=include_wars)
+
+    def read_xp2_human_unit_commands(self, player_id):
+        from .xp2_human_perspective import unit_commands
+        return unit_commands(self, player_id)
+
+    def execute_xp2_human_unit_command(self, player_id, decision, action):
+        from .xp2_human_perspective import execute_unit_command
+        return execute_unit_command(self, player_id, decision, action)
 
     def advance_congress_empty(self, protocol_sequence):
         """Private post-action/poll SetPhase transition, never an actor opcode."""

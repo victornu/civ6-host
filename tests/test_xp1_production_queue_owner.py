@@ -57,6 +57,7 @@ function drain_queue_fixture()
 end
 ''')
         self.token.observation['cities'] = [dict(id=5)]
+        self.token.world_input_prompts = {}
         self.observation = deepcopy(self.token.observation)
         self.token.emit = self.emit
         self.stack.enter_context(patch.object(shared, 'observe_player', self.observe_native))

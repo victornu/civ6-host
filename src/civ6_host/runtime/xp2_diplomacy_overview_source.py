@@ -12,6 +12,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from civ6_host.contracts.diplomacy_overview import PROMISE_REQUESTS
 from .paths import resource_root
 from .resource_resolution import resolve_path
 
@@ -37,10 +38,7 @@ REQUEST_STATEMENT_TYPES = {
     'CHOICE_DECLARE_FRIENDSHIP': 'DECLARE_FRIEND',
     'CHOICE_RESIDENT_EMBASSY': 'RESIDENT_EMBASSY',
     'CHOICE_OPEN_BORDERS': 'OPEN_BORDERS',
-    'CHOICE_DEMAND_PROMISE_DONT_SPY': 'WARNING_STOP_SPYING_ON_ME',
-    'CHOICE_DEMAND_PROMISE_DONT_SETTLE_TOO_NEAR': 'WARNING_DONT_SETTLE_NEAR_ME',
-    'CHOICE_DEMAND_PROMISE_DONT_CONVERT_CITY': 'WARNING_STOP_CONVERTING_MY_CITIES',
-    'CHOICE_DEMAND_PROMISE_DONT_DIG_ARTIFACTS': 'WARNING_STOP_DIGGING_UP_ARTIFACTS',
+    **PROMISE_REQUESTS,
     'CHOICE_DECLARE_GOLDEN_AGE_WAR': 'DECLARE_GOLDEN_WAR',
     'CHOICE_DECLARE_WAR_OF_RETRIBUTION': 'DECLARE_WAR_OF_RETRIBUTION',
     'CHOICE_DECLARE_IDEOLOGICAL_WAR': 'DECLARE_IDEOLOGICAL_WAR',
@@ -129,18 +127,20 @@ def _function(profile, group: str, name: str) -> bytes:
     return captured
 
 
-def source_dependencies(*, execution_image):
+def source_dependencies(*, execution_image, stock=False):
     _verify_image(execution_image)
     profile = _load_profile()
     pins = {}
     for name, row in profile['official_files'].items():
+        if stock and name == 'bbg_modinfo':
+            continue
         raw = _official_bytes(profile, name)
         pins[str(resolve_path(Path(row['path'])).resolve())] = hashlib.sha256(raw).hexdigest()
     pins[str((resource_root() / PROFILE_PATH).resolve())] = PROFILE_SHA256
     pins[str((resource_root() / SOURCE_PROFILE_PATH).resolve())] = SOURCE_PROFILE_SHA256
     module_refs = {
         'diplomacy_overview.py': '715d53af2582a31874133344199366b8d7a87a27a88452808babcd84bf546336',
-        'native/native_diplomacy_choices.py': '4d47b1ed1ada0b6d9e2590215ca4529d790e016ae3d9c6648f32bb368e9a08e4',
+        'native/native_diplomacy_choices.py': 'c75e7dfede1c6fbcc93ddc9a8377d5a194b98540117f2a1a082efed279e09c39',
         'native/native_diplomacy_default.py': '0457f83b38b527dbe83178a9814b91a340c68cdc0937f44c09a4da72f87f4cba',
         'native/native_diplomacy_configuration.py': 'e3b57ae22ea79f3d614efaa22ed8f8ca5b0ccbacf5016ee1c5bb11be41dfc65f',
     }
@@ -201,12 +201,16 @@ def _selected_dispatch(profile) -> bytes:
 
 
 def request_source(pid: int, turn: int, target: int, key: str, *, configuration,
-                   execution_image) -> bytes:
+                   execution_image, deal_draft=False) -> bytes:
     _verify_image(execution_image)
     _validate_identity(pid, turn)
     if (type(target) is not int or not 0 <= target < 64 or target == pid
-            or type(key) is not str or key not in DIRECT_REQUEST_CHOICES):
+            or type(key) is not str or type(deal_draft) is not bool
+            or (key not in ('CHOICE_MAKE_DEAL', 'CHOICE_MAKE_DEMAND', 'CHOICE_MAKE_PEACE')
+                if deal_draft else key not in DIRECT_REQUEST_CHOICES)):
         raise ValueError('Invalid XP2 diplomacy initiation request')
+    peace = key == 'CHOICE_MAKE_PEACE'
+    statement_name = ('MAKE_DEAL' if peace else key.removeprefix('CHOICE_')) if deal_draft else REQUEST_STATEMENT_TYPES[key]
     profile = _load_profile()
     from .diplomacy_overview import _verify_capability_source
     _verify_capability_source()
@@ -230,14 +234,26 @@ if capability and not paused then
 end
 assert(allowed,'Diplomacy choice is no longer available')
 '''
+    if deal_draft:
+        validate += r'''
+assert(Players[target]:IsHuman()==false and DealManager.HasPendingDeal(pid,target)==false,
+ 'Outgoing deal draft requires an AI counterparty without a pending deal')
+'''
     bindings = (b'\nlocal ms_LocalPlayerID=pid\nlocal ms_SelectedPlayerID=target\n'
                 + _function(profile, 'base', 'CanInitiateDiplomacyStatement'))
+    before_request = b''
+    if peace:
+        from .xp2_deal_peace import INVENTORY
+        bindings += b'\nlocal ms_LocalPlayer=localPlayer\nlocal pDealItem\n' + INVENTORY
+        before_request = (b' openingTreaty(DealManager.GetWorkingDeal(DealDirection.OUTGOING,'
+                          b'pid,target),pid,target)\n')
     dispatch = _selected_dispatch(profile)
     request_map = (b'\nlocal nativeDiplomacy=DiplomacyManager\nlocal calls=0\nlocal accepted=false\n'
         b'local DiplomacyManager=setmetatable({RequestSession=function(attacker,recipient,kind)\n'
         b' assert(calls==0 and attacker==pid and recipient==target and kind==' +
-        json.dumps(REQUEST_STATEMENT_TYPES[key]).encode('ascii') +
+        json.dumps(statement_name).encode('ascii') +
         b",'Official RequestSession identity/type differs')\n"
+        + before_request +
         b' calls=calls+1; local result=nativeDiplomacy.RequestSession(attacker,recipient,kind)\n'
         b" assert(type(result)=='boolean','Native RequestSession result is unavailable')\n"
         b' accepted=result; return result\nend},{__index=nativeDiplomacy})\n')

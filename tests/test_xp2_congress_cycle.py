@@ -385,6 +385,36 @@ class CycleTests(unittest.TestCase):
         self.assertFalse(reloaded.continuation._xp2_congress_cycles.current.entry_known)
         self.assertEqual(reloaded.continuation._xp2_congress_cycles.confirmations,[])
 
+    def test_exact_checkpoint_form_can_retire_without_synthesized_stage_callback(self):
+        g = self.graph()
+        public = catalogue(sequence=0)
+        self.observe(g, public)
+        g.saved._running = False
+        with self.mode(g, active=False), self.assertRaisesRegex(ValueError, 'initial unsubmitted'):
+            cycle.bind_restored_regular_ballot(g.saved, public)
+        checkpoint = ('work/test/checkpoint.json', 'f' * 64)
+        object.__setattr__(g.saved.inputs, 'checkpoint', checkpoint)
+        with self.mode(g, active=False):
+            cycle.bind_restored_regular_ballot(g.saved, public)
+        self.assertFalse(g.saved._running)
+        g.saved._running = True
+
+        action = ballot(public)
+        entry = self.begin(g, public, action)
+        self.assertFalse(entry.cycle.entry_known)
+        self.assertEqual(entry.cycle.phase_events, {})
+        self.deliver(g, entry)
+        self.assertEqual(cycle._cycle_reason(entry.owner, entry),
+                         'finished_not_observed_after_confirmation')
+        self.event(g, presentation.FINISHED)
+        result = self.read_result(g, public, action)
+        self.assertEqual(result[0]['result_status'], 'exact_current_cycle_ballot_result_observed')
+        with self.quiescent_control(g), self.mode(g, active=True):
+            receipt = cycle.check_checkpoint(g.saved)
+        self.assertEqual(receipt['entry_checkpoint'], list(checkpoint))
+        self.assertFalse(receipt['entry_known'])
+        self.assertEqual(receipt['callback_chronology'], [(presentation.FINISHED, None)])
+
     def test_retirement_requires_exact_result_fresh_scope_and_all_empty_queues(self):
         cases=('native','actions','deferred','feedback','publishing','revision','callback','record','result')
         for case in cases:

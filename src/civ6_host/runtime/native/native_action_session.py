@@ -505,19 +505,23 @@ class NativeActionSession(NativeSavedSession):
         return public
 
     def __init__(self, run_root=None, *, round_limit=8, lifetime_seconds=45, stdout_limit_mib=64, checkpoint_on_close=False, checkpoint=None, forced_endturn_diagnostic=False, production_queue_diagnostic=False, privileged_critic_diagnostic=False, city_focus_diagnostic=False, city_management_diagnostic=False, official_bundle=None, episode_budget=None, multiturn_movement_diagnostic=False, movement_information_diagnostic=False, unit_order_cancel_diagnostic=False, movement_ui_probe=None, world_input_diagnostic=False, ui_profile=None, _admitted_bundle=None):
+        installed_hotseat_save = (self.input_profile == 'hotseat-four'
+                                  and getattr(self, '_base_execution_image', None) is not None)
         self.ui_profile_admission = None
         if ui_profile is not None:
             from civ6_host.runtime.native.native_ui_profile import admit
             if any((city_management_diagnostic, city_focus_diagnostic, production_queue_diagnostic)):
                 raise ValueError('UI profile admission cannot be mixed with city/queue diagnostic overrides')
-            if checkpoint is not None or checkpoint_on_close:
+            if checkpoint is not None or (checkpoint_on_close and not installed_hotseat_save):
                 raise ValueError('UI profile admission requires its exact official bundle reset')
-            self.ui_profile_admission = admit(ui_profile, official_bundle=official_bundle, input_profile=self.input_profile)
-        if official_bundle is not None and (checkpoint is not None or checkpoint_on_close):
+            self.ui_profile_admission = admit(ui_profile, official_bundle=official_bundle,
+                input_profile=self.input_profile, execution_image=getattr(self, '_base_execution_image', None))
+        if official_bundle is not None and (checkpoint is not None or (checkpoint_on_close and not installed_hotseat_save)):
             raise ValueError('Captured bundle checkpoint ancestry is not yet supported; reset reloads the exact official save')
         from civ6_host.runtime.native.native_saved_session import ROOT
-        if type(checkpoint_on_close) is not bool or (checkpoint_on_close and type(self) is not NativeActionSession):
-            raise ValueError('Checkpoint save is an explicit Single-session administrative option')
+        if type(checkpoint_on_close) is not bool or (checkpoint_on_close
+                and type(self) is not NativeActionSession and not installed_hotseat_save):
+            raise ValueError('Checkpoint save requires an admitted administrative session')
         if type(forced_endturn_diagnostic) is not bool:
             raise ValueError('Forced turns require an exact explicit diagnostic option')
         self.forced_endturn_diagnostic = forced_endturn_diagnostic
@@ -596,7 +600,13 @@ class NativeActionSession(NativeSavedSession):
         treasury.verify_source()
         for path, pin in treasury.verified_files().items():
             closure['pins'][str(path)] = pin
-        for path, pin in yield_display.verified_files().items():
+        image = getattr(self, '_base_execution_image', None)
+        if image is not None:
+            from civ6_host.runtime.base_public_locale import source_files
+            yield_files = yield_display.verified_files(localization_sources=source_files(image))
+        else:
+            yield_files = yield_display.verified_files()
+        for path, pin in yield_files.items():
             closure['pins'][str(path)] = pin
         for path, pin in research_info.verified_files().items():
             closure['pins'][str(path)] = pin
@@ -717,7 +727,8 @@ class NativeActionSession(NativeSavedSession):
         if self.ui_profile_admission is not None:
             from civ6_host.runtime.native.native_ui_profile import admit
             from civ6_host.runtime.native.native_ui_profile import dependencies
-            fresh = admit(self.ui_profile_admission['profile_id'], official_bundle=self.official_bundle, input_profile=self.input_profile)
+            fresh = admit(self.ui_profile_admission['profile_id'], official_bundle=self.official_bundle,
+                input_profile=self.input_profile, execution_image=getattr(self, '_base_execution_image', None))
             if fresh != self.ui_profile_admission:
                 raise ValueError('UI profile changed between construction and reset')
             closure['ui_profile_admission'] = copy.deepcopy(fresh)

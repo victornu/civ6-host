@@ -1,6 +1,7 @@
 """Grouped transport-extension tests using explicit native-call fixtures."""
 import ast
 import ctypes as C
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import struct
@@ -10,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from civ6_host.runtime import turn_requests as requests
+from civ6_host.runtime import xp1_turn_profile as profiles
 
 
 class TurnRequestTests(unittest.TestCase):
@@ -19,6 +21,7 @@ class TurnRequestTests(unittest.TestCase):
         self.wrapper = b'offline ABI fixture, not game code'
         self.transport = SimpleNamespace(
             core=SimpleNamespace(_handle=0x10000000), context=0x20000000,
+            transport_abi=SimpleNamespace(core_sha256=profiles.BASE.core_sha256),
             pending=[], read=lambda address, size: self.wrapper,
             emit=lambda stage, **fields: self.events.append((stage, fields)))
         self.effect = lambda: self.transport.pending.append(
@@ -27,8 +30,8 @@ class TurnRequestTests(unittest.TestCase):
         native.virtual = self.virtual
         self.addCleanup(patch.stopall)
         patch.dict(sys.modules, {native.__name__: native}).start()
-        patch.object(requests, '_WRAPPER_SHA256',
-                     hashlib.sha256(self.wrapper).hexdigest()).start()
+        patch.object(profiles, 'BASE', replace(profiles.BASE,
+                     unready_wrapper_sha256=hashlib.sha256(self.wrapper).hexdigest())).start()
 
     def virtual(self, core, context, slot, rva, result, *arguments):
         self.assertEqual((core, context), (self.transport.core, self.transport.context))
@@ -42,7 +45,7 @@ class TurnRequestTests(unittest.TestCase):
 
     def test_generated_transport_method_preserves_queue_and_only_reports_emission(self):
         source = Path(__file__).resolve().parents[1] / 'src/civ6_host/runtime/native/native_action_transport.py'
-        cls = next(n for n in ast.parse(source.read_text()).body
+        cls = next(n for n in ast.parse(source.read_text(encoding='utf-8')).body
                    if isinstance(n, ast.ClassDef) and n.name == 'NativeActionTransport')
         method = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
                       and n.name == 'request_unready_turn')
@@ -100,7 +103,7 @@ class TurnRequestTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'pinned Core'):
             requests.request_unready_turn(self.transport, 1)
         self.transport.read = lambda address, size: self.wrapper
-        for player, roster in ((True, (0, 1)), (3, (0, 1)), (1, (0, 1, 4))):
+        for player, roster in ((True, (0, 1)), (3, (0, 1)), (1, (0, 1, 1))):
             with self.subTest(player=player, roster=roster):
                 with self.assertRaises(ValueError):
                     requests.request_unready_turn(self.transport, player, player_ids=roster)

@@ -13,9 +13,9 @@ class HotseatActionProtocol(ActionProtocol):
     schema = SCHEMA
     initial_turn = 3
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, initial_player=0, **kwargs):
         super().__init__(*args, **kwargs)
-        self.player_id = 0
+        self.player_id = validate_player(initial_player, PLAYERS)
         self._validated_boundary = None
         self._response_advance = False
         self._turn_reactivation_sequence = 0
@@ -110,14 +110,39 @@ class NativeHotseatActionSession(SessionViewsMixin, NativeActionSession):
     response_validator = staticmethod(validate_hotseat_response)
     command_schema = SCHEMA
 
-    def __init__(self, run_root=None, *, public_objective_players=None, **kwargs):
-        from civ6_host.runtime.native.native_saved_session import ROOT
+    def __init__(self, run_root=None, *, public_objective_players=None, execution_image_profile=None,
+                 reduced_memory_reserve=False, resume_from=None, **kwargs):
+        from civ6_host.runtime.native.native_saved_session import MIN_EXPANSION_MEMORY_RESERVE_MIB, ROOT
         from civ6_host.runtime.native.native_public_objective_witness import validate_players
+        if (type(reduced_memory_reserve) is not bool
+                or reduced_memory_reserve and execution_image_profile is None):
+            raise ValueError('Reduced memory reserve requires the explicit installed Base hotseat profile')
         self.public_objective_players = validate_players(public_objective_players)
         self.public_continuity_sources = None
         self._public_witness_files = {}
         self._public_closure = None
+        self._base_execution_image = None
+        if execution_image_profile is not None:
+            from civ6_host.runtime.base_capture_inputs import REFERENCE
+            from civ6_host.runtime.execution_images import _BASE_PROFILE, select
+            from civ6_host.runtime.native.native_official_bundle import normalize_reference
+            official_bundle = kwargs.get('official_bundle')
+            if (execution_image_profile != _BASE_PROFILE.id or official_bundle is None
+                    or normalize_reference(official_bundle) != REFERENCE
+                    or kwargs.get('_admitted_bundle') is not None):
+                raise ValueError('Installed Base hotseat requires its exact execution profile and capture')
+            self._base_execution_image = select(execution_image_profile, core_path=_BASE_PROFILE.path)
+        self.hotseat_checkpoint = None
+        if resume_from is not None:
+            from civ6_host.runtime.base_capture_inputs import checkpoint_manifest
+            from civ6_host.runtime.native.native_session_resume import normalize_reference
+            if self._base_execution_image is None or kwargs.get('world_input_diagnostic', False):
+                raise ValueError('Hotseat resume requires the exact installed Base session')
+            self.hotseat_checkpoint = normalize_reference(resume_from)
+            checkpoint_manifest(self.hotseat_checkpoint)
         super().__init__(run_root or ROOT / 'work/interactive-hotseat923/runs', **kwargs)
+        if reduced_memory_reserve:
+            self.memory_reserve_mib = MIN_EXPANSION_MEMORY_RESERVE_MIB
 
     def _configure_closure(self, closure):
         from civ6_host.runtime.native.native_public_objective_witness import source_pins
@@ -127,6 +152,17 @@ class NativeHotseatActionSession(SessionViewsMixin, NativeActionSession):
         from civ6_host.runtime.native.native_host_turn_reactivation import PROOF_PATH
         from civ6_host.runtime.native.native_host_turn_reactivation import PROOF_SHA256
         super()._configure_closure(closure)
+        if self.checkpoint_on_close:
+            from civ6_host.runtime.base_capture_inputs import checkpoint_enabled, checkpoint_source_pins
+            checkpoint_enabled(closure)
+            closure['pins'].update(checkpoint_source_pins())
+        if self.hotseat_checkpoint is not None:
+            from civ6_host.runtime.base_capture_inputs import checkpoint_dependencies, checkpoint_lineage
+            nodes = checkpoint_lineage(self.hotseat_checkpoint)
+            name, digest = self.hotseat_checkpoint
+            closure['hotseat_checkpoint'] = dict(path=name, sha256=digest)
+            closure['initial_turn'] = nodes[0][1]['observed_game_turn']
+            closure['pins'].update(checkpoint_dependencies(nodes))
         verify_source()
         closure['pins'][str(PROOF_PATH.relative_to(ROOT))] = PROOF_SHA256
         self._public_witness_files = {}
@@ -137,6 +173,39 @@ class NativeHotseatActionSession(SessionViewsMixin, NativeActionSession):
             closure['pins'].update(source_pins())
             self.public_continuity_sources = sources_from_closure(closure)
             self._public_closure = copy.deepcopy(closure)
+
+    def _initial_protocol(self, identity, closure):
+        player = 0
+        if self.hotseat_checkpoint is not None:
+            from civ6_host.runtime.base_capture_inputs import checkpoint_manifest
+            player = checkpoint_manifest(self.hotseat_checkpoint)['player_id']
+        return self.protocol_class(identity, self.nonce, round_limit=closure['rounds'], initial_player=player)
+
+    @property
+    def saved_checkpoint(self):
+        """Return a raw pair reference after a successful supervised close."""
+        self._owner()
+        if not self.checkpoint_on_close:
+            return None
+        report = getattr(self, 'report', None) or {}
+        if (not self.finished or not report.get('reaped') or report.get('exit_code') != 90
+                or report.get('error') is not None or (self.last or {}).get('operation') != 'close'
+                or not all(report['source_unchanged'].values())):
+            raise RuntimeError('Hotseat checkpoint requires a successful supervised close')
+        from civ6_host.runtime.network_checkpoint import reference
+        from civ6_host.runtime.native.native_session_checkpoint import HOTSEAT_SCHEMA
+        from civ6_host.runtime.native.native_source_cache import load_pinned_json
+
+        directory = self.run / 'checkpoint'
+        ref = reference(directory / 'checkpoint.json')
+        manifest = load_pinned_json(directory / 'checkpoint.json', ref['sha256'])
+        if (manifest.get('schema') != HOTSEAT_SCHEMA
+                or manifest.get('session_closure') != reference(self.run / 'closure.json')
+                or any(manifest['components'][role] != reference(directory / name)
+                       for role, name in (('gamecore', 'game.raw'),
+                                          ('application_configuration', 'configuration.raw')))):
+            raise ValueError('Hotseat checkpoint does not match its closed session and native pair')
+        return ref
 
     def _read_stream(self, pipe, name, limit, events):
         if not events or not self.public_objective_players:

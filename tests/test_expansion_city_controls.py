@@ -368,6 +368,58 @@ network_turn.validate_capability_catalogue(value,SimpleNamespace(episode_id=valu
                           dict(city_focus_diagnostic=False,city_management_diagnostic=True)):
                 with self.assertRaises(ValueError):NativeNetworkSession(**kwargs,**flags)
 
+    def test_installed_xp1_city_controls_pin_real_image_for_parent_and_worker(self):
+        import ast
+        from types import SimpleNamespace
+
+        import pefile
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
+        from civ6_host.runtime.workers import network_worker
+        from test_xp1_network_session import Fixture as ParentFixture
+
+        image_path = Path(_XP1_PROFILE.path)
+        with image_path.open('rb') as stream:
+            self.assertEqual(hashlib.file_digest(stream, 'sha256').hexdigest(), _XP1_PROFILE.image_sha256)
+        image = pefile.PE(str(image_path), fast_load=True)
+        self.addCleanup(image.close)
+        base = image.OPTIONAL_HEADER.ImageBase
+        fragments = profile.verify_live(base, lambda va, size: image.get_data(va - base, size),
+                                        XP1_CORE_SHA256)
+        self.assertEqual(fragments, 42)
+
+        with ParentFixture() as fixture:
+            session = fixture.session(execution_image_profile=_XP1_PROFILE.id,
+                                      city_focus_diagnostic=True, city_management_diagnostic=True)
+            session.reset()
+            closure = json.loads((session.run / 'closure.json').read_text(encoding='utf-8'))
+            self.assertEqual(len(fixture.spawns), 1)
+            self.assertEqual((closure['city_focus_diagnostic'], closure['city_management_diagnostic']),
+                             (True, True))
+            pins = profile.source_dependencies(XP1_CORE_SHA256, official_bundle=session.official_bundle,
+                                               execution_image=_XP1_PROFILE)
+            self.assertEqual(closure['pins'][str(image_path.resolve())], _XP1_PROFILE.image_sha256)
+            self.assertTrue(all(closure['pins'].get(path) == digest for path, digest in pins.items()))
+        with self.assertRaisesRegex(ValueError, 'differs from its expansion source'):
+            profile.source_dependencies(XP1_CORE_SHA256, execution_image=_PROFILE)
+
+        source = Path(network_worker.__file__).read_text(encoding='utf-8')
+        opener = next(node for node in ast.parse(source).body
+                      if isinstance(node, ast.FunctionDef) and node.name == '_open_xp1')
+        preflight = next(node for node in opener.body
+                         if isinstance(node, ast.If) and ast.unparse(node.test) == 'city_flags[0]')
+        wrapper = ast.parse('def check(city_flags, selected, execution_options, closure): pass')
+        wrapper.body[0].body = [preflight]
+        namespace = {'_Path': Path}
+        exec(compile(ast.fix_missing_locations(wrapper), network_worker.__file__, 'exec'), namespace)
+        check = namespace['check']
+        selected = SimpleNamespace(core_sha256=XP1_CORE_SHA256, reference=session.official_bundle)
+        options = {'execution_image': _XP1_PROFILE}
+        check((True, True), selected, options, closure)
+        without_runtime_pin = dict(closure, pins=dict(closure['pins']))
+        del without_runtime_pin['pins'][str(image_path.resolve())]
+        with self.assertRaisesRegex(ValueError, 'outside the worker closure'):
+            check((True, True), selected, options, without_runtime_pin)
+
     def test_shared_lua_focus_manage_and_actual_aux_callback_on_same_runtime(self):
         import ast
         sys.path.insert(0,str(HOST.parents[1]/'work/lua-test-deps'))

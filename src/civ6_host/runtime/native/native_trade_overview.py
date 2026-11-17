@@ -191,7 +191,7 @@ end
 
 local function snapshot()
  local p=ready();assert(p:GetID()==pid,'foreign trade overview player')
- if stock then
+ if congress_gate then
   local congress=assert(Game.GetWorldCongress(),'standard trade Congress interface unavailable')
   if boolean(congress:IsInSession(),'standard trade Congress phase') then
    return unavailable('ui_boundary_unavailable')
@@ -279,18 +279,22 @@ return snapshot()
 '''
 
 
-def source(player_id, turn, sequence, *, check_capacity, unlocked=False, profile=trade_overview.PROFILE):
+def source(player_id, turn, sequence, *, check_capacity, unlocked=False,
+           profile=trade_overview.PROFILE, rise_and_fall=False):
     """Build a protected, read-only Lua query for the selected display variant."""
     uint(player_id, 'overview player', 63)
     uint(turn, 'overview turn', 2**31 - 1)
     uint(sequence, 'overview sequence', 2**31 - 1)
-    if type(check_capacity) is not bool or type(unlocked) is not bool:
+    if any(type(flag) is not bool for flag in (check_capacity, unlocked, rise_and_fall)):
         raise ValueError('Trade overview unlock admission must be Boolean')
+    if rise_and_fall and profile != trade_overview.STOCK_PROFILE:
+        raise ValueError('Rise and Fall requires the stock trade overview')
     helpers = _official_helpers(profile)
     stock = profile == trade_overview.STOCK_PROFILE
     return (f'local pid,turn,sequence={player_id},{turn},{sequence}\n'
             f'local schema,profile="{trade_overview.SCHEMA}","{profile}"\n'
             f'local stock={str(stock).lower()}\n'
+            f'local congress_gate={str(stock and not rise_and_fall).lower()}\n'
             f'local check_capacity={str(check_capacity).lower()}\n'
             f'local unlocked={str(unlocked).lower()}\n'
             + helpers + COMMON_LUA + LUA).encode('utf-8')

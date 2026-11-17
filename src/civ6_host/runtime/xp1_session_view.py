@@ -4,6 +4,8 @@ This adapter exposes qualified families without fabricating absent information
 groups. It neither schedules players nor changes the native readiness flags.
 The parent adapter admits the exact captured bundle and attaches its reference.
 """
+from copy import deepcopy
+
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 from .xp1_bundle_inputs import XP1_LAN_PROFILE
 from .xp1_saved_load import REFERENCE
@@ -39,6 +41,25 @@ def _reference(saved, player_id):
     return ref, ids
 
 
+def _borrowed_xp2_reference(saved, player_id):
+    saved._check_active()
+    if saved.backend.load_abi.core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Borrowed human reads require Gathering Storm')
+    primary = saved.network_reference['state']['player_id']
+    ref, ids = _reference(saved, primary)
+    if type(player_id) is not int or player_id == primary or player_id not in ref['human_player_ids']:
+        raise ValueError('Borrowed human reads require a captured secondary seat')
+    return ref, ids
+
+
+def read_founders(prefix, player_id, turn, *, core_sha256):
+    from .native.native_unit_actions import found_city_catalog_source, parse_founders
+    source = found_city_catalog_source(player_id, turn, core_sha256=core_sha256)
+    raw = prefix.runtime.evaluate_text(prefix.ui_child, source, b'@native_found_city_catalog',
+                                       capacity=131072)
+    return parse_founders(raw, player_id, turn)
+
+
 def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     execution_options = {}
     if execution_image is not None:
@@ -65,11 +86,14 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     from .xp1_production_queue_profile import source_dependencies as queue_dependencies
     from .xp1_production_placement_profile import source_dependencies as placement_dependencies
     from .placement_inventory_profile import source_dependencies as inventory_dependencies
+    from .execution_images import _PROFILE
+    inventory_options = ({'include_pillage': True}
+                         if core_sha256 == XP2_CORE_SHA256 and execution_image is _PROFILE else {})
     groups.extend([world_dependencies(core_sha256,**execution_options),
                    order_dependencies(core_sha256,**execution_options),
                    queue_dependencies(core_sha256,**execution_options),
                    placement_dependencies(core_sha256,**execution_options),
-                   inventory_dependencies(core_sha256,**execution_options)])
+                   inventory_dependencies(core_sha256,**execution_options,**inventory_options)])
     if selected.candidate.family in ('xp1-lan','xp2-lan'):
         from .xp1_unit_attack_profile import source_dependencies as attack_dependencies
         groups.append(attack_dependencies(core_sha256,**execution_options))
@@ -120,6 +144,11 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             from .xp2_diplomacy_display_source import source_dependencies as dialogue_dependencies
             groups.append(statement_dependencies(**execution_options))
             groups.append(dialogue_dependencies(**execution_options))
+    if core_sha256 == XP1_CORE_SHA256:
+        from .execution_images import _XP1_PROFILE
+        if execution_image is _XP1_PROFILE:
+            from .xp1_production_info import source_dependencies as production_info_dependencies
+            groups.append(production_info_dependencies(execution_image))
     result={}
     for group in groups:
         for path,digest in group.items():
@@ -133,6 +162,13 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
         else:
             from .runtime_source_dependencies import materialize_runtime_source_pins
             result = materialize_runtime_source_pins(result, execution_image=execution_image)
+    if core_sha256 == XP1_CORE_SHA256 and execution_image is _XP1_PROFILE:
+        # Merge exact installed pins after the historical image compatibility projection.
+        from .xp1_city_religion import source_dependencies as city_religion_dependencies
+        for path,digest in city_religion_dependencies(execution_image).items():
+            if path in result and result[path] != digest:
+                raise ValueError('Installed city religion source dependency identity conflicts')
+            result[path] = digest
     return result
 
 
@@ -207,7 +243,7 @@ def _read_saved_diplomacy(saved, player_id, sequence, *, actions_closed=False):
     return session, observation, decisions
 
 
-def _read_state(saved, player_id, ref, ids):
+def _read_state(saved, player_id, ref, ids, *, inactive_player_id=None):
     from .lan_load import human_status_readback_source, _parse_humans
     from .network_turns import read_activity
     p = saved.prefix
@@ -216,8 +252,10 @@ def _read_state(saved, player_id, ref, ids):
     humans = _parse_humans(raw, ids)
     if humans != ref['human_player_ids']:
         raise RuntimeError('XP1 native human ownership differs from admitted capture')
-    activity = read_activity(saved, core_sha256=saved.backend.load_abi.core_sha256)
-    if activity['local_player_id'] != player_id or activity['observer_id'] != player_id:
+    activity = read_activity(saved, core_sha256=saved.backend.load_abi.core_sha256,
+                             inactive_player_id=inactive_player_id)
+    expected_observer = player_id if inactive_player_id is None else None
+    if activity['local_player_id'] != player_id or activity['observer_id'] != expected_observer:
         raise RuntimeError('XP1 native local identity or observer changed')
     session = dict(game_mode='LAN', turn_phase='TURNPHASE_SIMULTANEOUS',
         turn=activity['turn'], local_player_id=activity['local_player_id'],
@@ -227,16 +265,20 @@ def _read_state(saved, player_id, ref, ids):
     return session, activity
 
 
-def state(saved):
+def state(saved, *, inactive_player_id=None):
     """Read current native session identity/activity before any terminal teardown."""
     from .xp1_saved_load_owner import SavedLoadOwner
     if type(saved) is not SavedLoadOwner:
         raise TypeError('XP1 session state requires the retained SavedLoadOwner')
     saved._check('commands', requested='unit_commands_candidate')
     player_id = saved.network_reference['state']['player_id']
+    if inactive_player_id is not None and (type(inactive_player_id) is not int
+                                           or inactive_player_id != player_id):
+        raise ValueError('Inactive LAN status requires the captured local human')
     ref, ids = _prepare(saved, player_id)
     with saved._attempt():
-        session, _ = _read_state(saved, player_id, ref, ids)
+        session, _ = _read_state(saved, player_id, ref, ids,
+                                 inactive_player_id=inactive_player_id)
         saved.continuation.transport.require_empty_native_queue()
         saved.backend.control(empty=True)
         saved.continuation.check(active=False)
@@ -313,6 +355,420 @@ def read_turn_preflight(saved, player_id, kind):
     return observation, available
 
 
+def _add_dedications(saved, observation, decisions, *, actions_closed, previous_schema, target_schema):
+    from civ6_host.contracts import dedications, network_turn
+    from .xp2_dedications import catalogue
+
+    if decisions['schema'] != previous_schema:
+        raise ValueError('Dedication query requires its expansion capability boundary')
+    unavailable = network_turn.family_query_unavailable(
+        decisions, dedications.KIND, actions_closed=actions_closed)
+    state = None if unavailable else catalogue(saved, observation)
+    rows = [dict(candidate_id=network_turn.digest(action), action=action)
+            for action in dedications.candidates(state)]
+    decisions['candidates'].extend(rows)
+    decisions['schema'] = target_schema
+    decisions['dedications'] = state
+    decisions['families'][dedications.KIND] = (
+        dict(status='unqualified', reason='session_closed' if actions_closed else
+             'native_dedication_acting_boundary_unavailable') if unavailable else
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+
+
+def _add_trade(decisions, trade_view, *, actions_closed):
+    from civ6_host.contracts import network_turn, trade
+
+    decisions.update(trade_view)
+    for kind, field, choices in (
+            ('make_trade_route', 'trade_routes', trade.route_actions),
+            ('change_trade_origin', 'trade_origins', trade.origin_actions)):
+        value = trade_view[field]
+        if value is None:
+            reason = 'session_closed' if actions_closed else 'native_trade_acting_boundary_unavailable'
+            decisions['families'][kind] = dict(status='unqualified', reason=reason)
+            continue
+        rows = [dict(candidate_id=network_turn.digest(action), action=action)
+                for action in choices(value)]
+        decisions['candidates'].extend(rows)
+        decisions['families'][kind] = dict(
+            status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+
+
+def _add_xp1_plot_purchases(saved, observation, decisions, *, acting, actions_closed):
+    from civ6_host.contracts import network_turn, plot_purchases
+    from .xp1_plot_purchases import catalogue
+
+    decisions['schema'] = network_turn.XP1_PLOT_PURCHASE_SCHEMA_BY_BASE[decisions['schema']]
+    quotes = catalogue(saved, observation) if acting else None
+    decisions['plot_purchases'] = quotes
+    items = None
+    has_items = getattr(saved, 'xp1_city_purchase', False) is True
+    allow_faith = getattr(saved, 'xp1_faith_purchase', False) is True
+    if has_items:
+        from .xp1_city_purchases import catalogue as city_catalogue
+        decisions['schema'] = network_turn.XP1_CITY_PURCHASE_SCHEMA_BY_BASE[decisions['schema']]
+        if allow_faith:
+            decisions['schema'] = network_turn.XP1_FAITH_PURCHASE_SCHEMA_BY_BASE[decisions['schema']]
+        items = city_catalogue(saved, observation) if acting else None
+        decisions['city_purchases'] = items
+    if quotes is None:
+        decisions['families']['purchase'] = dict(status='unqualified',
+            reason='session_closed' if actions_closed else 'native_purchase_acting_boundary_unavailable')
+        return
+    rows = [dict(candidate_id=network_turn.digest(action), action=action)
+            for action in plot_purchases.actions(quotes + (items or []))]
+    decisions['candidates'].extend(rows)
+    gaps = (plot_purchases.CITY_FAITH_GAPS if allow_faith else
+            plot_purchases.CITY_GAPS if has_items else plot_purchases.GAPS)
+    decisions['families']['purchase'] = dict(status='queried_partial',
+        candidate_ids=[row['candidate_id'] for row in rows], unqualified=list(gaps))
+
+
+def _add_promotions(saved, observation, decisions, read_promotions, *, acting, actions_closed):
+    from civ6_host.contracts import network_turn
+
+    saved.explicit_promotions = None
+    state = read_promotions(saved, observation) if acting else None
+    decisions['unit_promotions'] = state
+    if state is None:
+        decisions['families']['promote_unit'] = dict(status='unqualified',
+            reason='session_closed' if actions_closed else 'native_promotion_acting_boundary_unavailable')
+        return
+    rows = [dict(candidate_id=network_turn.digest(action), action=action) for action in state['offers']]
+    decisions['candidates'].extend(rows)
+    decisions['families']['promote_unit'] = dict(status='queried_complete',
+        candidate_ids=[row['candidate_id'] for row in rows])
+
+
+def _add_upgrades(saved,observation,decisions,read_upgrades,*,acting,actions_closed):
+    from civ6_host.contracts import network_turn, unit_upgrades
+
+    state = read_upgrades(saved,observation) if acting else None
+    decisions['unit_upgrades'] = state
+    if state is None:
+        decisions['families']['upgrade_unit'] = dict(status='unqualified',
+            reason='session_closed' if actions_closed else 'native_upgrade_acting_boundary_unavailable')
+        return
+    rows = [dict(candidate_id=network_turn.digest(action),action=action) for action in unit_upgrades.actions(state)]
+    decisions['candidates'].extend(rows)
+    decisions['families']['upgrade_unit'] = dict(status='queried_complete',
+        candidate_ids=[row['candidate_id'] for row in rows])
+
+
+def _add_xp1_government_policies(saved, observation, decisions, *, acting, actions_closed):
+    from civ6_host.contracts import capability_policies, government, network_turn
+    from .xp2_government import read as read_government
+    from .xp2_policies import read as read_policies
+
+    policy_catalogue = read_policies(saved, observation) if acting else None
+    government_catalogue = read_government(saved, observation) if acting else None
+    for kind, catalogue, actions, gaps in (
+            ('policies', policy_catalogue, capability_policies.actions(policy_catalogue),
+                ('paid_policy_unlock', 'active_policy_relocation', 'unchanged_policy_confirmation')),
+            ('government', government_catalogue, government.actions(government_catalogue),
+                ('anarchy_transition',))):
+        decisions[kind] = catalogue
+        if catalogue is None:
+            reason = 'session_closed' if actions_closed else 'native_' + kind + '_acting_boundary_unavailable'
+            decisions['families'][kind] = dict(status='unqualified', reason=reason)
+            continue
+        rows = [dict(candidate_id=network_turn.digest(action), action=action) for action in actions]
+        decisions['candidates'].extend(rows)
+        decisions['families'][kind] = dict(status='queried_partial',
+            candidate_ids=[row['candidate_id'] for row in rows], unqualified=list(gaps))
+
+
+def _attach_installed_xp1_information(saved, observation, decisions):
+    """Leave historical and other image profiles on their existing catalogue."""
+    from .execution_images import _XP1_PROFILE
+    from civ6_host.contracts import network_turn as contract
+    backend = saved.backend
+    if (backend.load_abi.core_sha256 != XP1_CORE_SHA256
+            or getattr(backend.core,'_civ6_host_execution_image',None) is not _XP1_PROFILE):
+        return
+    if decisions['schema'] in contract.XP1_PRODUCTION_INFO_SCHEMA_BY_BASE:
+        from .xp1_production_info import attach as attach_production_info
+        attach_production_info(saved, observation, decisions)
+    if decisions['schema'] in contract.XP1_CITY_RELIGION_SCHEMA_BY_BASE:
+        from .xp1_city_religion import attach as attach_city_religion
+        attach_city_religion(saved, observation, decisions)
+
+
+def _add_xp1_city_religion_details(saved, observation, decisions):
+    from civ6_host.contracts import network_turn as contract
+    from .xp1_city_religion import read_details
+    if 'city_religion' not in decisions:
+        return
+    prior = decisions['city_religion']
+    contract.add_xp1_city_religion_details(
+        decisions,read_details(saved,observation,expected_majority=prior))
+
+
+def _add_xp2_city_religion_details(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract
+    from .xp1_city_religion import read_details
+    if actions_closed:
+        return
+    if decisions['schema'] not in contract.XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE:
+        raise ValueError('City religion requires its preceding Gathering Storm catalogue')
+    # This own-city reader is valid while waiting and without strategic
+    # command permission. It does not query action eligibility.
+    contract.add_xp2_city_religion_details(decisions,read_details(saved,observation))
+
+
+def _add_xp1_pantheon(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract
+    from .xp1_pantheon import catalogue
+    saved.explicit_pantheon = None
+    # Close omits the entire captured-city/XP1 optional catalogue chain above.
+    # Preserve that existing terminal contract; no action/query is available.
+    if actions_closed and decisions['schema'] not in contract.XP1_PANTHEON_SCHEMA_BY_BASE:
+        return
+    unavailable = contract.family_query_unavailable(decisions, 'pantheon', actions_closed=actions_closed)
+    state = None if unavailable else catalogue(saved, observation)
+    contract.add_xp1_pantheon(decisions, state, actions_closed=actions_closed)
+
+
+def _add_xp1_religion_beliefs(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religion_beliefs
+    from .xp1_religion_beliefs import catalogue
+    saved.explicit_religion_beliefs = None
+    if actions_closed and decisions['schema'] not in contract.XP1_RELIGION_BELIEFS_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'add_belief',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=religion_beliefs.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            beliefs=deepcopy(native['beliefs']))
+    contract.add_xp1_religion_beliefs(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp1_religion_founding(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religion_founding, religion_beliefs
+    from .xp1_religion_founding import catalogue
+    saved.explicit_religion_founding = None
+    if actions_closed and decisions['schema'] not in contract.XP1_RELIGION_FOUNDING_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'found_religion',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=religion_founding.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            foundation=deepcopy(native['foundation']))
+    contract.add_xp1_religion_founding(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp1_religion_custom_names(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religion_custom_names
+    from .xp1_religion_custom_names import catalogue
+    saved.explicit_religion_custom_names = None
+    if actions_closed and decisions['schema'] not in contract.XP1_RELIGION_CUSTOM_NAMES_SCHEMA_BY_BASE:
+        return
+    unavailable = contract.family_query_unavailable(decisions, religion_custom_names.KIND,
+                                                     actions_closed=actions_closed)
+    state = None
+    if not unavailable:
+        native = catalogue(saved, observation)
+        state = religion_custom_names.project(native, observation['player_id'], observation['turn'],
+                                               observation=observation)
+    contract.add_xp1_religion_custom_names(decisions, state, actions_closed=actions_closed)
+
+
+def _add_xp1_great_person_activation(saved, observation, decisions, *, actions_closed=False, xp2=False):
+    from civ6_host.contracts import network_turn as contract, great_person_activation
+    from .xp1_great_person_activation import catalogue
+    saved.explicit_great_person_activation = None
+    schemas = (contract.XP2_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE if xp2
+               else contract.XP1_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE)
+    if actions_closed and decisions['schema'] not in schemas:
+        return
+    unavailable = contract.family_query_unavailable(decisions,great_person_activation.KIND,
+                                                     actions_closed=actions_closed)
+    state = None
+    if not unavailable:
+        native = catalogue(saved,observation)
+        state = great_person_activation.project(native,observation['player_id'],observation['turn'],
+                                                  observation=observation)
+    attach = contract.add_xp2_great_person_activation if xp2 else contract.add_xp1_great_person_activation
+    attach(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp1_religious_unit_operations(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religious_unit_operations
+    from .xp1_religious_unit_operations import catalogue
+    saved.explicit_religious_unit_operations = None
+    if actions_closed and decisions['schema'] not in contract.XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE:
+        return
+    unavailable = any(contract.family_query_unavailable(decisions,kind,actions_closed=actions_closed)
+                      for kind in religious_unit_operations.KINDS)
+    state = None
+    if not unavailable:
+        native = catalogue(saved,observation)
+        state = religious_unit_operations.project(native,observation['player_id'],observation['turn'],
+                                                   observation=observation)
+    contract.add_xp1_religious_unit_operations(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp2_religious_unit_operations(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religious_unit_operations
+    from .xp1_religious_unit_operations import catalogue
+    saved.explicit_religious_unit_operations = None
+    if actions_closed and decisions['schema'] not in contract.XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE:
+        return
+    unavailable = any(contract.family_query_unavailable(decisions,kind,actions_closed=actions_closed)
+                      for kind in religious_unit_operations.KINDS)
+    state = None
+    if not unavailable:
+        native = catalogue(saved,observation)
+        state = religious_unit_operations.project(native,observation['player_id'],observation['turn'],
+                                                   observation=observation)
+    contract.add_xp2_religious_unit_operations(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp1_prophet_activation(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, prophet_activation, religion_beliefs
+    from .xp1_prophet_activation import catalogue
+    saved.explicit_prophet_activation = None
+    if actions_closed and decisions['schema'] not in contract.XP1_PROPHET_ACTIVATION_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'activate_prophet',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=prophet_activation.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            activation=deepcopy(native['activation']))
+    contract.add_xp1_prophet_activation(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp2_pantheon(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, pantheon
+    from .xp1_pantheon import catalogue, read_pantheon_index
+    saved.explicit_pantheon = None
+    if actions_closed and decisions['schema'] not in contract.XP2_PANTHEON_SCHEMA_BY_BASE:
+        return
+    unavailable = contract.family_query_unavailable(decisions, 'pantheon', actions_closed=actions_closed)
+    state = None
+    if not unavailable:
+        native = catalogue(saved, observation)
+        index = read_pantheon_index(saved, observation)
+        state = dict(schema=pantheon.STATE_SCHEMA, player_id=observation['player_id'],
+                     turn=observation['turn'], pantheon_index=index, catalogue=deepcopy(native))
+    contract.add_xp2_pantheon(decisions, state, actions_closed=actions_closed)
+
+
+def _add_xp2_prophet_activation(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, prophet_activation, religion_beliefs
+    from .xp1_prophet_activation import catalogue
+    saved.explicit_prophet_activation = None
+    if actions_closed and decisions['schema'] not in contract.XP2_PROPHET_ACTIVATION_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'activate_prophet',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=prophet_activation.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            activation=deepcopy(native['activation']))
+    contract.add_xp2_prophet_activation(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp2_religion_founding(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religion_founding, religion_beliefs
+    from .xp1_religion_founding import catalogue
+    saved.explicit_religion_founding = None
+    if actions_closed and decisions['schema'] not in contract.XP2_RELIGION_FOUNDING_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'found_religion',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=religion_founding.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            foundation=deepcopy(native['foundation']))
+    contract.add_xp2_religion_founding(decisions,state,actions_closed=actions_closed)
+
+
+def _add_xp2_religion_beliefs(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract, religion_beliefs
+    from .xp1_religion_beliefs import catalogue
+    saved.explicit_religion_beliefs = None
+    if actions_closed and decisions['schema'] not in contract.XP2_RELIGION_BELIEFS_SCHEMA_BY_BASE:
+        return
+    unavailable=contract.family_query_unavailable(decisions,'add_belief',actions_closed=actions_closed)
+    state=None
+    if not unavailable:
+        native=catalogue(saved,observation)
+        pid,turn=observation['player_id'],observation['turn']
+        state=dict(schema=religion_beliefs.SCHEMA,player_id=pid,turn=turn,
+            own=religion_beliefs.project_snapshot(native['own'],pid,turn,observation=observation),
+            beliefs=deepcopy(native['beliefs']))
+    contract.add_xp2_religion_beliefs(decisions,state,actions_closed=actions_closed)
+
+
+
+def _add_xp1_great_people(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract
+    commands_enabled = getattr(saved, 'xp1_great_people_actions', False) is True
+    if commands_enabled:
+        from .xp1_great_people_commands import catalogue as read_people
+        saved.explicit_great_people_actions = None
+    else:
+        from .xp1_great_people import read as read_people
+    if actions_closed and decisions['schema'] not in contract.XP1_GREAT_PEOPLE_SCHEMA_BY_BASE:
+        return
+    unavailable = actions_closed or contract.is_waiting(decisions['turn_controls'])
+    state = None if unavailable else read_people(saved, observation)
+    contract.add_xp1_great_people(decisions, state, actions_closed=actions_closed)
+
+
+def _add_xp2_great_people(saved, observation, decisions, *, actions_closed=False):
+    from civ6_host.contracts import network_turn as contract
+
+    if actions_closed and decisions['schema'] not in contract.XP2_GREAT_PEOPLE_SCHEMA_BY_BASE:
+        return
+    commands_enabled = getattr(saved, 'xp2_great_people_actions', False) is True
+    if commands_enabled:
+        from .xp1_great_people_commands import catalogue as read_people
+        saved.explicit_great_people_actions = None
+    else:
+        from .xp1_great_people import read as read_people
+    unavailable = contract.family_query_unavailable(decisions, 'great_people', actions_closed=actions_closed)
+    state = None if unavailable else read_people(saved, observation, xp2=True)
+    contract.add_xp2_great_people(decisions, state, actions_closed=actions_closed)
+    if commands_enabled:
+        contract.add_xp2_great_people_actions(decisions, actions_closed=actions_closed)
+
+
+def _add_unit_work(saved, observation, decisions, *, actions_closed):
+    from civ6_host.contracts import network_turn as contract, unit_work
+    from .unit_work_info import read_catalog
+    from .unit_work_state import observe
+    from .xp2_lan_unit_work import primary_adjacent_enabled
+
+    acting = not actions_closed and not contract.is_waiting(decisions['turn_controls'])
+    adjacent = primary_adjacent_enabled(saved)
+    catalogue, info = (read_catalog(saved.prefix, observation['turn'],
+                                    player_id=observation['player_id'], processing=True, adjacent=adjacent)
+                       if acting else (None, None))
+    state = observe(saved, observation, catalogue, include_plot=True) if acting else None
+    decisions.update(unit_work=catalogue, unit_work_state=state, unit_work_info=info)
+    rows = [dict(candidate_id=contract.digest(action), action=action)
+            for action in unit_work.actions(catalogue)] if acting else []
+    decisions['candidates'].extend(rows)
+    reason = 'session_closed' if actions_closed else 'native_unit_work_acting_boundary_unavailable'
+    decisions['families'].update(unit_work.network_families(catalogue, rows, adjacent=adjacent,
+                                                           unavailable_reason=reason))
+
+
 def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnostic=False):
     """Return session, player observation, and an honest partial family catalogue.
 
@@ -334,6 +790,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
     continuation = saved.continuation
     b, p = saved.backend, saved.prefix
     core_sha256=b.load_abi.core_sha256
+    xp1_unit_work = core_sha256 == XP1_CORE_SHA256 and getattr(saved, '_xp1_unit_work_core', None) is b.core
     attack_families=core_sha256 in (XP1_CORE_SHA256,XP2_CORE_SHA256)
     city_flags=getattr(saved,'_expansion_city_controls_requested',None)
     city_controls_enabled=city_flags is not None
@@ -351,7 +808,6 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             or continuation.unit_source.get('callbacks') != CALLBACKS):
         raise ValueError('XP1 session lost its original unit-operation source receipt')
     from .network_timer import read as read_timer
-    from .native.native_unit_actions import found_city_catalog_source, parse_founders
     from civ6_host.contracts import network_turn as contract
     turn_gates = None if actions_closed else _turn_gates(saved, player_id)
 
@@ -368,10 +824,14 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
         if common_input_families:
             from .placement_inventory_profile import bind_owner as bind_inventory, source_reference
             from .placement_inventory import read as read_inventory
-            INVENTORY_SOURCE=source_reference(core_sha256)
-            bind_inventory(b, b.core, b.runtime.read)
+            from .execution_images import _PROFILE
+            inventory_options = ({'include_pillage': True}
+                if core_sha256 == XP2_CORE_SHA256
+                and getattr(b.core,'_civ6_host_execution_image',None) is _PROFILE else {})
+            INVENTORY_SOURCE=source_reference(core_sha256,**inventory_options)
+            bind_inventory(b, b.core, b.runtime.read,**inventory_options)
             inventory = read_inventory(p, player_id, activity['turn'], observation,
-                                       core_sha256=core_sha256)
+                                       core_sha256=core_sha256,**inventory_options)
             saved.emit('native_placement_inventory_readback',
                 episode_id=continuation.identity.episode_id,
                 game_generation=continuation.identity.game_generation,
@@ -442,11 +902,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 'native_foundation_acting_boundary_unavailable' if strategic_allowed else
                 contract.NATIVE_STRATEGIC_READER_UNAVAILABLE))
         else:
-            source = found_city_catalog_source(player_id, activity['turn'],
-                                               core_sha256=core_sha256)
-            raw = p.runtime.evaluate_text(p.ui_child, source, b'@native_found_city_catalog',
-                                          capacity=131072)
-            actions = parse_founders(raw, player_id, activity['turn'])
+            actions = read_founders(p, player_id, activity['turn'], core_sha256=core_sha256)
             founders = [dict(candidate_id=contract.digest(action), action=action)
                         for action in actions]
             candidates.extend(founders)
@@ -552,22 +1008,21 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 decisions['families'][kind]=dict(status='unqualified',
                     reason='xp2_family_profile_not_yet_qualified')
         if city_controls_enabled:
-            decisions['schema']=contract.CAPABILITY_CITY_CONTROLS_SCHEMA
+            # Rise and Fall composes its existing feature branches from v11.
+            # City queries are an optional group in those same views.
+            if core_sha256 != XP1_CORE_SHA256:
+                decisions['schema']=contract.CAPABILITY_CITY_CONTROLS_SCHEMA
             decisions.update(city_focus_catalogs=city_focus_catalogs,citizen_catalogs=citizen_catalogs)
             decisions['families'].update(city_families)
         if core_sha256 == XP2_CORE_SHA256:
             from .native import native_saved_city_shot, native_saved_district_shot
             from .native import native_saved_city_targets as defenses
-            from .native.native_saved_unit_work import actions as work_actions
-            from .unit_work_info import read_catalog as read_work_catalogue
-            from .unit_work_state import observe as observe_work_state
             from .production_inputs import read_current as read_current_production
-            from civ6_host.contracts.unit_work import NETWORK_GAPS
             from .xp2_plot_purchases import catalogue as read_plot_purchases
             from .xp2_promotions import catalogue as read_promotions
             from .xp2_unit_upgrades import catalogue as read_upgrades
             from .xp2_strategic_resources import observe as read_strategic_resources
-            from civ6_host.contracts import plot_purchases, unit_upgrades
+            from civ6_host.contracts import plot_purchases
             decisions['schema'] = contract.CAPABILITY_XP2_ENVOYS_SCHEMA
             from .xp2_policies import read as read_policies
             from civ6_host.contracts import capability_policies
@@ -610,30 +1065,10 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             continuation.explicit_ranged_shots = {}
             continuation.explicit_city_shot_defenses = None
             acting = not actions_closed and not contract.is_waiting(controls)
-            saved.explicit_promotions = None
-            promotions = read_promotions(saved, observation) if acting else None
-            decisions['unit_promotions'] = promotions
-            if promotions is None:
-                decisions['families']['promote_unit'] = dict(status='unqualified',
-                    reason='session_closed' if actions_closed else 'native_promotion_acting_boundary_unavailable')
-            else:
-                promotion_rows = [dict(candidate_id=contract.digest(action), action=action)
-                                  for action in promotions['offers']]
-                candidates.extend(promotion_rows)
-                decisions['families']['promote_unit'] = dict(status='queried_complete',
-                    candidate_ids=[row['candidate_id'] for row in promotion_rows])
+            _add_promotions(saved, observation, decisions, read_promotions, acting=acting, actions_closed=actions_closed)
             saved.explicit_unit_upgrades = saved.xp2_unit_upgrades = None
-            upgrades = read_upgrades(saved, observation) if acting and strategic_allowed else None
-            decisions['unit_upgrades'] = upgrades
-            if upgrades is None:
-                decisions['families']['upgrade_unit'] = dict(status='unqualified',
-                    reason='session_closed' if actions_closed else 'native_upgrade_acting_boundary_unavailable')
-            else:
-                upgrade_rows = [dict(candidate_id=contract.digest(action), action=action)
-                                for action in unit_upgrades.actions(upgrades)]
-                candidates.extend(upgrade_rows)
-                decisions['families']['upgrade_unit'] = dict(status='queried_complete',
-                    candidate_ids=[row['candidate_id'] for row in upgrade_rows])
+            _add_upgrades(saved,observation,decisions,read_upgrades,
+                          acting=acting and strategic_allowed,actions_closed=actions_closed)
             plot_catalogue, city_catalogue = read_plot_purchases(saved, observation, allow_faith=True) if acting else (None, None)
             decisions['plot_purchases'] = plot_catalogue
             decisions['city_purchases'] = city_catalogue
@@ -669,38 +1104,13 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                         p, activity['turn'], player_id=player_id, collect=False)['cities']
                 decisions['families'][kind] = dict(status='queried_complete',
                     candidate_ids=[row['candidate_id'] for row in shot_rows])
-            work_catalogue, work_info = (
-                read_work_catalogue(p, activity['turn'], player_id=player_id, processing=True)
-                if acting else (None, None))
-            decisions['unit_work'] = work_catalogue
-            decisions['unit_work_info'] = work_info
-            decisions['unit_work_state'] = (observe_work_state(saved, observation, work_catalogue,
-                                            include_plot=True) if acting else None)
-            work_rows = ([dict(candidate_id=contract.digest(action), action=action)
-                          for action in work_actions(work_catalogue)] if acting else [])
-            candidates.extend(work_rows)
-            for kind, gaps in NETWORK_GAPS.items():
-                if work_catalogue is None:
-                    decisions['families'][kind] = dict(status='unqualified',
-                        reason='session_closed' if actions_closed else 'native_unit_work_acting_boundary_unavailable')
-                    continue
-                decisions['families'][kind] = dict(status='queried_partial',
-                    candidate_ids=[row['candidate_id'] for row in work_rows if row['action']['kind'] == kind],
-                    unqualified=list(gaps))
+        if core_sha256 == XP2_CORE_SHA256 or xp1_unit_work:
+            _add_unit_work(saved, observation, decisions, actions_closed=actions_closed)
         if core_sha256 == XP2_CORE_SHA256:
             from .xp2_envoys import catalogue as read_envoys
-            from civ6_host.contracts.envoys import actions as envoy_actions
             acting = not actions_closed and not contract.is_waiting(controls)
             envoys = read_envoys(saved, observation) if acting and strategic_allowed else None
-            decisions['envoys'] = envoys
-            envoy_rows = [dict(candidate_id=contract.digest(action), action=action)
-                          for action in envoy_actions(envoys)]
-            candidates.extend(envoy_rows)
-            for kind in ('send_envoy', 'retain_envoys'):
-                decisions['families'][kind] = (dict(status='unqualified', reason=(
-                    'session_closed' if actions_closed else 'native_envoy_acting_boundary_unavailable'))
-                    if envoys is None else dict(status='queried_complete', candidate_ids=[
-                        row['candidate_id'] for row in envoy_rows if row['action']['kind'] == kind]))
+            contract.add_envoy_choices(decisions, envoys, actions_closed=actions_closed)
         if getattr(saved, 'governors_diagnostic', False):
             if core_sha256 != XP2_CORE_SHA256:
                 raise ValueError('Governor query option requires the selected XP2 core')
@@ -718,14 +1128,17 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                     'session_closed' if actions_closed else 'native_governor_acting_boundary_unavailable'))
                     if governor_catalogue is None else dict(status='queried_complete', candidate_ids=[
                         row['candidate_id'] for row in governor_rows if row['action']['kind'] == kind]))
-        if getattr(saved, 'diplomacy_overview_diagnostic', False):
+        standard_trade = getattr(saved, 'standard_trade', False)
+        initial_diplomacy = getattr(saved, 'diplomacy_overview_diagnostic', False)
+        if initial_diplomacy and not standard_trade:
             if (core_sha256 != XP2_CORE_SHA256
                     or decisions['schema'] != contract.CAPABILITY_XP2_GOVERNORS_SCHEMA):
                 raise ValueError('Initial diplomacy requires its complete XP2 v32 input group')
             from .xp2_diplomacy_overview import catalogue as read_initial_diplomacy
             from civ6_host.contracts.diplomacy_overview import candidates as initial_choices
             acting = not actions_closed and not contract.is_waiting(controls)
-            overview = read_initial_diplomacy(saved, observation, sequence=sequence) if acting else None
+            overview = (read_initial_diplomacy(saved, observation, sequence=sequence,
+                                               public_relationships=True) if acting else None)
             decisions['schema'] = contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA
             decisions['diplomacy_overview'] = overview
             rows = [dict(candidate_id=contract.digest(action), action=action)
@@ -737,13 +1150,11 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                 if overview is None else dict(status='queried_partial',
                     candidate_ids=[row['candidate_id'] for row in rows],
                     unqualified=list(contract.INITIAL_DIPLOMACY_GAPS)))
-        standard_trade = getattr(saved, 'standard_trade', False)
         if getattr(saved, 'trade_diagnostic', False) or standard_trade:
             base = (contract.CAPABILITY_XP2_ENVOYS_SCHEMA if standard_trade
                     else contract.CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA)
             if decisions['schema'] != base:
                 raise ValueError('Trade requires its selected XP2 base query group')
-            from civ6_host.contracts import trade
             from .xp2_trade import catalogue as read_trade
 
             acting = not actions_closed and not contract.is_waiting(controls)
@@ -757,18 +1168,7 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                           dict(trade_routes=None, trade_origins=None))
             decisions['schema'] = (contract.CAPABILITY_XP2_STANDARD_TRADE_SCHEMA if standard_trade
                                    else contract.CAPABILITY_XP2_TRADE_SCHEMA)
-            decisions.update(trade_view)
-            for kind, field, choices in (
-                    ('make_trade_route', 'trade_routes', trade.route_actions),
-                    ('change_trade_origin', 'trade_origins', trade.origin_actions)):
-                value = trade_view[field]
-                rows = [dict(candidate_id=contract.digest(action), action=action)
-                        for action in ([] if value is None else choices(value))]
-                candidates.extend(rows)
-                decisions['families'][kind] = (
-                    dict(status='unqualified', reason='session_closed' if actions_closed else
-                         'native_trade_acting_boundary_unavailable') if value is None else
-                    dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+            _add_trade(decisions, trade_view, actions_closed=actions_closed)
         if getattr(saved, 'unit_formations', False):
             from .xp2_unit_formations import catalogue as read_formations
             if decisions['schema'] != contract.CAPABILITY_XP2_STANDARD_TRADE_SCHEMA:
@@ -785,21 +1185,9 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
                      'native_unit_formation_acting_boundary_unavailable') if state is None else
                 dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
         if getattr(saved, 'stock_dedications', False):
-            from .xp2_dedications import catalogue as read_dedications
-            from civ6_host.contracts import dedications
-            if decisions['schema'] != contract.CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA:
-                raise ValueError('Dedication query requires the stock formation capability boundary')
-            acting = not actions_closed and not contract.is_waiting(controls)
-            state = read_dedications(saved, observation) if acting else None
-            rows = [dict(candidate_id=contract.digest(action), action=action)
-                    for action in dedications.candidates(state)]
-            candidates.extend(rows)
-            decisions['schema'] = contract.CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA
-            decisions['dedications'] = state
-            decisions['families'][dedications.KIND] = (
-                dict(status='unqualified', reason='session_closed' if actions_closed else
-                     'native_dedication_acting_boundary_unavailable') if state is None else
-                dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+            _add_dedications(saved, observation, decisions, actions_closed=actions_closed,
+                previous_schema=contract.CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA,
+                target_schema=contract.CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA)
         if getattr(saved, 'espionage_diagnostic', False):
             if core_sha256 != XP2_CORE_SHA256:
                 raise ValueError('Espionage requires the selected XP2 engine')
@@ -811,7 +1199,8 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             decisions = contract.upgrade_espionage_catalogue(
                 decisions, espionage, observation=observation)
             from .xp2_spy_completion import catalogue as read_spy_completion
-            completion = read_spy_completion(saved, observation) if acting else None
+            completion = (read_spy_completion(saved, observation, waiting=not acting)
+                          if not actions_closed else None)
             decisions = contract.upgrade_spy_completion_catalogue(
                 decisions, completion, observation=observation)
         if getattr(saved, 'world_congress_diagnostic', False):
@@ -855,11 +1244,207 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             decisions = contract.upgrade_trade_overview_catalogue(
                 decisions, panel, observation=observation, status=status)
         if not actions_closed and getattr(continuation, 'captured_city_core', None) is not None:
-            from .xp2_captured_city import read as read_captured_city
+            from .captured_city_session import read as read_captured_city
             captured_city = read_captured_city(saved, observation, controls=controls,
                                               actions_closed=actions_closed)
             decisions = contract.upgrade_captured_city_catalogue(
                 decisions, captured_city, actions_closed=actions_closed)
+            if getattr(continuation, 'city_shot_core', None) is b.core:
+                from .native import native_saved_city_shot, native_saved_district_shot
+                acting = strategic_allowed and not contract.is_waiting(controls)
+                image = b.core._civ6_host_execution_image
+                continuation.explicit_ranged_shots = {}
+                continuation.explicit_city_shot_defenses = None
+                for kind, shot, upgrade in (
+                    ('city_range_attack', native_saved_city_shot, contract.upgrade_xp1_city_shot_catalogue),
+                    ('district_range_attack', native_saved_district_shot, contract.upgrade_xp1_district_shot_catalogue),
+                ):
+                    shots = (shot.catalog(p, activity['turn'], player_id=player_id, execution_image=image)
+                             if acting else None)
+                    continuation.explicit_ranged_shots[kind] = shots
+                    if shots is not None:
+                        shot.compare_own_cities(shots, observation)
+                        if shot.actions(shots) and continuation.explicit_city_shot_defenses is None:
+                            if continuation.explicit_combat_cities is None:
+                                raise ValueError('Rise and Fall ranged shot lacks current visible defenses')
+                            continuation.explicit_city_shot_defenses = deepcopy(
+                                continuation.explicit_combat_cities)
+                    decisions = upgrade(decisions, shots)
+                if getattr(saved, 'xp1_governors_enabled', False):
+                    from .xp2_governors import catalogue as read_governors
+                    from .xp1_city_state_envoys import read as read_city_state_envoys
+                    from .xp1_city_state_levies import catalogue as read_city_state_levies, unit_flags
+                    from .xp2_envoys import catalogue as read_envoys
+                    waiting = contract.is_waiting(controls)
+                    governor_catalogue = None if waiting else read_governors(saved, observation)
+                    decisions = contract.upgrade_xp1_governor_catalogue(decisions, governor_catalogue)
+                    influence = None if waiting else read_city_state_envoys(saved, observation)
+                    decisions = contract.upgrade_xp1_city_state_envoys_catalogue(decisions, influence)
+                    envoys = None if waiting else read_envoys(saved, observation)
+                    decisions['schema'] = contract.CAPABILITY_XP1_ENVOY_CHOICES_SCHEMA
+                    contract.add_envoy_choices(decisions, envoys, actions_closed=actions_closed)
+                    levies = None if waiting else read_city_state_levies(saved, observation)
+                    contract.add_xp1_city_state_levies(decisions, levies)
+                    contract.add_xp1_unit_levies(decisions, None if waiting else unit_flags(saved, observation))
+                    if getattr(saved, 'xp1_dedications_enabled', False):
+                        _add_dedications(saved, observation, decisions, actions_closed=actions_closed,
+                            previous_schema=contract.CAPABILITY_XP1_UNIT_LEVIES_SCHEMA,
+                            target_schema=contract.CAPABILITY_XP1_DEDICATIONS_SCHEMA)
+                    if getattr(saved, 'xp1_trade', False):
+                        if decisions['schema'] != contract.CAPABILITY_XP1_DEDICATIONS_SCHEMA:
+                            raise ValueError('Rise and Fall trade requires its previous public catalogue')
+                        from .xp2_trade import catalogue as read_trade
+                        trade_view = (dict(trade_routes=None, trade_origins=None) if waiting else
+                                      read_trade(saved, observation))
+                        decisions['schema'] = contract.CAPABILITY_XP1_TRADE_SCHEMA
+                        _add_trade(decisions, trade_view, actions_closed=actions_closed)
+                        if getattr(saved, 'xp1_trade_overview', False):
+                            from .xp2_trade_overview import read_stock
+                            panel, status = (None, 'waiting_or_closed') if waiting else read_stock(
+                                saved, observation, sequence)
+                            decisions = contract.upgrade_trade_overview_catalogue(
+                                decisions, panel, observation=observation, status=status)
+                    if getattr(saved, 'xp1_government', False):
+                        decisions['schema'] = contract.XP1_GOVERNMENT_SCHEMA_BY_BASE[decisions['schema']]
+                        _add_xp1_government_policies(saved, observation, decisions,
+                            acting=not waiting, actions_closed=actions_closed)
+                    if getattr(saved, 'xp1_plot_purchase', False):
+                        _add_xp1_plot_purchases(saved, observation, decisions,
+                            acting=not waiting, actions_closed=actions_closed)
+                    if getattr(saved, 'xp1_city_buildings', False):
+                        from .xp1_city_buildings import read as read_city_buildings
+                        from .xp2_great_work_commands import public_panel
+
+                        decisions['schema'] = contract.XP1_CITY_BUILDINGS_SCHEMA_BY_BASE[decisions['schema']]
+                        decisions['city_buildings'] = public_panel(
+                            saved, read_city_buildings(saved, observation), can_act=not waiting and not actions_closed)
+                        contract.add_great_work_choices(decisions, decisions['city_buildings'])
+                    if getattr(saved, 'xp1_promotions', False):
+                        from .xp1_promotions import catalogue as read_promotions
+                        decisions['schema'] = contract.XP1_PROMOTION_SCHEMA_BY_BASE[decisions['schema']]
+                        _add_promotions(saved, observation, decisions, read_promotions,
+                                        acting=not waiting, actions_closed=actions_closed)
+                    if getattr(saved,'xp1_unit_upgrades',False):
+                        from .xp1_unit_upgrades import catalogue as read_upgrades
+                        decisions['schema'] = contract.XP1_UPGRADE_SCHEMA_BY_BASE[decisions['schema']]
+                        saved.explicit_unit_upgrades = None
+                        _add_upgrades(saved,observation,decisions,read_upgrades,
+                                      acting=not waiting,actions_closed=actions_closed)
+        if core_sha256 == XP1_CORE_SHA256:
+            _attach_installed_xp1_information(saved, observation, decisions)
+            if getattr(saved,'xp1_pantheon',False):
+                _add_xp1_pantheon(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_religion_beliefs',False):
+                _add_xp1_religion_beliefs(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_religion_founding',False):
+                _add_xp1_religion_founding(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_great_people',False):
+                _add_xp1_great_people(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_prophet_activation',False):
+                _add_xp1_prophet_activation(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_great_people_actions',False) is True and 'great_people' in decisions:
+                contract.add_xp1_great_people_actions(decisions,actions_closed=actions_closed)
+                if getattr(saved,'xp1_great_people_reject',False) is True:
+                    contract.add_xp1_great_people_reject(decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_religion_custom_names',False) is True:
+                _add_xp1_religion_custom_names(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_great_person_activation',False) is True:
+                _add_xp1_great_person_activation(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_religious_unit_operations',False) is True:
+                _add_xp1_religious_unit_operations(saved,observation,decisions,actions_closed=actions_closed)
+            if getattr(saved,'xp1_city_religion_details',False) is True:
+                _add_xp1_city_religion_details(saved,observation,decisions)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved, 'xp2_city_state_levies_enabled', False):
+            from civ6_host.contracts.city_state_levies import ACTION as LEVY
+            from .xp1_city_state_levies import catalogue as read_city_state_levies, unit_flags
+            available = not contract.family_query_unavailable(decisions, LEVY, actions_closed=actions_closed)
+            levies = read_city_state_levies(saved, observation) if available else None
+            flags = None if actions_closed or contract.is_waiting(controls) else unit_flags(saved, observation)
+            contract.add_xp2_levies(decisions, levies, flags)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_religious_unit_operations',False) is True:
+            _add_xp2_religious_unit_operations(saved,observation,decisions,actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_prophet_activation',False) is True:
+            _add_xp2_prophet_activation(saved,observation,decisions,actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_religion_founding',False) is True:
+            _add_xp2_religion_founding(saved,observation,decisions,actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_religion_beliefs',False) is True:
+            _add_xp2_religion_beliefs(saved,observation,decisions,actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_pantheon',False) is True:
+            _add_xp2_pantheon(saved,observation,decisions,actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved,'xp2_city_religion_details',False) is True:
+            _add_xp2_city_religion_details(saved,observation,decisions,actions_closed=actions_closed)
+        if (core_sha256 == XP2_CORE_SHA256 and getattr(saved, 'xp2_city_buildings', False)
+                and not actions_closed):
+            from .xp2_city_buildings import read as read_city_buildings
+            from .xp2_great_work_commands import public_panel
+            from civ6_host.contracts.city_buildings import GREAT_WORK_COMMAND_SCHEMAS
+
+            decisions['schema'] = contract.XP2_CITY_BUILDINGS_SCHEMA_BY_BASE[decisions['schema']]
+            panel = public_panel(saved, read_city_buildings(saved, observation),
+                                 can_act=strategic_allowed and not contract.is_waiting(controls))
+            decisions['city_buildings'] = panel
+            if panel['schema'] in GREAT_WORK_COMMAND_SCHEMAS:
+                contract.add_great_work_choices(decisions, panel)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved, 'xp2_great_people', False) is True:
+            _add_xp2_great_people(saved, observation, decisions, actions_closed=actions_closed)
+        if core_sha256 == XP2_CORE_SHA256 and getattr(saved, 'xp2_great_person_activation', False) is True:
+            _add_xp1_great_person_activation(saved, observation, decisions, actions_closed=actions_closed, xp2=True)
+        if getattr(saved, '_world_score_core', None) is not None:
+            from . import world_score
+            decisions['world_score'] = None if actions_closed else world_score.read(saved, observation)
+        if getattr(saved, '_xp2_build_route_core', None) is not None:
+            from . import xp2_build_route
+
+            routes = [] if actions_closed or contract.is_waiting(controls) else xp2_build_route.read(saved, observation)
+            contract.add_build_route_choices(decisions, routes, actions_closed)
+        if getattr(saved, '_xp2_air_operations_core', None) is not None:
+            from . import xp2_air_operations
+
+            air = [] if actions_closed or contract.is_waiting(controls) else xp2_air_operations.read(saved, observation)
+            contract.add_air_choices(decisions, air, actions_closed)
+        if getattr(saved, '_xp2_designate_park', None) is not None:
+            from . import xp2_designate_park
+
+            parks = ([] if actions_closed or contract.is_waiting(controls)
+                     else xp2_designate_park.read(saved, observation))
+            contract.add_park_designation_choices(decisions, parks, actions_closed)
+        if getattr(saved, '_xp2_rock_bands', None) is not None:
+            from . import xp2_rock_bands
+            panel = None if actions_closed else xp2_rock_bands.read_panel(saved, observation)
+            contract.add_rock_band_choices(decisions, panel, actions_closed)
+        if getattr(saved, '_archaeology_core', None) is not None:
+            from . import xp2_archaeology
+
+            decisions['archaeology'] = None if actions_closed else xp2_archaeology.read(
+                saved, observation, panel=decisions.get('city_buildings'))
+            if xp2_archaeology.commands_enabled(saved):
+                from .xp2_archaeology_excavation import read as read_excavations
+
+                excavations = [] if actions_closed or contract.is_waiting(controls) else read_excavations(saved, observation)
+                contract.add_archaeology_choices(decisions, actions_closed=actions_closed, excavations=excavations)
+        if getattr(saved, '_expansion_city_growth', None) is not None:
+            from . import expansion_city_growth
+            decisions['city_growth'] = None if actions_closed else expansion_city_growth.read(saved, observation)
+        if getattr(saved, '_expansion_city_loyalty', None) is not None:
+            from . import expansion_city_loyalty
+            decisions['city_loyalty'] = None if actions_closed else expansion_city_loyalty.read(saved, observation)
+        if getattr(saved, '_expansion_national_parks', None) is not None:
+            from . import expansion_national_parks
+            decisions['national_parks'] = None if actions_closed else expansion_national_parks.read(saved, observation)
+        if initial_diplomacy and standard_trade:
+            from .xp2_diplomacy_overview import catalogue as read_initial_diplomacy
+            from civ6_host.contracts.diplomacy_overview import candidates as initial_choices
+            available = not actions_closed and not contract.is_waiting(controls) and strategic_allowed
+            overview = read_initial_diplomacy(saved, observation, sequence=sequence) if available else None
+            decisions['diplomacy_overview'] = overview
+            rows = [dict(candidate_id=contract.digest(action), action=action)
+                    for action in ([] if overview is None else initial_choices(overview))]
+            decisions['candidates'].extend(rows)
+            decisions['families']['diplomacy_initiate'] = (
+                dict(status='queried_partial', candidate_ids=[row['candidate_id'] for row in rows],
+                     unqualified=list(contract.STOCK_CITY_STATE_PEACE_GAPS)) if available else
+                dict(status='unqualified', reason=('session_closed' if actions_closed else
+                     'native_initial_diplomacy_acting_boundary_unavailable')))
         decisions.pop('decision_id', None)
         decisions['decision_id'] = contract.digest(decisions)
         contract.validate_capability_catalogue(decisions, identity, sequence, activity['turn'],
@@ -868,7 +1453,6 @@ def read(saved, player_id, sequence, *, actions_closed=False, specialist_diagnos
             from .xp1_unit_attacks import administrative_readback
             event=administrative_readback(saved,observation,sequence)
             saved.emit(event['stage'],**{k:v for k,v in event.items() if k!='stage'})
-            from copy import deepcopy
             if not hasattr(saved,'combat_administrative_by_player'):
                 saved.combat_administrative_by_player={}
             saved.combat_administrative_by_player[player_id]=deepcopy(event)

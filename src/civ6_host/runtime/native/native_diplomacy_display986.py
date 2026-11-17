@@ -126,7 +126,9 @@ def read(owner, statement, data, configuration, sequence, *, saved_context=None)
     before = _snapshot(owner, 'before', saved_context)
     prefix = owner.prefix
     attach(prefix)
-    raw = prefix.runtime.evaluate_text(prefix.ui_child, lua_source(statement, data['session']['player_id'], configuration, public_display=True,execution_image=image), b'@official_diplomacy_public_display', capacity=MAX_BYTES)
+    code = lua_source(statement, data['session']['player_id'], configuration, public_display=True,
+                      execution_image=image, promise_responses=saved_context is not None)
+    raw = prefix.runtime.evaluate_text(prefix.ui_child, code, b'@official_diplomacy_public_display', capacity=MAX_BYTES)
     value = parse(raw, data, configuration)
     if _snapshot(owner, 'after', saved_context) != before:
         raise RuntimeError('Diplomatic display read changed scheduler')

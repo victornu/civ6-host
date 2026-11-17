@@ -18,6 +18,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 PROFILE_MANIFESTS = {
     'base': 'native/source-manifest.json',
+    'base-current-havok': 'native/profiles/base-current-havok/source-manifest.json',
     'xp1': 'native/profiles/xp1/source-manifest.json',
     'xp1-current': 'native/source-current.json',
     'xp1-postload': 'native/profiles/xp1-postload/source-manifest.json',
@@ -36,6 +37,32 @@ PROFILE_MANIFESTS = {
 
 
 def sha(data):return hashlib.sha256(data).hexdigest()
+
+
+_HAVOK_THREAD_IMPORT = re.compile(
+    rb'^(\s*THREAD_IMPORT\((\w+), "([^"\r\n]+)", )(0x[0-9a-f]+)(\);)$',
+    re.MULTILINE,
+)
+
+
+def with_havok_thread_rvas(root, base, recipe):
+    """Reuse the current export table without compiling any expansion code."""
+    reference = (root / recipe['path']).resolve()
+    if not reference.is_relative_to((root / 'native').resolve()):
+        raise ValueError('Havok export source escapes source directory')
+    current = reference.read_bytes()
+    if sha(current) != recipe['sha256']:
+        raise ValueError('Havok export source changed')
+    old_keys = [row.group(2, 3) for row in _HAVOK_THREAD_IMPORT.finditer(base)]
+    new_rows = list(_HAVOK_THREAD_IMPORT.finditer(current))
+    new_keys = [row.group(2, 3) for row in new_rows]
+    if old_keys != new_keys or len(new_keys) != recipe['count'] or len(set(new_keys)) != len(new_keys):
+        raise ValueError('Havok thread import names or order differ')
+    rvas = {row.group(2, 3): row[4] for row in new_rows}
+    staged = _HAVOK_THREAD_IMPORT.sub(lambda row: row[1] + rvas[row.group(2, 3)] + row[5], base)
+    if sha(staged) != recipe['staged_sha256']:
+        raise ValueError('Staged Havok export addresses differ')
+    return staged
 
 
 def staging_paths(root,manifest):
@@ -68,7 +95,12 @@ def source_inputs(root,manifest):
         if len(data)!=row['bytes'] or sha(data)!=row['sha256']:raise ValueError('Native source changed: '+row['path'])
         if path in entries:raise ValueError('Duplicate native source')
         entries[path]=data
-    pending=[by_build['gamecore_python_host.c']];seen=set()
+    main = by_build['gamecore_python_host.c']
+    if 'havok_thread_rvas' in manifest:
+        if 'reference_executable' in manifest:
+            raise ValueError('Retained executable sources cannot use a Havok overlay')
+        entries[main] = with_havok_thread_rvas(root, entries[main], manifest['havok_thread_rvas'])
+    pending=[main];seen=set()
     while pending:
         path=pending.pop().resolve()
         if path in seen:continue

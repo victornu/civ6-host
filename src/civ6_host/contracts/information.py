@@ -10,15 +10,19 @@ import math
 import re
 from collections.abc import Mapping
 
-from civ6_host.contracts import city_growth, economy_inputs, production_inputs
+from civ6_host.contracts import capability_unit_attacks, city_growth, economy_inputs, production_inputs
 from civ6_host.contracts import unit_work_info, unit_work_state
 from . import network_turn
 
 
-PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources', 'diplomacy', 'trade', 'trade_overview', 'unit_formations', 'dedications', 'espionage', 'spy_completion', 'world_congress', 'world_congress_review', 'native_command_permissions', 'world_congress_active_effects')
+PUBLIC_GROUPS = ('economy', 'production', 'growth', 'unit_work', 'combat', 'display', 'strategic_resources', 'diplomacy', 'trade', 'trade_overview', 'unit_formations', 'unit_promotions', 'unit_upgrades', 'dedications', 'espionage', 'spy_completion', 'world_congress', 'world_congress_review', 'native_command_permissions', 'world_congress_active_effects', 'city_state_envoys', 'city_state_levies', 'unit_levies', 'city_buildings', 'city_religion')
+PUBLIC_GROUPS = (*PUBLIC_GROUPS, 'pantheon', 'religion_beliefs', 'religion_founding', 'great_people', 'prophet_activation', 'religion_custom_names', 'great_person_activation', 'religious_unit_operations', 'world_score')
+PUBLIC_GROUPS = (*PUBLIC_GROUPS, 'city_loyalty', 'national_parks', 'captured_city', 'archaeology', 'purchase_quotes')
+PUBLIC_GROUPS = (*PUBLIC_GROUPS, 'rock_bands')
 COMBAT_GROUP_SCHEMA='civ6-host.combat-inputs.v1'
 PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v1'
 CURRENT_PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v2'
+QUOTED_PRODUCTION_GROUP_SCHEMA = 'civ6-host.production-inputs.v3'
 UNIT_WORK_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v1'
 UNIT_WORK_CATALOGUE_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v2'
 UNIT_WORK_DETAILED_GROUP_SCHEMA = 'civ6-host.unit-work-inputs.v3'
@@ -27,12 +31,32 @@ _REQUIRED_FIELDS = {
     'display': (),
     'economy': ('treasury', 'yield_display', 'research_info', 'research', 'candidates'),
     'production': ('production', 'production_info', 'production_queues', 'candidates'),
+    'purchase_quotes': ('plot_purchases',),
     'growth': ('city_growth',),
     'strategic_resources': ('strategic_resources',),
     'diplomacy': ('diplomacy_overview',),
+    'city_state_envoys': ('city_state_envoys',),
+    'city_buildings': ('city_buildings',),
+    'city_loyalty': ('city_loyalty',),
+    'captured_city': ('captured_city',),
+    'national_parks': ('national_parks',),
+    'rock_bands': ('rock_bands',),
+    'city_religion': ('city_religion',),
+    'pantheon': ('pantheon',),
+    'religion_beliefs': ('religion_beliefs',),
+    'religion_founding': ('religion_founding',),
+    'religion_custom_names': ('religion_custom_names',),
+    'great_person_activation': ('great_person_activation',),
+    'religious_unit_operations': ('religious_unit_operations',),
+    'great_people': ('great_people',),
+    'prophet_activation': ('prophet_activation',),
+    'city_state_levies': ('city_state_levies',),
+    'unit_levies': ('unit_levies',),
     'trade': ('trade_routes', 'trade_origins'),
     'trade_overview': ('trade_overview_status',),
     'unit_formations': ('unit_formations',),
+    'unit_promotions': ('unit_promotions',),
+    'unit_upgrades': ('unit_upgrades',),
     'dedications': ('dedications',),
     'espionage': ('espionage',),
     'spy_completion': ('spy_completion',),
@@ -40,6 +64,8 @@ _REQUIRED_FIELDS = {
     'world_congress_review': ('world_congress_review', 'world_congress_review_status'),
     'native_command_permissions': ('native_command_permissions',),
     'world_congress_active_effects': ('world_congress_active_effects','world_congress_active_effects_status'),
+    'world_score': ('world_score',),
+    'archaeology': ('archaeology',),
     'combat': ('unit_attacks','queued_orders'),
     'unit_work': ('unit_work_state', 'unit_work_info', 'unit_work'),
 }
@@ -55,12 +81,18 @@ def required_fields(group: str, decision_schema=None) -> tuple[str, ...]:
     """Return the exact decision-side fields a group needs at this boundary."""
     if type(group) is not str or group not in _REQUIRED_FIELDS:
         raise ValueError(f'Unknown public information group: {group!r}')
+    decision_schema = network_turn.xp2_great_person_base_schema(decision_schema)
     if group == 'unit_work' and decision_schema == network_turn.CAPABILITY_UNIT_WORK_STATE_SCHEMA:
         return ('unit_work_state', 'unit_work')
+    if group == 'production' and decision_schema in network_turn.XP1_PRODUCTION_INFO_SCHEMAS:
+        return ('production_current', 'production_info', 'production_queues', 'candidates')
     if group == 'production' and decision_schema in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS:
         return ('production_current', 'production_queues')
-    if group == 'trade' and decision_schema in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+    if group == 'trade' and decision_schema in (
+            *network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS, *network_turn._SECONDARY_UNIT_SCHEMAS):
         return ('trade_routes',)
+    if group == 'combat' and decision_schema in capability_unit_attacks.HOTSEAT_COMBAT_SCHEMAS:
+        return capability_unit_attacks.HOTSEAT_COMBAT_FIELDS
     return _REQUIRED_FIELDS[group]
 
 
@@ -86,6 +118,10 @@ def project(group: str, observation, decisions) -> dict:
         raise ValueError('Display information requires the same cached versioned public envelope')
     if not isinstance(decisions, Mapping):
         raise ValueError('decisions must be an object')
+    original_schema = decisions.get('schema')
+    base_schema = network_turn.xp2_great_person_base_schema(original_schema)
+    if base_schema != original_schema:
+        decisions = dict(decisions, schema=base_schema)
     fields = required_fields(group, decisions.get('schema'))
     missing = [field for field in fields if field not in decisions]
     if missing:
@@ -105,16 +141,152 @@ def project(group: str, observation, decisions) -> dict:
     if group == 'economy':
         return economy_inputs.project(observation, decisions)
 
+    if group == 'purchase_quotes':
+        from . import plot_purchases
+
+        return plot_purchases.project_quotes(observation, decisions, player_id, turn)
+
+    if group == 'archaeology':
+        from . import archaeology
+
+        return copy.deepcopy(archaeology.validate(decisions['archaeology'], player_id, turn,
+                                                 observation=observation, panel=decisions.get('city_buildings')))
+
+    if group == 'world_score':
+        from . import world_score
+        return copy.deepcopy(world_score.validate(decisions['world_score'], player_id, turn))
+
     if group == 'diplomacy':
         from . import diplomacy_overview
         return copy.deepcopy(diplomacy_overview.validate(decisions['diplomacy_overview'], player_id, turn))
+
+    if group == 'captured_city':
+        from . import captured_city
+        return copy.deepcopy(captured_city.validate_public_catalog(
+            decisions['captured_city'], player_id, turn, observation=observation))
+
+    if group == 'city_religion':
+        from . import city_religion
+        if decisions.get('schema') not in network_turn.CITY_RELIGION_SCHEMAS:
+            raise ValueError('City religion requires its explicit engine revision')
+        state = city_religion.validate(decisions['city_religion'],player_id,turn,observation=observation)
+        expected = (city_religion.DETAILS_SCHEMA if decisions['schema'] in network_turn.CITY_RELIGION_DETAILS_SCHEMAS
+                    else city_religion.SCHEMA)
+        if state['schema'] != expected:
+            raise ValueError('City religion information revision differs from its catalogue')
+        return copy.deepcopy(state)
+
+    if group == 'pantheon':
+        from . import pantheon
+        schema = decisions.get('schema')
+        borrowed = schema in network_turn._SECONDARY_UNIT_SCHEMAS
+        if not borrowed and schema not in network_turn.PANTHEON_SCHEMAS:
+            raise ValueError('Pantheon requires its explicit engine revision')
+        validate = (pantheon.validate_state if borrowed or schema in network_turn.XP2_PANTHEON_SCHEMAS
+                    else pantheon.validate)
+        return copy.deepcopy(validate(decisions['pantheon'], player_id, turn))
+
+    if group == 'religion_beliefs':
+        from . import religion_beliefs
+        schema = decisions.get('schema')
+        if schema not in network_turn._SECONDARY_UNIT_SCHEMAS and schema not in network_turn.RELIGION_BELIEFS_SCHEMAS:
+            raise ValueError('Beliefs require their explicit engine revision')
+        return copy.deepcopy(religion_beliefs.validate(decisions['religion_beliefs'],
+            player_id, turn, observation=observation))
+
+    if group == 'religion_founding':
+        from . import religion_founding
+        schema = decisions.get('schema')
+        if schema not in network_turn._SECONDARY_UNIT_SCHEMAS and schema not in network_turn.RELIGION_FOUNDING_SCHEMAS:
+            raise ValueError('Religion foundation requires its explicit engine revision')
+        return copy.deepcopy(religion_founding.validate(decisions['religion_founding'],
+            player_id, turn, observation=observation))
+
+    if group == 'religion_custom_names':
+        from . import religion_custom_names
+        if decisions.get('schema') not in network_turn.XP1_RELIGION_CUSTOM_NAMES_SCHEMAS:
+            raise ValueError('Custom religion names require their explicit Rise and Fall revision')
+        return copy.deepcopy(religion_custom_names.validate(decisions['religion_custom_names'],
+            player_id, turn, observation=observation))
+
+    if group == 'great_person_activation':
+        from . import great_person_activation
+        if original_schema == base_schema and original_schema not in network_turn.XP1_GREAT_PERSON_ACTIVATION_SCHEMAS:
+            raise ValueError('Great Person activation requires its explicit expansion revision')
+        return copy.deepcopy(great_person_activation.validate(decisions['great_person_activation'],
+            player_id, turn, observation=observation))
+
+    if group == 'religious_unit_operations':
+        from . import religious_unit_operations
+        schema = decisions.get('schema')
+        if (schema not in network_turn._SECONDARY_UNIT_SCHEMAS
+                and schema not in network_turn.RELIGIOUS_UNIT_OPERATIONS_SCHEMAS):
+            raise ValueError('Religious unit operations requires its explicit engine revision')
+        return copy.deepcopy(religious_unit_operations.validate(decisions['religious_unit_operations'],
+            player_id, turn, observation=observation))
+
+    if group == 'great_people':
+        from . import great_people
+        schema = decisions.get('schema')
+        if (schema not in network_turn.XP1_GREAT_PEOPLE_SCHEMAS
+                and schema not in network_turn.XP2_GREAT_PEOPLE_SCHEMAS
+                and not (schema in network_turn._SECONDARY_UNIT_SCHEMAS
+                         and type(decisions.get('great_people_actions')) is bool)):
+            raise ValueError('Great People require their explicit engine revision')
+        return great_people.project(decisions['great_people'], player_id, turn, observation=observation)
+
+    if group == 'prophet_activation':
+        from . import prophet_activation
+        schema = decisions.get('schema')
+        if schema not in network_turn._SECONDARY_UNIT_SCHEMAS and schema not in network_turn.PROPHET_ACTIVATION_SCHEMAS:
+            raise ValueError('Prophet activation requires its explicit engine revision')
+        return copy.deepcopy(prophet_activation.validate(decisions['prophet_activation'],
+            player_id, turn, observation=observation))
+
+    if group == 'city_buildings':
+        from . import city_buildings
+        return copy.deepcopy(city_buildings.validate(decisions['city_buildings'],player_id,turn,observation=observation))
+    if group == 'city_loyalty':
+        from . import city_loyalty
+        return copy.deepcopy(city_loyalty.validate(decisions['city_loyalty'], player_id, turn, observation=observation))
+    if group == 'national_parks':
+        from . import national_parks
+        return copy.deepcopy(national_parks.validate(decisions['national_parks'], player_id, turn,
+                                                     observation=observation))
+    if group == 'rock_bands':
+        from . import rock_bands
+        return copy.deepcopy(rock_bands.validate(decisions['rock_bands'], player_id, turn,
+                                                 observation=observation))
+
+    if group == 'city_state_envoys':
+        from . import city_state_envoys
+        if decisions.get('schema') not in network_turn.XP1_CITY_STATE_ENVOY_SCHEMAS:
+            raise ValueError('City-state envoys require the qualified Rise and Fall catalogue')
+        return copy.deepcopy(city_state_envoys.validate(decisions['city_state_envoys'], player_id, turn))
+
+    if group == 'city_state_levies':
+        from . import city_state_levies
+        if decisions.get('schema') not in network_turn.CITY_STATE_LEVY_SCHEMAS:
+            raise ValueError('Military levies require a qualified expansion catalogue')
+        return copy.deepcopy(city_state_levies.validate(decisions['city_state_levies'], player_id, turn))
+
+    if group == 'unit_levies':
+        from . import city_state_levies
+        if decisions.get('schema') not in network_turn.UNIT_LEVY_SCHEMAS:
+            raise ValueError('Unit levy flags require a qualified expansion catalogue')
+        return copy.deepcopy(city_state_levies.validate_unit_flags(
+            decisions['unit_levies'], player_id, turn, observation=observation))
 
     if group == 'trade':
         from . import trade
         if any(decisions[field] is None for field in fields):
             raise ValueError('Public trade information is unavailable')
-        if decisions.get('schema') in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
-            unavailable = network_turn.family_query_unavailable(decisions, 'change_trade_origin')
+        if (decisions.get('schema') in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS
+                or (decisions.get('schema') in network_turn._SECONDARY_UNIT_SCHEMAS
+                    and decisions.get('trade_origins') is None)):
+            unavailable = (decisions['unit_orders'] is None
+                           if decisions['schema'] in network_turn._SECONDARY_UNIT_SCHEMAS
+                           else network_turn.family_query_unavailable(decisions, 'change_trade_origin'))
             if (decisions.get('trade_origins') is None) != unavailable:
                 raise ValueError('Trade origin information differs from native reader admission')
             trade.validate_decisions(decisions, observation, actions_closed=False)
@@ -133,7 +305,7 @@ def project(group: str, observation, decisions) -> dict:
         if decisions.get('schema') not in network_turn.TRADE_OVERVIEW_CAPABILITY_SCHEMAS:
             raise ValueError('Trade overview requires its explicit capability revision')
         profile = (trade_overview.STOCK_PROFILE
-                   if decisions['schema'] in network_turn.STOCK_TRADE_CAPABILITY_SCHEMAS
+                   if decisions['schema'] in network_turn.STOCK_TRADE_OVERVIEW_SCHEMAS
                    else trade_overview.PROFILE)
         trade_overview.validate_group(
             decisions['trade_overview'], decisions['trade_overview_status'], decisions, observation, profile=profile)
@@ -143,20 +315,38 @@ def project(group: str, observation, decisions) -> dict:
 
     if group == 'unit_formations':
         from . import unit_formations
-        if decisions['schema'] not in network_turn.STOCK_FORMATION_SCHEMAS:
+        if decisions['schema'] not in (
+                *network_turn.STOCK_FORMATION_SCHEMAS, *network_turn._SECONDARY_UNIT_SCHEMAS):
             raise ValueError('Unit formation information requires its explicit capability revision')
         return copy.deepcopy(unit_formations.validate(decisions['unit_formations'], player_id, turn,
                                                        observation=observation))
 
+    if group == 'unit_promotions':
+        from . import unit_promotions
+        if decisions.get('families', {}).get('promote_unit', {}).get('status') != 'queried_complete':
+            raise ValueError('Unit promotion information requires a native query')
+        return copy.deepcopy(unit_promotions.validate_catalogue(
+            decisions[group], player_id, turn, observation=observation))
+
+    if group == 'unit_upgrades':
+        from . import unit_upgrades
+        if decisions.get('families', {}).get('upgrade_unit', {}).get('status') != 'queried_complete':
+            raise ValueError('Unit upgrade information requires a native query')
+        return copy.deepcopy(unit_upgrades.validate_catalogue(
+            decisions[group], player_id, turn, observation=observation))
+
     if group == 'dedications':
         from . import dedications
-        if decisions['schema'] not in network_turn.STOCK_DEDICATION_SCHEMAS:
+        if decisions['schema'] not in (
+                *network_turn.DEDICATION_SCHEMAS, *network_turn._SECONDARY_UNIT_SCHEMAS):
             raise ValueError('Dedication information requires its explicit capability revision')
         return copy.deepcopy(dedications.validate_state(decisions['dedications'], player_id, turn))
 
     if group == 'espionage':
         from . import espionage
-        if decisions.get('schema') not in network_turn.ESPIONAGE_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        secondary = schema in network_turn._SECONDARY_UNIT_SCHEMAS and 'espionage' in decisions
+        if schema not in network_turn.ESPIONAGE_CAPABILITY_SCHEMAS and not secondary:
             raise ValueError('Espionage requires its explicit capability revision')
         catalogue = decisions['espionage']
         if catalogue is None:
@@ -170,7 +360,9 @@ def project(group: str, observation, decisions) -> dict:
 
     if group == 'spy_completion':
         from . import spy_completion
-        if decisions.get('schema') not in network_turn.SPY_COMPLETION_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        secondary = schema in network_turn._SECONDARY_UNIT_SCHEMAS and 'spy_completion' in decisions
+        if schema not in network_turn.SPY_COMPLETION_CAPABILITY_SCHEMAS and not secondary:
             raise ValueError('Spy completion requires its explicit capability revision')
         catalogue = decisions['spy_completion']
         if catalogue is None:
@@ -184,7 +376,9 @@ def project(group: str, observation, decisions) -> dict:
 
     if group == 'world_congress_active_effects':
         from . import world_congress_active_effects
-        if decisions.get('schema') not in network_turn.CONGRESS_ACTIVE_EFFECTS_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        secondary = schema in network_turn._SECONDARY_UNIT_SCHEMAS and group in decisions
+        if schema not in network_turn.CONGRESS_ACTIVE_EFFECTS_CAPABILITY_SCHEMAS and not secondary:
             raise ValueError('Congress active effects require their explicit capability revision')
         value=decisions['world_congress_active_effects']
         world_congress_active_effects.validate_group(value,decisions['world_congress_active_effects_status'],
@@ -195,7 +389,9 @@ def project(group: str, observation, decisions) -> dict:
 
     if group == 'world_congress_review':
         from . import world_congress_review
-        if decisions.get('schema') not in network_turn.WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        secondary = schema in network_turn._SECONDARY_UNIT_SCHEMAS and group in decisions
+        if schema not in network_turn.WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS and not secondary:
             raise ValueError('Congress review requires its explicit capability revision')
         value = decisions['world_congress_review']
         world_congress_review.validate_group(value, decisions['world_congress_review_status'],
@@ -206,7 +402,9 @@ def project(group: str, observation, decisions) -> dict:
 
     if group == 'world_congress':
         from . import world_congress
-        if decisions.get('schema') not in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        secondary = schema in network_turn._SECONDARY_UNIT_SCHEMAS and group in decisions
+        if schema not in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS and not secondary:
             raise ValueError('Congress requires its explicit capability revision')
         catalogue = decisions['world_congress']
         if catalogue is None:
@@ -226,8 +424,14 @@ def project(group: str, observation, decisions) -> dict:
         if decisions.get('schema') in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS:
             current = production_inputs.validate_current(decisions['production_current'], player_id, turn,
                 observation=observation, queues=decisions['production_queues'])
-            return {'schema': CURRENT_PRODUCTION_GROUP_SCHEMA, 'current': copy.deepcopy(current),
-                    'queues': copy.deepcopy(decisions['production_queues'])}
+            result = {'schema': CURRENT_PRODUCTION_GROUP_SCHEMA, 'current': copy.deepcopy(current),
+                      'queues': copy.deepcopy(decisions['production_queues'])}
+            if decisions.get('schema') in network_turn.XP1_PRODUCTION_INFO_SCHEMAS:
+                result['schema'] = QUOTED_PRODUCTION_GROUP_SCHEMA
+                result['quotes'] = copy.deepcopy(production_inputs.validate_quotes(
+                    decisions['production_info'],player_id,turn,
+                    candidates=decisions['candidates'],observation=observation))
+            return result
         current = production_inputs.validate_current(decisions['production'], player_id, turn,
             observation=observation, queues=decisions['production_queues'])
         info = decisions['production_info']
@@ -247,11 +451,14 @@ def project(group: str, observation, decisions) -> dict:
         }
 
     if group == 'combat':
-        from .capability_unit_attacks import validate_public_catalog
-        if decisions.get('schema') not in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
+        schema = decisions.get('schema')
+        if schema in capability_unit_attacks.HOTSEAT_COMBAT_SCHEMAS:
+            value = capability_unit_attacks.project_hotseat(decisions, observation)
+        elif schema in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
+            value = capability_unit_attacks.validate_public_catalog(decisions['unit_attacks'], player_id, turn,
+                observation=observation, queued_orders=decisions['queued_orders'])
+        else:
             raise ValueError('Historical raw combat catalogue is not a qualified public projection')
-        value=validate_public_catalog(decisions['unit_attacks'],player_id,turn,
-            observation=observation,queued_orders=decisions['queued_orders'])
         if value is None or decisions['queued_orders'] is None:
             raise ValueError('Public combat information is unavailable')
         return {'schema':COMBAT_GROUP_SCHEMA,'unit_attacks':copy.deepcopy(value),
@@ -263,16 +470,18 @@ def project(group: str, observation, decisions) -> dict:
         return copy.deepcopy(value)
 
     catalog = decisions['unit_work']
-    if decisions.get('schema') in network_turn.UNIT_WORK_STATE_CAPABILITY_SCHEMAS:
+    if (decisions.get('schema') in network_turn.UNIT_WORK_STATE_CAPABILITY_SCHEMAS
+            or network_turn.has_xp1_unit_work(decisions)):
         from .unit_work import validate_network_catalog
-        validate_network_catalog(catalog, player_id, turn, observation=observation)
+        adjacent = network_turn.has_adjacent_unit_work(decisions)
+        validate_network_catalog(catalog, player_id, turn, observation=observation, adjacent=adjacent)
         state = unit_work_state.validate(decisions['unit_work_state'], player_id, turn,
             observation=observation, work_catalog=catalog, include_plot=True)
         result = {'schema': UNIT_WORK_CATALOGUE_GROUP_SCHEMA, 'state': copy.deepcopy(state),
                   'catalogue': copy.deepcopy(catalog)}
         if decisions['schema'] != network_turn.CAPABILITY_UNIT_WORK_STATE_SCHEMA:
             info = unit_work_info.validate(decisions['unit_work_info'], player_id, turn,
-                observation=observation, work_catalog=catalog, work_state=state)
+                  observation=observation, work_catalog=catalog, work_state=state, visible_work=adjacent)
             result.update(schema=UNIT_WORK_DETAILED_GROUP_SCHEMA, info=copy.deepcopy(info))
         return result
     state = unit_work_state.validate(decisions['unit_work_state'], player_id, turn,

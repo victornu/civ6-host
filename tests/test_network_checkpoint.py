@@ -43,6 +43,40 @@ class NetworkCheckpointTests(unittest.TestCase):
             emit.assert_called_with('native_checkpoint_skipped',
                                     reason='official_native_victory', sequence=5)
 
+    def test_eliminated_actor_close_omits_the_live_checkpoint_without_a_global_result(self):
+        from civ6_host.runtime.workers.network_worker import _save_before_close
+
+        identity = SimpleNamespace(episode_id='episode', game_generation='generation')
+        status = dict(schema='civ6rl.native_victory_episode.observation.v1',
+            policy_id='first-official-native-victory-v1', episode_id=identity.episode_id,
+            game_generation=identity.game_generation, current_game_turn=2, player_id=0,
+            was_ever_alive=True, is_alive=False, winner_present=False, episode_terminated=False)
+        protocol = SimpleNamespace(identity=identity, session=self.session, sequence=4,
+            last_outcome=dict(terminated=False, truncated=False, native_victory=status))
+        request = dict(player_id=0, sequence=5)
+        with patch('civ6_host.runtime.xp1_session_view.read') as expansion_read, \
+             patch('civ6_host.runtime.network_owner.read') as base_read, \
+             patch.object(self.owner, 'control') as emit:
+            for expansion in (False, True):
+                _save_before_close(self.owner, protocol, {}, None, request, expansion, emit)
+            expansion_read.assert_not_called()
+            base_read.assert_not_called()
+            self.assertEqual(emit.call_count, 2)
+            emit.assert_called_with('native_checkpoint_skipped', reason='acting_player_eliminated',
+                                    player_id=0, turn=2, sequence=5)
+
+            status['current_game_turn'] = 1
+            with self.assertRaisesRegex(ValueError, 'another actor/boundary'):
+                _save_before_close(self.owner, protocol, {}, None, request, True, emit)
+            status['current_game_turn'] = 2
+            expansion_read.return_value = (self.session, {'player_id': 1}, {'candidates': []})
+            with patch('civ6_host.runtime.xp1_session_checkpoint.save') as save:
+                other_request = dict(player_id=1, sequence=5)
+                _save_before_close(self.owner, protocol, {}, None, other_request, True, emit)
+                expansion_read.assert_called_once_with(self.owner, 1, 4)
+                save.assert_called_once_with(self.owner, {'player_id': 1}, {'candidates': []}, {}, None, 5)
+            self.assertEqual(emit.call_count, 2)
+
     def test_other_humans_ai_or_modal_state_do_not_enter_save(self):
         self.owner.network_turn_rows[1]['active']=True
         with self.assertRaises(ValueError):checkpoint.validate_boundary(self.owner)
@@ -56,13 +90,108 @@ class NetworkCheckpointTests(unittest.TestCase):
         self.session['human_player_ids']=[0,1]
         with self.assertRaises(ValueError):checkpoint.validate_boundary(self.owner)
 
+    def test_private_checkpoint_checks_each_gathering_storm_turn_row(self):
+        primary = dict(self.controls, schema='civ6-host.turn-controls.v1', player_id=0, turn=2)
+        single = dict(session=self.session, controls=primary)
+        checkpoint._validate_secondary_boundary(single, 'xp1-lan')
+        session = dict(self.session, human_player_ids=[0, 1, 3], active_human_player_ids=[0, 1, 3])
+        boundary = dict(session=session, controls=primary,
+                        secondary_controls=[dict(primary, player_id=1), dict(primary, player_id=3)])
+        checkpoint._validate_secondary_boundary(boundary, 'xp2-lan')
+        for mode in ('lan', 'xp1-lan'):
+            with self.assertRaisesRegex(ValueError, 'simultaneous human roster'):
+                checkpoint._validate_secondary_boundary(boundary, mode)
+        for key, value in (('player_id', 0), ('turn', 3), ('active', False),
+                           ('active_complete', False), ('can_unready', True), ('timer_elapsed', None)):
+            with self.subTest(key=key):
+                changed = copy.deepcopy(boundary)
+                changed['secondary_controls'][1][key] = value
+                with self.assertRaises(ValueError):
+                    checkpoint._validate_secondary_boundary(changed, 'xp2-lan')
+        del boundary['secondary_controls']
+        with self.assertRaisesRegex(ValueError, 'simultaneous human roster'):
+            checkpoint._validate_secondary_boundary(boundary, 'xp2-lan')
+
+    def test_checkpoint_public_view_digests_are_roster_and_producer_scoped(self):
+        from civ6_host.runtime import player_views
+
+        session = dict(self.session, human_player_ids=[0, 1, 3], active_human_player_ids=[0, 1, 3])
+        boundary = dict(session=session, secondary_controls=[dict(player_id=1), dict(player_id=3)])
+        self.assertEqual(player_views.checkpoint_view_players({}, boundary), ())
+        self.assertEqual(player_views.checkpoint_view_players({'public_view_players': [3, 0]}, boundary), (0, 3))
+        with self.assertRaisesRegex(ValueError, 'unauthenticated human seat'):
+            player_views.checkpoint_view_players({'public_view_players': [2]}, boundary)
+        valid = dict(player_id=3, observation_sha256='a' * 64, player_map_sha256='b' * 64)
+        manifest = dict(network_boundary=boundary,
+                        checkpoint_public_views=dict(schema=player_views.CHECKPOINT_SCHEMA, players=[valid]))
+        self.assertEqual(checkpoint._checkpoint_view_scope(manifest), ((3,), ()))
+        primary = dict(self.controls, schema='civ6-host.turn-controls.v1', player_id=0, turn=2)
+        saved_boundary = dict(boundary, controls=primary,
+                              secondary_controls=[dict(primary, player_id=1), dict(primary, player_id=3)])
+        backend = SimpleNamespace(inputs=SimpleNamespace(official_bundle=('work/fixture.json', 'f' * 64)),
+                                  owner=self.owner, network_boundary=saved_boundary,
+                                  checkpoint_public_views=manifest['checkpoint_public_views'])
+        with patch('civ6_host.runtime.native.native_official_bundle._manifest', return_value=(
+                None, {'save': {'source': {'sha256': 'c' * 64}}})):
+            published = checkpoint.finalize_manifest(
+                backend, dict(schema=checkpoint.SCHEMA, input_profile='xp2-lan-official-capture-inputs'))
+        self.assertEqual(published['checkpoint_public_views'], manifest['checkpoint_public_views'])
+        self.assertEqual(set(published['checkpoint_public_views']['players'][0]),
+                         {'player_id', 'observation_sha256', 'player_map_sha256'})
+        for rows in ([dict(valid, player_id=2)], [valid, dict(valid, player_id=0)], [valid, valid],
+                     [dict(valid, observation_sha256='stale')], [dict(valid, observation={'private': True})]):
+            with self.subTest(invalid=rows):
+                invalid = dict(manifest['checkpoint_public_views'], players=rows)
+                with self.assertRaises(ValueError):
+                    checkpoint._checkpoint_view_scope(dict(manifest, checkpoint_public_views=invalid))
+        modern = dict(schema=player_views.CHECKPOINT_DECISIONS_SCHEMA,
+                      players=[dict(valid, decisions_sha256='d' * 64)])
+        self.assertEqual(checkpoint._checkpoint_view_scope(dict(manifest, checkpoint_public_views=modern)),
+                         ((3,), (3,)))
+        self.assertEqual(player_views.checkpoint_decision_players(
+            {'secondary_unit_commands': True}, boundary, (0, 3)), (3,))
+        for invalid in (dict(modern, players=[valid]),
+                        dict(modern, players=[dict(modern['players'][0], player_id=0)]),
+                        dict(modern, schema=player_views.CHECKPOINT_SCHEMA)):
+            with self.assertRaisesRegex(ValueError, 'public decision scope'):
+                checkpoint._checkpoint_view_scope(dict(manifest, checkpoint_public_views=invalid))
+
+    def test_expansion_close_refreshes_the_local_result_after_a_secondary_response(self):
+        from civ6_host.runtime.workers import network_worker
+
+        identity = SimpleNamespace(episode_id='episode', game_generation='generation')
+        local_status = dict(schema='civ6rl.native_victory_episode.observation.v1',
+            policy_id='first-official-native-victory-v1', episode_id=identity.episode_id,
+            game_generation=identity.game_generation, current_game_turn=2, player_id=0,
+            was_ever_alive=True, is_alive=False, winner_present=False, episode_terminated=False)
+        remote_status = dict(local_status, player_id=1, is_alive=True)
+        protocol = SimpleNamespace(identity=identity, session=self.session, sequence=4,
+            last_outcome=dict(terminated=False, native_victory=remote_status))
+        request, closure = dict(player_id=0, sequence=5), dict(secondary_unit_commands=True)
+        with (patch.object(network_worker, '_read_xp1_outcome', return_value=local_status) as read_local,
+              patch('civ6_host.runtime.xp1_session_view.read') as view,
+              patch('civ6_host.runtime.xp1_session_checkpoint.save') as save,
+              patch.object(self.owner, 'control') as emit):
+            network_worker._save_before_close(self.owner, protocol, closure, None, request, True, emit)
+            read_local.assert_called_once_with(self.owner, 0)
+            view.assert_not_called()
+            save.assert_not_called()
+            emit.assert_called_once_with('native_checkpoint_skipped', reason='acting_player_eliminated',
+                                         player_id=0, turn=2, sequence=5)
+            read_local.return_value = dict(local_status, is_alive=True)
+            view.return_value = self.session, {'player_id': 0}, {'candidates': []}
+            network_worker._save_before_close(self.owner, protocol, closure, None, request, True, emit)
+            view.assert_called_once_with(self.owner, 0, 4)
+            save.assert_called_once_with(self.owner, {'player_id': 0}, {'candidates': []}, closure, None, 5)
+
     def test_saved_and_restored_views_are_compared_without_identity_substitution(self):
         observation=dict(turn=2,player_id=0)
         decisions=dict(schema='capacity-fixture',episode_id='old',game_generation='old',sequence=4,
                        decision_id='old',candidates=[dict(candidate_id='opaque',action=dict(kind='move',unit_id=1))])
         restored=copy.deepcopy(decisions);restored.update(episode_id='new',game_generation='new',sequence=0,decision_id='new')
         owner=SimpleNamespace(inputs=SimpleNamespace(checkpoint=('work/checkpoint.json','a'*64),official_bundle=('work/capture.json','b'*64)),emit=lambda *a,**k:None)
-        with patch.object(checkpoint,'manifest',return_value=dict(observation=observation,decisions=decisions)):
+        with patch.object(checkpoint,'manifest',return_value=dict(
+                schema=checkpoint.SCHEMA, observation=observation, decisions=decisions)):
             checkpoint.compare_decisions(owner,observation,restored)
             restored['candidates'][0]['action']['unit_id']=2
             with self.assertRaisesRegex(ValueError,'catalogue differs'):

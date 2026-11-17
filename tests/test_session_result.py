@@ -3,8 +3,8 @@ import copy
 import unittest
 
 from civ6_host import SessionClient
-from civ6_host.client import ProtocolError, _digest
-from civ6_host.contracts.session_result import project_terminal_result, SCHEMA
+from civ6_host.client import InformationUnavailable, ProtocolError, _digest
+from civ6_host.contracts.session_result import PLAYER_STATUS_SCHEMA, project_terminal_result, SCHEMA
 from test_session_client import Backend
 
 
@@ -14,6 +14,7 @@ class TerminalBackend(Backend):
     truncate_without_board = False
     winner = 1
     result_player = None
+    inactive_player = None
 
     def _reply(self, *args, **kwargs):
         response = super()._reply(*args, **kwargs)
@@ -39,6 +40,17 @@ class TerminalBackend(Backend):
         elif self.truncate_without_board:
             response['observation'] = response['decisions'] = None
             response['outcome'].update(truncated=True, reason='diagnostic_round_limit')
+        elif pid == self.inactive_player:
+            response['observation'] = response['decisions'] = None
+            response['outcome']['native_victory'] = dict(
+                schema='civ6rl.native_victory_episode.observation.v1',
+                policy_id='first-official-native-victory-v1',
+                episode_id=response['episode_id'], game_generation=response['game_generation'],
+                player_id=pid if self.result_player is None else self.result_player,
+                current_game_turn=self.turn, is_alive=False, was_ever_alive=True,
+                episode_terminated=False, winner_present=False, private_extra={'raw': 2})
+        if self.inactive_player is not None:
+            response['session']['active_human_player_ids'].remove(self.inactive_player)
         return response
 
 
@@ -124,6 +136,57 @@ class SessionResultTests(unittest.TestCase):
         self.assertFalse(view['outcome']['terminated'])
         self.assertIsNone(view['decisions'])
         self.assertNotIn('result',view['outcome'])
+
+    def test_inactive_actor_loses_only_its_own_catalogue_until_revived(self):
+        initial = self.client.reset()
+        living = self.client.observe(1)
+        self.backend.inactive_player = 1
+        view = self.client.observe(1)
+        self.assertEqual(view['outcome']['player_status'], dict(
+            schema=PLAYER_STATUS_SCHEMA, player_id=1, turn=1, is_alive=False, was_ever_alive=True))
+        self.assertFalse(view['outcome']['terminated'])
+        self.assertFalse(view['outcome']['truncated'])
+        self.assertNotIn('result', view['outcome'])
+        self.assertIsNone(view['observation'])
+        self.assertIsNone(view['decisions'])
+        self.assertEqual(self.client.view(0), initial)
+        with self.assertRaisesRegex(ProtocolError, 'no current action catalogue'):
+            self.client.act(1, living['decisions']['decision_id'], '1-move')
+        with self.assertRaises(InformationUnavailable):
+            self.client.information('economy', player_id=1)
+        other = self.client.observe(0)
+        moved = self.client.act(0, other['decisions']['decision_id'], '0-move')
+        self.assertEqual(moved['applied_action'], dict(kind='move', unit_id=0))
+        self.backend.inactive_player = None
+        revived = self.client.observe(1)
+        self.assertNotIn('player_status', revived['outcome'])
+        self.assertTrue(revived['decisions']['candidates'])
+
+    def test_inactive_status_requires_its_exact_requested_actor(self):
+        self.client.reset()
+        self.backend.inactive_player = 1
+        self.backend.result_player = 0
+        with self.assertRaisesRegex(ProtocolError, 'player status belongs to another actor'):
+            self.client.observe(1)
+        self.assertEqual(self.backend.aborts, ['session_client_exchange_failed'])
+
+    def test_inactive_actor_can_close_and_reset_without_claiming_a_winner(self):
+        initial = self.client.reset()
+        self.backend.inactive_player = 0
+        inactive = self.client.observe(0)
+        closed = self.client.close()
+        self.assertEqual(closed['outcome']['player_status'], inactive['outcome']['player_status'])
+        self.assertTrue(closed['outcome']['truncated'])
+        self.assertFalse(closed['outcome']['terminated'])
+        self.assertNotIn('result', closed['outcome'])
+        self.assertIsNone(closed['observation'])
+        self.assertIsNone(closed['decisions'])
+        self.assertEqual(self.backend.calls[-1]['player_id'], 0)
+        self.backend.inactive_player = None
+        fresh = self.client.reset()
+        self.assertNotEqual(fresh['episode_id'], initial['episode_id'])
+        self.assertNotIn('player_status', fresh['outcome'])
+        self.assertEqual(self.backend.aborts, [])
 
     def test_global_result_does_not_turn_an_uncompleted_command_into_success(self):
         for status in ('refused','submitted','pending'):

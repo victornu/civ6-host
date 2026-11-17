@@ -6,6 +6,7 @@ All provider calls remain native; ownership and failure handling remain shared.
 import hashlib
 import struct
 
+from .source_verification import file_sha256
 from .configuration_profiles import XP2_CORE_SHA256, _source, _body
 
 SOURCE=('work/host-extensions/xp2-application-mirror/source-profile-v1.json',
@@ -83,7 +84,7 @@ def _pins(proof):
           *(proof[k] for k in ('generator','boundary_helper','extractor'))]
     for ref in refs:
         path=resolve_path(resource_root()/ref['path']).resolve()
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=ref['sha256']:
+        if file_sha256(path)!=ref['sha256']:
             raise ValueError('XP2 application source dependency differs: '+str(path))
         pins[str(path)]=ref['sha256']
     return pins

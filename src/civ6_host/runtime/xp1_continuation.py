@@ -4,7 +4,9 @@ Shared operation methods use the real UI child, command transport and publisher.
 This candidate capability is not public session admission or a substitute loader.
 """
 from copy import deepcopy
-from civ6_host.contracts.unit_work import NETWORK_ACTION_FIELDS as UNIT_WORK_FIELDS
+from civ6_host.contracts import air_operations, archaeology, city_buildings, city_state_levies, great_people_actions, religious_unit_operations
+from civ6_host.contracts import national_parks, rock_bands, unit_work
+from civ6_host.contracts.unit_work import ADJACENT_KIND, ADJACENT_NETWORK_ACTION_FIELDS as UNIT_WORK_FIELDS
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 READY='xp1-continuation-ready'
@@ -16,7 +18,9 @@ ESPIONAGE_KINDS = ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')
 SPY_COMPLETION_KINDS = ('spy_renew', 'spy_completion_dismiss')
 CONGRESS_KINDS = ('congress_open', 'congress_confirm_ballot', 'congress_confirm_proposals', 'congress_close')
 
-def validate_command(action, *, observation=None):
+def validate_command(action, *, observation=None, allow_faith=False):
+    if type(allow_faith) is not bool:
+        raise ValueError("Faith purchase admission flag must be Boolean")
     if type(action) is not dict:
         raise ValueError('Explicit command dictionary required')
     if action.get('kind') in CONGRESS_KINDS:
@@ -26,6 +30,27 @@ def validate_command(action, *, observation=None):
     if action.get('kind') == 'confirm_dedications':
         from civ6_host.contracts.dedications import validate_action
         validate_action(action)
+        return
+    if action.get('kind') == city_buildings.GREAT_WORK_MOVE:
+        city_buildings.validate_great_work_action(action)
+        return
+    if action.get('kind') == archaeology.KIND:
+        archaeology.validate_action(action)
+        return
+    if action.get('kind') == archaeology.EXCAVATE:
+        archaeology.validate_excavation(action, observation=observation)
+        return
+    if action.get('kind') == air_operations.KIND:
+        air_operations.validate(action, observation)
+        return
+    if action.get('kind') == unit_work.BUILD_ROUTE:
+        unit_work.validate_route(action, observation)
+        return
+    if action.get('kind') == national_parks.DESIGNATE:
+        national_parks.validate_designation(action, observation)
+        return
+    if action.get('kind') == rock_bands.KIND:
+        rock_bands.validate_action(action, observation)
         return
     if action.get('kind') in SPY_COMPLETION_KINDS:
         from civ6_host.contracts.spy_completion import validate_action
@@ -63,6 +88,9 @@ def validate_command(action, *, observation=None):
         from civ6_host.contracts.envoys import validate_action
         validate_action(action)
         return
+    if action.get('kind') == city_state_levies.ACTION:
+        city_state_levies.validate_action(action)
+        return
     if action.get('kind') in ('government','retain_government'):
         from civ6_host.contracts.government import validate_action
         validate_action(action)
@@ -77,7 +105,7 @@ def validate_command(action, *, observation=None):
         return
     if action.get('kind') == 'purchase':
         from civ6_host.contracts.plot_purchases import validate_purchase_action
-        validate_purchase_action(action)
+        validate_purchase_action(action, allow_faith=allow_faith)
         return
     if action.get('kind') == 'promote_unit':
         from civ6_host.contracts.unit_promotions import validate_action
@@ -85,6 +113,29 @@ def validate_command(action, *, observation=None):
         return
     if action.get('kind') == 'upgrade_unit':
         from civ6_host.contracts.unit_upgrades import validate_action
+        validate_action(action)
+        return
+    if action.get('kind') in great_people_actions.KINDS:
+        return great_people_actions.validate_action(action)
+    if action.get('kind') == 'found_custom_religion':
+        from civ6_host.contracts.religion_custom_names import validate_action
+        return validate_action(action)
+    if action.get('kind') == 'found_religion':
+        from civ6_host.contracts.religion_founding import validate_action
+        return validate_action(action)
+    if action.get('kind') == 'activate_great_person':
+        from civ6_host.contracts.great_person_activation import validate_action
+        return validate_action(action)
+    if action.get('kind') in religious_unit_operations.KINDS:
+        return religious_unit_operations.validate_action(action)
+    if action.get('kind') == 'activate_prophet':
+        from civ6_host.contracts.prophet_activation import validate_action
+        return validate_action(action)
+    if action.get('kind') == 'add_belief':
+        from civ6_host.contracts.religion_beliefs import validate_action
+        return validate_action(action)
+    if action.get('kind') == 'pantheon':
+        from civ6_host.contracts.pantheon import validate_action
         validate_action(action)
         return
     if type(action.get('kind')) is str and action['kind'] in UNIT_WORK_FIELDS:
@@ -140,9 +191,8 @@ def validate_command(action, *, observation=None):
         return
     if action.get('kind')!='found_city' or set(action)!={'kind','unit_id','x','y'}:
         raise ValueError('This XP1 continuation family has no qualified adapter for the requested command')
-    from .native.native_unit_actions import _identifier
-    _identifier(action['unit_id'],'unit ID',0xFFFFFFFF)
-    _identifier(action['x'],'founder x',65535);_identifier(action['y'],'founder y',65535)
+    from civ6_host.contracts.capability_choices import validate_founder_action
+    validate_founder_action(action)
 
 
 def validate_unit_command(action):
@@ -150,6 +200,25 @@ def validate_unit_command(action):
     if type(action) is not dict or action.get('kind') != 'found_city':
         raise ValueError('Explicit foundation command required')
     validate_command(action)
+
+
+def _purchase_allows_faith(continuation, session):
+    """Select existing purchase admission for this retained saved owner.
+
+    The purchase adapters still enforce the selected profile, city ownership,
+    live source, fresh quote and native effect. This only carries their currency
+    admission through the two preceding command-shape checks.
+    """
+    from .xp1_saved_load_owner import SavedLoadOwner
+    if (type(session) is not SavedLoadOwner
+            or session.continuation is not continuation
+            or session.backend is not continuation.owner):
+        return False
+    core_sha256 = continuation.owner.load_abi.core_sha256
+    return (core_sha256 == XP2_CORE_SHA256
+            or core_sha256 == XP1_CORE_SHA256
+            and getattr(session, 'xp1_faith_purchase', False) is True)
+
 
 class SavedContinuation:
     def __init__(self,view):
@@ -240,7 +309,8 @@ class SavedContinuation:
         self.publishing=False;self.publication_count+=1
 
     def execute(self,action,*,session=None):
-        validate_command(action,observation=getattr(self,'observation',None))
+        validate_command(action, observation=getattr(self, 'observation', None),
+                         allow_faith=_purchase_allows_faith(self, session))
         xp2 = self.owner.load_abi.core_sha256 == XP2_CORE_SHA256
         if (self.world_input_prompts.get(self.observation['player_id']) is not None
                 and action['kind'] != 'world_war_response'):
@@ -251,25 +321,55 @@ class SavedContinuation:
             if not xp2 or pin is None:
                 raise ValueError('War responses require the explicitly selected XP2 session profile')
             source_pin(pin, 'xp2-lan')
-        if action['kind'] in GOVERNOR_KINDS and (not xp2
-                or not getattr(session, 'governors_diagnostic', False)):
-            raise ValueError('Governors require the explicit source-qualified XP2 session option')
+        if action['kind'] in GOVERNOR_KINDS:
+            if xp2:
+                enabled = getattr(session, 'governors_diagnostic', False)
+            else:
+                enabled = getattr(session, 'xp1_governors_enabled', False)
+            if enabled is not True:
+                raise ValueError('Governors require their source-qualified expansion session')
         if action['kind'] == 'diplomacy_initiate' and (not xp2
                 or getattr(session, 'diplomacy_overview_diagnostic', False) is not True):
             raise ValueError('Initial diplomacy requires the selected XP2 initial-choice group')
         if action['kind'] in TRADE_KINDS:
-            standard = getattr(session, 'standard_trade', False) is True and self.trade_feedback is None
-            bbg = getattr(session, 'trade_diagnostic', False) is True and self.trade_feedback is not None
-            if not xp2 or not (standard or bbg):
-                raise ValueError('Trade requires a selected XP2 trade query group')
+            flag = 'standard_trade' if xp2 else 'xp1_trade'
+            standard = getattr(session, flag, False) is True and self.trade_feedback is None
+            bbg = xp2 and getattr(session, 'trade_diagnostic', False) is True and self.trade_feedback is not None
+            if not (standard or bbg):
+                raise ValueError('Trade requires a selected native trade query group')
         if action['kind'] == 'unit_formation' and (not xp2 or getattr(session, 'unit_formations', False) is not True):
             raise ValueError('Formation commands require the selected stock XP2 query group')
+        if action['kind'] == city_buildings.GREAT_WORK_MOVE:
+            from .xp2_great_work_commands import enabled
+            if session is None or not enabled(session):
+                raise ValueError('Great Work commands require the selected expansion query group')
+        if action['kind'] in (archaeology.KIND, archaeology.EXCAVATE):
+            from .xp2_archaeology import commands_enabled
+            if not xp2 or not commands_enabled(session):
+                raise ValueError('Artifact choices require their admitted Gathering Storm owner')
+        if action['kind'] == air_operations.KIND:
+            from .xp2_air_operations import enabled
+            if not xp2 or not enabled(session):
+                raise ValueError('Air operations require their admitted Gathering Storm owner')
+        if action['kind'] == unit_work.BUILD_ROUTE:
+            from .xp2_build_route import enabled
+            if not xp2 or not enabled(session):
+                raise ValueError('Build Route requires its admitted Gathering Storm owner')
+        if action['kind'] == national_parks.DESIGNATE:
+            from .xp2_designate_park import enabled
+            if not xp2 or not enabled(session):
+                raise ValueError('Park designation requires its admitted Gathering Storm owner')
+        if action['kind'] == rock_bands.KIND:
+            from .xp2_rock_bands import enabled
+            if not xp2 or not enabled(session):
+                raise ValueError('Rock concerts require their admitted Gathering Storm owner')
         if action['kind'] == 'resolve_captured_city' and (
-                not xp2 or getattr(self, 'captured_city_core', None) is not self.owner.core):
-            raise ValueError('Captured-city commands require the retained current XP2 route')
-        if action['kind'] == 'confirm_dedications' and (
-                not xp2 or getattr(session, 'stock_dedications', False) is not True):
-            raise ValueError('Dedication commands require the selected stock XP2 query group')
+                getattr(self, 'captured_city_core', None) is not self.owner.core):
+            raise ValueError('Captured-city commands require the retained expansion route')
+        if action['kind'] == 'confirm_dedications':
+            profile = 'stock_dedications' if xp2 else 'xp1_dedications_enabled'
+            if getattr(session, profile, False) is not True:
+                raise ValueError('Dedication commands require their source-qualified expansion query group')
         if action['kind'] in ESPIONAGE_KINDS + SPY_COMPLETION_KINDS and (not xp2 or self.trade_feedback is None
                 or getattr(session, 'espionage_diagnostic', False) is not True):
             raise ValueError('Espionage requires the selected XP2 BBG espionage query group')
@@ -282,19 +382,87 @@ class SavedContinuation:
             if (not xp2 or getattr(session, 'world_congress_diagnostic', False) is not True
                     or stock_congress != (self.trade_feedback is None)):
                 raise ValueError('Congress requires its selected XP2 profile and feedback owner')
+        if action['kind'] == ADJACENT_KIND:
+            from .xp2_lan_unit_work import primary_adjacent_enabled
+            if not xp2 or not primary_adjacent_enabled(session):
+                raise ValueError('Adjacent unit work requires the verified Gathering Storm owner')
         if not xp2 and action['kind'] in UNIT_WORK_FIELDS:
-            raise ValueError('Expansion unit work requires the verified XP2 route')
-        if not xp2 and action['kind'] in ('purchase', 'promote_unit', 'upgrade_unit', 'policies', 'policy_unlock','government','retain_government','send_envoy','retain_envoys'):
+            from .xp1_unit_work_profile import require_owner
+            require_owner(session)
+        if not xp2 and action['kind'] in ('policies', 'government', 'retain_government'):
+            if getattr(session, 'xp1_government', False) is not True:
+                raise ValueError('Government and policies require the admitted Rise and Fall owner')
+        if not xp2 and action['kind'] == 'purchase':
+            flag = 'xp1_plot_purchase' if 'plot_id' in action else 'xp1_city_purchase'
+            faith_allowed = flag == 'xp1_city_purchase' and getattr(session, 'xp1_faith_purchase', False) is True
+            currencies = ('YIELD_GOLD', 'YIELD_FAITH') if faith_allowed else ('YIELD_GOLD',)
+            if getattr(session, flag, False) is not True or action['currency'] not in currencies:
+                raise ValueError('Purchase requires the admitted Rise and Fall owner and currency')
+        if not xp2 and action['kind'] == 'promote_unit' and getattr(session, 'xp1_promotions', False) is not True:
+            raise ValueError('Promotion requires the admitted Rise and Fall owner')
+        if not xp2 and action['kind'] == 'upgrade_unit':
+            if getattr(session,'xp1_unit_upgrades',False) is not True or action['resource_type'] is not None:
+                raise ValueError('Unit upgrade requires the admitted Rise and Fall owner')
+        if action['kind'] == 'found_custom_religion':
+            if (xp2 or getattr(session,'xp1_religion_custom_names',False) is not True
+                    or getattr(session,'xp1_religion_founding',False) is not True):
+                raise ValueError('Custom religion naming requires its explicit Rise and Fall foundation group')
+        if action['kind'] == 'found_religion':
+            flag = 'xp2_religion_founding' if xp2 else 'xp1_religion_founding'
+            if getattr(session,flag,False) is not True:
+                raise ValueError('Religion founding requires its explicit expansion group')
+        if action['kind'] in great_people_actions.KINDS:
+            flag = 'xp2_great_people' if xp2 else 'xp1_great_people'
+            if (getattr(session, flag + '_actions', False) is not True
+                    or getattr(session, flag, False) is not True):
+                raise ValueError('Great Person commands require the admitted expansion action owner')
+            if (not xp2 and action['kind'] == great_people_actions.REJECT
+                    and getattr(session, 'xp1_great_people_reject', False) is not True):
+                raise ValueError('Great Person rejection requires its explicit Rise and Fall group')
+        if action['kind'] == 'activate_great_person':
+            from .xp1_great_person_activation import enabled
+            if not enabled(session):
+                raise ValueError('Great Person activation requires its explicit expansion group')
+        if action['kind'] in religious_unit_operations.KINDS:
+            flag = 'xp2_religious_unit_operations' if xp2 else 'xp1_religious_unit_operations'
+            if getattr(session,flag,False) is not True:
+                raise ValueError('Religious unit operations require their explicit expansion group')
+        if action['kind'] == 'activate_prophet':
+            flag = 'xp2_prophet_activation' if xp2 else 'xp1_prophet_activation'
+            if getattr(session,flag,False) is not True:
+                raise ValueError('Prophet activation requires its explicit expansion group')
+        if action['kind'] == 'add_belief':
+            flag = 'xp2_religion_beliefs' if xp2 else 'xp1_religion_beliefs'
+            if getattr(session,flag,False) is not True:
+                raise ValueError('Belief choice requires its explicit expansion group')
+        if action['kind'] == 'pantheon':
+            flag = 'xp2_pantheon' if xp2 else 'xp1_pantheon'
+            if getattr(session,flag,False) is not True:
+                raise ValueError('Pantheon requires its admitted expansion owner')
+        if not xp2 and action['kind'] == 'policy_unlock':
             raise ValueError('Expansion command requires the verified XP2 route')
+        if (not xp2 and action['kind'] in ('send_envoy', 'retain_envoys')
+                and getattr(session, 'xp1_governors_enabled', False) is not True):
+            raise ValueError('Envoy command requires the admitted Rise and Fall owner')
+        if action['kind'] == city_state_levies.ACTION:
+            flag = 'xp2_city_state_levies_enabled' if xp2 else 'xp1_governors_enabled'
+            if getattr(session, flag, False) is not True:
+                raise ValueError('Military levy requires its admitted expansion owner')
         if (xp2 and action['kind'] not in UNIT_WORK_FIELDS
                 and action['kind'] not in TRADE_KINDS
                 and action['kind'] not in ESPIONAGE_KINDS
                 and action['kind'] not in SPY_COMPLETION_KINDS
                 and action['kind'] not in CONGRESS_KINDS
+                and action['kind'] not in great_people_actions.KINDS
+                and action['kind'] not in religious_unit_operations.KINDS
+                and action['kind'] not in (city_buildings.GREAT_WORK_MOVE, archaeology.KIND, archaeology.EXCAVATE,
+                                           air_operations.KIND, unit_work.BUILD_ROUTE, national_parks.DESIGNATE,
+                                           rock_bands.KIND)
+                and action['kind'] not in ('activate_great_person','activate_prophet','found_religion','add_belief','pantheon')
                 and action['kind'] not in GOVERNOR_KINDS and action['kind'] not in
                 ('found_city','research','civic','production','end_turn','force_end_turn','unready_turn',
                  'world_select_unit','world_deselect_unit','world_plot_click','world_war_response','diplomacy_initiate','unit_order','unit_formation','confirm_dedications',
-                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit','policies','policy_unlock','government','retain_government','send_envoy','retain_envoys','resolve_captured_city')):
+                 'queue_append','queue_remove','queue_swap','production_placement','production_resume','unit_attack','city_range_attack','district_range_attack','city_focus','city_citizen','purchase','promote_unit','upgrade_unit','policies','policy_unlock','government','retain_government','send_envoy','retain_envoys','resolve_captured_city',city_state_levies.ACTION)):
             raise ValueError('XP2 command family is not yet source-qualified in this session')
         return self._transition(action,session=session,pump=False)
 
@@ -337,15 +505,34 @@ class SavedContinuation:
         is_purchase=not pump and action['kind']=='purchase'
         is_promotion=not pump and action['kind']=='promote_unit'
         is_upgrade=not pump and action['kind']=='upgrade_unit'
+        is_pantheon=not pump and action['kind']=='pantheon'
+        is_belief=not pump and action['kind']=='add_belief'
+        is_religion_founding=not pump and action['kind']=='found_religion'
+        is_religion_custom_names=not pump and action['kind']=='found_custom_religion'
+        is_prophet_activation=not pump and action['kind']=='activate_prophet'
+        is_great_person_activation=not pump and action['kind']=='activate_great_person'
+        is_religious_unit_operation=not pump and action['kind'] in religious_unit_operations.KINDS
+        is_great_people=not pump and action['kind'] in great_people_actions.KINDS
+        is_great_work=not pump and action['kind']==city_buildings.GREAT_WORK_MOVE
+        is_artifact_origin = not pump and action['kind'] == archaeology.KIND
+        is_excavation = not pump and action['kind'] == archaeology.EXCAVATE
+        is_air = not pump and action['kind'] == air_operations.KIND
+        is_build_route = not pump and action['kind'] == unit_work.BUILD_ROUTE
+        is_park_designation = not pump and action['kind'] == national_parks.DESIGNATE
+        is_rock_concert = not pump and action['kind'] == rock_bands.KIND
         is_policy=not pump and action['kind'] in ('policies', 'policy_unlock')
         is_government=not pump and action['kind'] in ('government','retain_government')
         is_envoy=not pump and action['kind'] in ('send_envoy','retain_envoys')
+        is_levy=not pump and action['kind']==city_state_levies.ACTION
         is_governor=not pump and action['kind'] in GOVERNOR_KINDS
         has_observation_effect = (is_world or is_order or is_formation or is_queue or is_placement or is_attack or is_occupation
                                   or is_city or is_city_shot or is_work or is_purchase or is_promotion
-                                  or is_upgrade or is_policy or is_government or is_envoy or is_governor
+                                  or is_upgrade or is_policy or is_government or is_envoy or is_levy or is_governor
                                   or is_trade or is_espionage or is_spy_completion or is_congress
-                                  or is_dedication)
+                                  or is_dedication or is_pantheon or is_belief or is_religion_founding
+                                  or is_prophet_activation or is_great_person_activation or is_great_people or is_religion_custom_names
+                                  or is_religious_unit_operation or is_great_work or is_artifact_origin
+                                  or is_excavation or is_air or is_build_route or is_park_designation or is_rock_concert)
         if is_turn or has_observation_effect or is_initial_diplomacy:
             from .xp1_saved_load_owner import SavedLoadOwner
             if (type(session) is not SavedLoadOwner or session.continuation is not self
@@ -401,10 +588,22 @@ class SavedContinuation:
                     effect=apply(session,action,before_observation)
                 elif is_work:
                     from .native.native_saved_unit_work import apply
-                    effect = {'observation': apply(self, p, action, turn, before_observation, player_id=pid)}
+                    if kind == ADJACENT_KIND:
+                        from .xp2_lan_unit_work import archive_scope
+                        with archive_scope(self.transport, p, before_observation, action):
+                            effect = {'observation': apply(self, p, action, turn, before_observation, player_id=pid)}
+                    else:
+                        effect = {'observation': apply(self, p, action, turn, before_observation, player_id=pid)}
                 elif is_purchase:
-                    from .xp2_plot_purchases import apply
-                    effect = dict(observation=apply(session, action, before_observation, allow_faith=True))
+                    if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                        if 'plot_id' in action:
+                            from .xp1_plot_purchases import apply
+                        else:
+                            from .xp1_city_purchases import apply
+                        effect = apply(session, action, before_observation)
+                    else:
+                        from .xp2_plot_purchases import apply
+                        effect = dict(observation=apply(session, action, before_observation, allow_faith=True))
                 elif is_government:
                     from .xp2_government import apply
                     effect=apply(session,action,before_observation)
@@ -415,11 +614,64 @@ class SavedContinuation:
                         from .xp2_policies import apply
                     effect = apply(session, action, before_observation)
                 elif is_promotion:
-                    from .xp2_promotions import apply
-                    effect = dict(observation=apply(session, action, before_observation))
+                    if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                        from .xp1_promotions import apply
+                        effect = apply(session, action, before_observation)
+                    else:
+                        from .xp2_promotions import apply
+                        effect = dict(observation=apply(session, action, before_observation))
                 elif is_upgrade:
-                    from .xp2_unit_upgrades import apply
-                    effect = dict(observation=apply(session, action, before_observation))
+                    if b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                        from .xp1_unit_upgrades import apply
+                        effect = apply(session,action,before_observation)
+                    else:
+                        from .xp2_unit_upgrades import apply
+                        effect = dict(observation=apply(session, action, before_observation))
+                elif is_religion_custom_names:
+                    from .xp1_religion_custom_names import apply
+                    effect=apply(session,action,before_observation)
+                elif is_religion_founding:
+                    from .xp1_religion_founding import apply
+                    effect=apply(session,action,before_observation)
+                elif is_great_people:
+                    from .xp1_great_people_commands import apply
+                    effect=apply(session,action,before_observation)
+                elif is_great_work:
+                    from .xp2_great_work_commands import apply
+                    effect = apply(session, action, before_observation)
+                elif is_artifact_origin:
+                    from .xp2_archaeology import apply
+                    effect = apply(session, action, before_observation)
+                elif is_excavation:
+                    from .xp2_archaeology_excavation import apply
+                    effect = apply(session, action, before_observation)
+                elif is_air:
+                    from .xp2_air_operations import apply
+                    effect = apply(session, action, before_observation)
+                elif is_build_route:
+                    from .xp2_build_route import apply
+                    effect = apply(session, action, before_observation)
+                elif is_park_designation:
+                    from .xp2_designate_park import apply
+                    effect = apply(session, action, before_observation)
+                elif is_rock_concert:
+                    from .xp2_rock_bands import apply
+                    effect = apply(session, action, before_observation)
+                elif is_great_person_activation:
+                    from .xp1_great_person_activation import apply
+                    effect=apply(session,action,before_observation)
+                elif is_religious_unit_operation:
+                    from .xp1_religious_unit_operations import apply
+                    effect=apply(session,action,before_observation)
+                elif is_prophet_activation:
+                    from .xp1_prophet_activation import apply
+                    effect=apply(session,action,before_observation)
+                elif is_belief:
+                    from .xp1_religion_beliefs import apply
+                    effect=apply(session,action,before_observation)
+                elif is_pantheon:
+                    from .xp1_pantheon import apply
+                    effect=apply(session,action,before_observation)
                 elif is_order:
                     from .xp1_unit_orders import apply
                     effect=apply(session,action,before_observation)
@@ -433,21 +685,25 @@ class SavedContinuation:
                     from .xp1_unit_attacks import apply
                     effect=apply(session,action,before_observation)
                 elif is_occupation:
-                    from .xp2_captured_city import apply
+                    from .captured_city_session import apply
                     effect=apply(session,action,before_observation)
                 elif is_city_shot:
-                    from .native import native_saved_city_shot, native_saved_district_shot
                     district = kind == 'district_range_attack'
-                    shot = native_saved_district_shot if district else native_saved_city_shot
-                    if b.load_abi.core_sha256 != XP2_CORE_SHA256:
-                        raise ValueError('City-shot action requires the XP2 session')
-                    result = native_saved_city_shot.execute(session, p, action, turn, before_observation,
-                        player_id=pid, expected_catalogue=self.explicit_ranged_shots[kind],
-                        expected_defenses=self.explicit_city_shot_defenses,
-                        validate=shot.validate_action, read_catalogue=shot.catalog,
-                        compare=shot.compare_own_cities, offers=shot.actions,
-                        request=shot.request_source, verify_effect=shot.effect,
-                        shooter='district' if district else 'city', proof_sha=shot.PROOF_SHA)
+                    if b.load_abi.core_sha256 == XP2_CORE_SHA256:
+                        from .native import native_saved_city_shot, native_saved_district_shot
+                        shot = native_saved_district_shot if district else native_saved_city_shot
+                        result = native_saved_city_shot.execute(session, p, action, turn, before_observation,
+                            player_id=pid, expected_catalogue=self.explicit_ranged_shots[kind],
+                            expected_defenses=self.explicit_city_shot_defenses,
+                            validate=shot.validate_action, read_catalogue=shot.catalog,
+                            compare=shot.compare_own_cities, offers=shot.actions,
+                            request=shot.request_source, verify_effect=shot.effect,
+                            shooter='district' if district else 'city', proof_sha=shot.PROOF_SHA)
+                    elif b.load_abi.core_sha256 == XP1_CORE_SHA256:
+                        from .xp1_city_shot import apply
+                        result = apply(session, p, action, turn, before_observation)
+                    else:
+                        raise ValueError('Ranged shot requires a supported engine and shooter')
                     effect = dict(observation=result)
                 elif is_city:
                     from .expansion_city_controls import apply
@@ -457,6 +713,9 @@ class SavedContinuation:
                     effect=apply(session,action,before_observation)
                 elif is_envoy:
                     from .xp2_envoys import apply
+                    effect=apply(session,action,before_observation)
+                elif is_levy:
+                    from .xp1_city_state_levies import apply
                     effect=apply(session,action,before_observation)
                 elif kind=='found_city':
                     effect=p.inspect_found_city(pid,unit_id=action['unit_id'],

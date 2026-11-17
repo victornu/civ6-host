@@ -18,15 +18,23 @@ except ImportError:
 
 class TradeCivicHookTests(unittest.TestCase):
     def test_owned_fifo_checks_local_civic_and_latches_first_positive_capacity(self):
+        self.check_civic_hook(rise_and_fall=False)
+
+    def test_rise_and_fall_reuses_the_owned_fifo_with_its_installed_source(self):
+        self.check_civic_hook(rise_and_fall=True)
+
+    def check_civic_hook(self, *, rise_and_fall):
         from civ6_host.runtime import xp2_trade_overview
         from civ6_host.runtime.a0_family_service import A0FamilyService
-        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
         from civ6_host.runtime.native.native_event_87667464 import EventFields, _source_record
+        from civ6_host.runtime.xp1_saved_load import REFERENCE
 
-        core = SimpleNamespace(_handle=0x180000000, _civ6_host_execution_image=_PROFILE)
+        image = _XP1_PROFILE if rise_and_fall else _PROFILE
+        core = SimpleNamespace(_handle=0x180000000, _civ6_host_execution_image=image)
         bodies = {'producer': dict(rva=17, bytes=3, sha256=sha256(b'raw').hexdigest())}
         backend = SimpleNamespace(core=core, runtime=SimpleNamespace(read=Mock(return_value=b'raw')),
-                                  check_thread=Mock())
+                                  check_thread=Mock(), captured_bundle=SimpleNamespace(reference=REFERENCE))
         events = SimpleNamespace(core=core, pending=[], consumed_count=0,
                                  _sequence=0, _draining_empty_receivers=False)
         owner = SimpleNamespace(deferred=events, _check=Mock(), handles_record=lambda kind: kind == 192,
@@ -37,15 +45,17 @@ class TradeCivicHookTests(unittest.TestCase):
         prefix = SimpleNamespace(deferred_events=events, runtime=runtime, ui_child=object(),
                                  event_arguments=SimpleNamespace(consumer=owner))
         saved = SimpleNamespace(backend=backend, prefix=prefix, emit=Mock(),
-                                continuation=SimpleNamespace(check=Mock()))
+                                continuation=SimpleNamespace(check=Mock()), xp1_trade_overview=rise_and_fall)
 
         def consume_empty(record, sequence, **_):
             self.assertIs(events.pending.pop(0), record)
             events.consumed_count = sequence
 
         events._consume_empty_record = consume_empty
-        with patch.object(xp2_trade_overview, '_civic_source', return_value=(None, {'core_bodies': bodies})):
+        with patch.object(xp2_trade_overview, '_civic_source',
+                          return_value=(None, {'core_bodies': bodies})) as proof:
             xp2_trade_overview.bind_civic_hook(saved)
+        proof.assert_called_once_with(**({'rise_and_fall': True} if rise_and_fall else {}))
         backend.runtime.read.assert_called_once_with(core._handle + 17, 3)
         for sequence, player in enumerate((1, 0, 0, 0), 1):
             record = _source_record(sequence, EventFields(0, 2, player))
@@ -229,6 +239,18 @@ class TradeOverviewTests(unittest.TestCase):
                          (None, 'ui_boundary_unavailable'))
         with self.assertRaisesRegex(ValueError, 'availability'):
             reader.parse(raw, 1, 64, 15)
+
+    def test_rise_and_fall_reads_the_stock_panel_without_a_congress_binding(self):
+        self.lua.execute(b'stockLookupFixture(); Game.GetWorldCongress=nil')
+        stock = trade_overview.STOCK_PROFILE
+        source = reader.source(1, 64, 15, check_capacity=True, profile=stock, rise_and_fall=True)
+        panel, status = reader.parse(self.lua.execute(source), 1, 64, 15, profile=stock)
+        self.assertEqual(status, 'available')
+        self.assertEqual((panel['active_count'], panel['capacity']), (1, 3))
+        self.assertEqual(len(panel['incoming_routes']), 1)
+        self.assertNotIn('unit_id', panel['incoming_routes'][0])
+        with self.assertRaisesRegex(ValueError, 'stock trade overview'):
+            reader.source(1, 64, 15, check_capacity=True, rise_and_fall=True)
 
     def test_available_tab_is_independent_of_idle_trader_and_spare_capacity(self):
         self.lua.execute(b'units[2]=nil; capacity=1')

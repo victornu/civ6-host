@@ -42,15 +42,19 @@ CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS = {
 CURRENT_XP2_CHANGED_BLP_FILES = frozenset(path for path, _index in CURRENT_XP2_CHANGED_BLP_FIRST_COMPONENTS)
 
 
-def _execution_image_for_ownership(candidate_backend):
+def _execution_image_for_ownership(candidate_backend, *, base_execution_image=None):
     """Select the shared installation inventory for an exact captured runtime."""
+    from civ6_host.runtime.execution_images import _BASE_PROFILE, _XP1_PROFILE, identity
+    if base_execution_image is not None:
+        if base_execution_image is not _BASE_PROFILE or candidate_backend is not None:
+            raise ValueError('AppOwnership requires the exact installed Base capture profile')
+        return identity(base_execution_image)
     if candidate_backend is None:
         return None
     image = getattr(getattr(candidate_backend, 'core', None),
                     '_civ6_host_execution_image', None)
     if image is None:
         return None
-    from civ6_host.runtime.execution_images import _XP1_PROFILE, identity
     selected = identity(image)
     if image is _XP1_PROFILE:
         from civ6_host.runtime.xp1_saved_load import validate_context_identity
@@ -68,11 +72,11 @@ def _validate_current_xp2_inventory_receipt(receipt, original_rows, selected_ima
     original_rows = plain(original_rows)
     host_proof = plain(host_proof)
     producer_proof = plain(producer_proof)
-    from civ6_host.runtime.execution_images import _XP1_PROFILE, identity
+    from civ6_host.runtime.execution_images import _BASE_PROFILE, _XP1_PROFILE, identity
     if (type(receipt) is not dict
             or receipt.get('schema') != 'civ6-host.app-ownership.current-inventory-transition.v1'
             or receipt.get('execution_image') != CURRENT_XP2_IMAGE_IDENTITY
-            or selected_image not in (CURRENT_XP2_IMAGE_IDENTITY, identity(_XP1_PROFILE))):
+            or selected_image not in (CURRENT_XP2_IMAGE_IDENTITY, identity(_XP1_PROFILE), identity(_BASE_PROFILE))):
         raise ValueError('AppOwnership current inventory receipt or image identity differs')
     source_proofs = [
         {'path': 'evidence/native-host-capability-status/77ed09ed4c69e5f23c83e72e45bad0d0ee5aec62bcebc66dfe3d4dff526ba620.json',
@@ -203,13 +207,15 @@ def _validate_current_xp2_inventory_receipt(receipt, original_rows, selected_ima
 
 
 def _read_current_xp2_fixed_inventory(root, original_rows, candidate_backend,
-                                      host_proof, producer_proof):
-    selected_image = _execution_image_for_ownership(candidate_backend)
+                                      host_proof, producer_proof, *, base_execution_image=None):
+    selected_image = _execution_image_for_ownership(candidate_backend, base_execution_image=base_execution_image)
     if selected_image is None:
         return read_fixed_inventory(root, original_rows)
-    if (selected_image != CURRENT_XP2_IMAGE_IDENTITY
-            and Path(root).resolve() != Path(selected_image['path']).resolve().parents[4]):
-        raise ValueError('AppOwnership inventory and selected Core use different installations')
+    if selected_image != CURRENT_XP2_IMAGE_IDENTITY:
+        binaries_depth = 2 if base_execution_image is not None else 3
+        executable_directory = Path(selected_image['path']).resolve().parent
+        if Path(root).resolve() != executable_directory.parents[binaries_depth]:
+            raise ValueError('AppOwnership inventory and selected Core use different installations')
     receipt = load_pinned_json(abi.ROOT / CURRENT_XP2_INVENTORY_PATH,
                                CURRENT_XP2_INVENTORY_SHA256)
     current_rows = _validate_current_xp2_inventory_receipt(
@@ -266,7 +272,22 @@ def _verify_captured_bundle_profile(manifest, catalogue_gameplay_sha, captured_b
         raise ValueError('Official capture manifest is malformed') from exc
     engine_path = _resolve_resource_path(_resolve_resource_path(Path(captured_bundle.engine_path))).resolve()
     content = captured_bundle.content_profile
-    if type(dependencies) is not dict or dependencies.get(str(engine_path)) != CORE_SHA256 or content.get('schema') != 'civ6rl.official_content_profile.v1' or (content.get('engine', {}).get('gamecore_sha256') != CORE_SHA256) or (type(content.get('engine', {}).get('executable_sha256')) is not str) or (len(content['engine']['executable_sha256']) != 64):
+    execution_sha = CORE_SHA256
+    if captured_bundle.execution_image is not None:
+        from civ6_host.runtime.base_capture_inputs import REFERENCE
+        from civ6_host.runtime.execution_images import _BASE_PROFILE
+        image = captured_bundle.execution_image
+        if (image is not _BASE_PROFILE or captured_bundle.reference != REFERENCE
+                or profile is not HOTSEAT_FOUR_PROFILE or engine_path != Path(image.path).resolve()
+                or image.reference_core_sha256 != CORE_SHA256
+                or dependencies.get(str(engine_path)) != image.image_sha256):
+            raise ValueError('Official bundle ownership does not match the installed Base hotseat pair')
+        execution_sha = image.image_sha256
+    if (dependencies.get(str(engine_path)) != execution_sha
+            or content.get('schema') != 'civ6rl.official_content_profile.v1'
+            or content.get('engine', {}).get('gamecore_sha256') != CORE_SHA256
+            or type(content.get('engine', {}).get('executable_sha256')) is not str
+            or len(content['engine']['executable_sha256']) != 64):
         raise ValueError('Official bundle engine identity is not the pinned Base engine')
     roles = {'gameplay', 'configuration', 'localization'}
     source_dbs = fixture.get('databases')
@@ -477,8 +498,11 @@ class ClosedBaseOwnership:
         if count != expected_count or sorted(((a, b, c, d & 4294967295) for a, b, c, d in actual_rows)) != expected_rows:
             raise ValueError('Loaded Base capability names/types differ')
         fixed = self.proof['catalogue_evidence']['fixed_files']
+        base_execution_image = (getattr(captured_bundle, 'execution_image', None)
+                                if candidate_backend is None else None)
         self.inventory = _read_current_xp2_fixed_inventory(
-            installation, fixed, candidate_backend, self.proof, self.producer_proof)
+            installation, fixed, candidate_backend, self.proof, self.producer_proof,
+            base_execution_image=base_execution_image)
         if len(self.inventory) != 65 or sum((row['present'] for row in self.inventory)) != 35:
             raise ValueError('Closed AppOwnership inventory is incomplete')
         restrictions = self.proof['catalogue_evidence']['capability_restrictions']

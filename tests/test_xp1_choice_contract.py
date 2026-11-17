@@ -113,10 +113,12 @@ class ChoiceContracts(unittest.TestCase):
         saved.execute.assert_not_called()
 
     def test_unit_order_worker_requires_matching_native_effect_receipt(self):
+        from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
         action=dict(kind='unit_order',unit_id=17,route='command',
                     item_type='UNITCOMMAND_CANCEL',hash=123)
         validate_command(action)
-        saved=NS(continuation=NS(explicit_unit_orders={'same':1},observation=self.obs),
+        saved=NS(backend=NS(load_abi=NS(core_sha256=XP1_CORE_SHA256)),
+                 continuation=NS(explicit_unit_orders={'same':1},observation=self.obs),
                  execute=Mock(),emit=Mock())
         saved.execute.return_value=dict(action=action,effect=dict(status='completed',
             observation=self.obs,receipt=dict(action=action)))
@@ -138,7 +140,9 @@ class ChoiceContracts(unittest.TestCase):
         from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
         action = {'kind': 'force_end_turn'}
         saved = NS(backend=NS(load_abi=NS(core_sha256=XP2_CORE_SHA256)),
-                   continuation=NS(observation=self.obs), emit=Mock(), execute=Mock())
+                   continuation=NS(observation=self.obs, world_input_prompts={}),
+                   prefix=NS(deferred_events=NS(pending_diplomacy_statements=[])),
+                   emit=Mock(), execute=Mock())
         effect = dict(status='completed', reason=None, requested_action=action)
         saved.execute.return_value = dict(action=action, effect=effect)
         with patch('civ6_host.runtime.xp1_session_view.read') as full, patch(

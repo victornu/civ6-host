@@ -2,8 +2,8 @@
 from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
-import hashlib
 import struct
+from .source_verification import file_sha256
 from .configuration_profiles import _source
 from .saved_load_profiles import XP2_CORE_SHA256
 
@@ -33,7 +33,7 @@ def _verified_source():
     from .resource_resolution import resolve_path
     for row in p['references'].values():
         path=resolve_path(resource_root()/row['path'])
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        if file_sha256(path)!=row['sha256']:
             raise ValueError('XP2 cache source dependency differs: '+row['path'])
     return p
 

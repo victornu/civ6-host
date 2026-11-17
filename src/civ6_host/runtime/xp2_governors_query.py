@@ -15,14 +15,17 @@ def _context(player_id, turn):
         raise ValueError('Invalid governor query perspective')
 
 
-def catalogue_source(player_id, turn, support_source):
+def catalogue_source(player_id, turn, support_source, *, rise_and_fall=False):
     _context(player_id, turn)
     if type(support_source) is not bytes or not 0 < len(support_source) <= MAX_PAYLOAD:
         raise ValueError('Verified official GovernorSupport source is required')
     # The installed module declares functions; it does not initialize Controls
     # or register UI events. Preserve its source, including Firaxis annotations.
     prefix = support_source.removeprefix(b'\xef\xbb\xbf') + b'\n'
-    context = f'local pid={player_id}; local expectedTurn={turn}\n'.encode('ascii')
+    if type(rise_and_fall) is not bool:
+        raise ValueError('An explicit governor panel variant is required')
+    context = (f'local pid={player_id}; local expectedTurn={turn}; '
+               f'local riseAndFall={str(rise_and_fall).lower()}\n').encode('ascii')
     return prefix + context + _QUERY
 
 
@@ -70,14 +73,16 @@ for _,definition in ipairs(definitions) do
    b(canEver),b(manager:CanPromoteGovernor(definition.Hash)),b(assignmentOpen),
    i(manager:GetTurnsToEstablish(definition.Hash))},'|')
   local assignedCity=nil
+  local majorAssignment=false
   if governor then
    assert(governor:GetType()==definition.Index,'governor definition/instance mismatch')
    assignedCity=governor:GetAssignedCity()
+   if not riseAndFall then majorAssignment=governor:CanAssignToMajorCiv() end
    lines[#lines+1]=table.concat({'S',i(definition.Index),i(neutralized),b(governor:IsEstablished()),
     i(governor:GetTurnsToEstablish()),i(governor:GetTurnsOnSite()),
     assignedCity and i(assignedCity:GetOwner()) or '~',
     assignedCity and i(assignedCity:GetID()) or '~',
-    b(governor:IsGovernCityState()),b(governor:CanAssignToMajorCiv())},'|')
+    b(governor:IsGovernCityState()),b(majorAssignment)},'|')
   end
   local promotions={}
   for promotionSet in GameInfo.GovernorPromotionSets() do
@@ -100,7 +105,12 @@ for _,definition in ipairs(definitions) do
     local owner,id=city:GetOwner(),city:GetID()
     -- The chooser omits the selected governor's current destination. Repeated
     -- appearances of the same city in the own/major lists are the same command.
-    if assignedCity and assignedCity:GetOwner()==owner and assignedCity:GetID()==id then return end
+    if riseAndFall then
+     local current=manager:GetAssignedGovernor(city)
+     if current and current:GetID()==governor:GetID() then return end
+    elseif assignedCity and assignedCity:GetOwner()==owner and assignedCity:GetID()==id then
+     return
+    end
     local key=i(owner)..':'..i(id)
     if seen[key]~=nil then return end
     seen[key]=canAssign
@@ -115,12 +125,15 @@ for _,definition in ipairs(definitions) do
      local influence=minor:GetInfluence()
      if influence~=nil and influence:CanReceiveInfluence() and diplomacy:HasMet(minor:GetID()) then
       for _,city in minor:GetCities():Members() do
-       target(city,manager:CanAssignGovernor(definition.Hash,city,true))
+       local allowed
+       if riseAndFall then allowed=manager:CanAssignGovernor(definition.Hash,city)
+       else allowed=manager:CanAssignGovernor(definition.Hash,city,true) end
+       target(city,allowed)
       end
      end
     end
    end
-   if governor:CanAssignToMajorCiv() then
+   if majorAssignment then
     for _,major in ipairs(PlayerManager.GetAliveMajors()) do
      if diplomacy:HasMet(major:GetID()) then
       local capital=major:GetCities():GetCapitalCity()

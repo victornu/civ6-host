@@ -141,6 +141,24 @@ class SpyCompletionClientTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     information.project('spy_completion', observation, value)
 
+    def test_waiting_player_can_use_a_current_popup_with_strategic_espionage_closed(self):
+        decisions, observation = self.spy._v35('waiting')
+        plot = observation['plots'][0]
+        observation['units'] = [dict(id=9, type=91, owner=observation['player_id'],
+            x=plot['x'], y=plot['y'], damage=0, moves=0, max_moves=2)]
+        completion = self._completion(observation)
+        waiting = network_turn.upgrade_spy_completion_catalogue(decisions, completion, observation)
+        self._validate(waiting, observation)
+        self.assertIsNone(waiting['espionage'])
+        self.assertEqual(information.project('spy_completion', observation, waiting), completion)
+        for action in spy_completion.actions(completion):
+            self.assertEqual(network_turn.select_capability(
+                waiting, dict(decision_id=waiting['decision_id'], candidate_id=network_turn.digest(action))), action)
+        with self.assertRaisesRegex(ValueError, 'native occurrence'):
+            network_turn.upgrade_spy_completion_catalogue(decisions, self._completion(observation, current=False))
+        with self.assertRaises(ValueError):
+            self._validate(waiting, observation, closed=True)
+
     def test_checkpoint_projection_restores_exact_v35_gaps_and_historical_fields(self):
         old, observation = self.spy._v35()
         current = network_turn.upgrade_spy_completion_catalogue(old, self._completion(observation), observation)

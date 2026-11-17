@@ -1,5 +1,6 @@
 """Shared event routing/lifetime; native transport is qualified separately."""
 import ast
+from contextlib import contextmanager
 import hashlib
 import struct
 import sys
@@ -82,6 +83,91 @@ class A0FamilyServiceTests(unittest.TestCase):
             self.assertIs(getattr(NativeDeferredHostEvents,name),getattr(SharedHostEventDispatch,name))
         with self.assertRaises(TypeError):self.profile.record_types_by_kind[1]=frozenset()
 
+    def test_installed_xp2_deal_history_uses_the_owned_record_135_receiver(self):
+        import pefile
+        from civ6_host.runtime import xp2_deal_history as history
+        from civ6_host.runtime.execution_images import _PROFILE
+
+        host, deferred, arguments, owner, reader, _, _ = self.fixture(
+            XP2_CORE_SHA256, execution_image=_PROFILE)
+        self.assertEqual(owner.diplomacy_event_profile.record_types_by_kind[history.KIND],
+                         frozenset((135,)))
+        proof = history.source()
+        image = pefile.PE(proof['images']['core']['path'], fast_load=True)
+        self.addCleanup(image.close)
+        reader.read.side_effect = lambda address,size: image.get_data(address-1000,size)
+        fields = {0xa1e5a149:scalar(3,0), 0xd6fcf3e4:scalar(2,0),
+                  0xa1fbc372:scalar(2,1), 0x38f292c8:scalar(2,1000)}
+        reader.fields.return_value = fields
+        self.assertEqual(arguments.dispatch(host.pointer,history.KIND,0x9000),0)
+        record, = deferred.pending
+        self.assertEqual(struct.unpack_from('<IIII',record), (96,135,1,0))
+        self.assertEqual(struct.unpack_from('<III',record,80), (1,0,1))
+        self.assertEqual(deferred.drain(),1)
+        self.assertEqual((deferred.consumed_count,deferred.pending), (1,[]))
+        self.assertEqual(reader.fields.return_value,fields)
+        for changed in ({**fields, 0x38f292c8:scalar(3,1000)},
+                        {**fields, 0xa1fbc372:scalar(2,0)},
+                        {k:v for k,v in fields.items() if k!=0x38f292c8}):
+            with self.subTest(fields=len(changed)), self.assertRaises(ValueError):
+                history.encode_record(2,changed)
+
+    def test_installed_xp1_project_completion_reuses_ordered_native_records(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.foundation_event_profile import (
+            PROJECT_KIND, XP1_PROJECT_SOURCE, event_profile, verify_project_live,
+            xp1_project_source, xp1_project_source_dependencies)
+        from civ6_host.runtime.native import native_event_3182bc8e as event
+
+        _, deferred, _, owner, reader, _, _ = self.fixture(execution_image=_XP1_PROFILE)
+        profile = event_profile(execution_image=_XP1_PROFILE)
+        self.assertEqual(event_profile().record_types_by_kind[PROJECT_KIND], frozenset((96,)))
+        self.assertEqual(profile.record_types_by_kind[PROJECT_KIND], frozenset((96, 99, 100)))
+        pins = xp1_project_source_dependencies(_XP1_PROFILE)
+        self.assertIn(XP1_PROJECT_SOURCE[1], pins.values())
+        spans = xp1_project_source(_XP1_PROFILE)['spans']
+        memory = {1000 + span['rva']: bytes.fromhex(span['raw_hex']) for span in spans.values()}
+        verify_project_live(1000, lambda address, size: memory[address], xp1_image=_XP1_PROFILE)
+        with self.assertRaisesRegex(ValueError, 'live bytes'):
+            verify_project_live(1000, lambda address, size: bytes(size), xp1_image=_XP1_PROFILE)
+
+        owner.foundation_event_profile = owner._foundation_event_profile = profile
+        owner.active_kind = PROJECT_KIND
+        reader.read.return_value = struct.pack('<HHI', 15, 2, 0x10000)
+        fields = {event.DESCRIPTOR_KEY: struct.pack('<H6xQII', 1024, 123, 8, 0x21000001),
+                  event.SELECTOR_KEY: scalar(3, 0), event.D6_KEY: scalar(2, 3),
+                  event.A1FBC_KEY: scalar(2, 15), event.NORMALIZED_58_KEY: scalar(2, 0xffffffff)}
+        cache, facades = object(), object()
+        lease = Mock(backend=cache)
+        lease.require.return_value = facades
+        token = NS(owner=NS(load_abi=NS(core_sha256=XP1_CORE_SHA256)), lease=lease,
+                   publisher=NS(_facades=facades))
+
+        def retained(passed_facades, read, *, core_sha256):
+            self.assertIs(passed_facades, facades)
+            self.assertIs(read, reader.read)
+            self.assertEqual(core_sha256, XP1_CORE_SHA256)
+            self.assertEqual([struct.unpack_from('<I', row, 4)[0] for row in deferred.pending], [96])
+            return 15
+
+        with (patch('civ6_host.runtime.a0_foundation_events.require_borrow', return_value=token),
+              patch('civ6_host.runtime.native.native_retained_game_getter.read_retained_game_value',
+                    side_effect=retained) as getter):
+            with self.assertRaisesRegex(ValueError, 'lookup branch'):
+                owner._enqueue_project_completion(fields | {event.NORMALIZED_58_KEY: scalar(2, 1)})
+            self.assertFalse(deferred.pending)
+            self.assertEqual(owner._enqueue_project_completion(fields), 0)
+            getter.assert_called_once()
+        self.assertEqual([struct.unpack_from('<III', row) for row in deferred.pending],
+                         [(112, 96, 1), (128, 99, 2), (128, 100, 3)])
+        for row in deferred.pending[1:]:
+            self.assertEqual(struct.unpack_from('<I', row, 72), (22,))
+            self.assertEqual(struct.unpack_from('<HHIIIii', row, 88),
+                             (15, 2, 0x10000, 15, 0xffffffff, -9999, -9999))
+        owner.active_kind = None
+        self.assertEqual(deferred.drain(), 3)
+        self.assertFalse(deferred.pending)
+
     def test_xp2_terminal_notifications_use_the_shared_fifo(self):
         h,d,a,c,reader,_,_ = self.fixture(XP2_CORE_SHA256)
         d.host_notification_counter = 1
@@ -118,6 +204,155 @@ class A0FamilyServiceTests(unittest.TestCase):
         self.assertEqual(resolve_empty_receiver_row(127)['event_name'], cases[0][2])
         a.close()
         d.close()
+
+    def test_current_xp2_culture_changed_preserves_scope_and_owned_fifo(self):
+        import pefile
+        from civ6_host.runtime import xp2_culture_changed as culture
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import resolve_empty_receiver_row
+
+        host, deferred, arguments, owner, reader, _, _ = self.fixture(
+            XP2_CORE_SHA256, execution_image=_PROFILE)
+        core = pefile.PE(str(_PROFILE.path), fast_load=True)
+        self.addCleanup(core.close)
+        reader.read.side_effect = lambda address, size: core.get_data(address - deferred.core._handle, size)
+        fields = {
+            culture.SELECTOR: bytes.fromhex('030000005f574f5200000000000000000000000000000000'),
+            culture.FIRST_VALUE: scalar(2, 1),
+            culture.SECOND_VALUE: scalar(2, 19),
+        }
+        reader.fields.return_value = fields
+        deferred.host_notification_counter = 1
+        deferred.host_metadata_counter = 2
+        self.assertTrue(owner.handles_kind(culture.KIND))
+        self.assertTrue(owner.handles_record(culture.RECORD_TYPE))
+        self.assertEqual(arguments.dispatch(host.pointer, culture.KIND, 0x9000), 0)
+        record, = deferred.pending
+        self.assertEqual(struct.unpack_from('<4I', record), (96, 0x10d, 1, 0))
+        self.assertEqual(struct.unpack_from('<I', record, 72), (4,))
+        self.assertEqual(struct.unpack_from('<4I', record, 80), (1, 1, 19, 0))
+        self.assertEqual((deferred.host_notification_counter, deferred.host_metadata_counter), (1, 2))
+        self.assertEqual(resolve_empty_receiver_row(0x10d, execution_image=_PROFILE)['event_name'],
+                         'GameCoreEvent::CultureChanged')
+        self.assertIsNone(resolve_empty_receiver_row(0x10d))
+        with self.assertRaises(ValueError):
+            culture.encode_record(2, {**fields, culture.SELECTOR: scalar(3, 1)})
+        deferred.host_notification_counter = deferred.host_metadata_counter = 0
+        self.assertEqual(deferred.drain(), 1)
+        self.assertEqual(deferred.pending, [])
+        arguments.close()
+        deferred.close()
+
+    def test_installed_xp1_foundation_events_use_the_owned_receivers(self):
+        import pefile
+        from civ6_host.runtime import a0_foundation_events, foundation_event_profile
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.native import native_event_great_work as codec
+        from civ6_host.runtime.xp1_continuation import SavedContinuation
+        from civ6_host.runtime import xp2_building_removal as building
+        from civ6_host.runtime import xp2_city_occupation_event as transfer
+        from civ6_host.runtime import xp2_player_can_construct_event as player
+
+        h, deferred, arguments, owner, reader, _, _ = self.fixture(execution_image=_XP1_PROFILE)
+        image = pefile.PE(str(_XP1_PROFILE.path), fast_load=True)
+        self.addCleanup(image.close)
+        backend = NS(host=h, core=deferred.core, context=deferred.context, prefix=None,
+                     check_thread=Mock(), stage='prepared', _xp1_commands_requested=True,
+                     load_abi=NS(core_sha256=XP1_CORE_SHA256))
+        token = SavedContinuation.__new__(SavedContinuation)
+        token.owner = backend
+        backend._xp1_continuation = token
+        position, component = 0x90000, 0x90010
+        payloads = {position: struct.pack('<ii', 3, 4),
+                    component: struct.pack('<HHI', 0, 1, 0xffffffff)}
+        reader.read.side_effect = lambda address, size: (
+            payloads[address] if address in payloads
+            else image.get_data(address - deferred.core._handle, size))
+        reader.fields.return_value = {
+            0x8c468e3c: struct.pack('<H6xQII', 0, position, 8, 0x21000001),
+            0xa1e5a149: scalar(3, 0),
+            0xa1fbc372: scalar(2, 0),
+            0xd6fcf3e4: scalar(2, 1),
+            0xf0548bb7: struct.pack('<H6xQII', 1024, component, 8, 0x21000001),
+        }
+        calls = []
+
+        @contextmanager
+        def native_plot(core, context, fields, *, read, include_flag148, core_sha256):
+            self.assertEqual((core, context, read), (backend.core, backend.context, reader.read))
+            self.assertEqual((include_flag148, core_sha256), (False, XP1_CORE_SHA256))
+            self.assertEqual(fields['position_bytes'], payloads[position])
+            calls.append('borrow')
+            yield dict(owner=0, city_id=44, district_id=0)
+            self.assertEqual(len(deferred.pending), 1)
+            calls.append('release')
+
+        @contextmanager
+        def building_plot(core, context, fields, *, read, core_sha256):
+            self.assertEqual((core, context, read), (backend.core, backend.context, reader.read))
+            self.assertEqual(core_sha256, XP1_CORE_SHA256)
+            self.assertEqual(fields['position_bytes'], payloads[position])
+            yield dict(owner=0, city_id=44, district_id=51, flag148=1)
+            self.assertEqual(len(deferred.pending), 1)
+
+        legacy = foundation_event_profile.event_profile(core_sha256=XP1_CORE_SHA256)
+        self.assertNotIn(codec.EVENT_KIND, legacy.record_types_by_kind)
+        self.assertNotIn(transfer.KIND, legacy.record_types_by_kind)
+        with patch('civ6_host.runtime.foundation_facade_profiles.verify_xp1_once'):
+            a0_foundation_events.enable(owner, backend)
+        self.assertTrue(owner.handles_kind(codec.EVENT_KIND))
+        with (patch.object(SavedContinuation, 'check', autospec=True),
+              patch('civ6_host.runtime.xp1_visibility_cache_gate.require_internal_cache',
+                    return_value={'callback_gate_enabled': True}),
+              patch('civ6_host.runtime.native.native_event_07c83dae.plot_snapshot', native_plot)):
+            self.assertEqual(arguments.dispatch(h.pointer, codec.EVENT_KIND, 0x9000), 0)
+            record, = deferred.pending
+            self.assertEqual(struct.unpack_from('<III', record), (160, 220, 1))
+            self.assertEqual(struct.unpack_from('<HHI', record, 96), (0, 2, 44))
+            self.assertEqual(record[144:152], payloads[component])
+            self.assertEqual(deferred.drain(), 1)
+            self.assertEqual(deferred.pending, [])
+            great_work_fields = reader.fields.return_value
+            self.assertEqual(calls, ['borrow', 'release'])
+            self.assertEqual((owner._foundation_borrow, deferred.pending), (None, []))
+            self.assertTrue(owner.handles_kind(transfer.KIND))
+            payloads[component] = struct.pack('<HHI', 0, 2, 131073)
+            reader.fields.return_value = {
+                transfer.SELECTOR: scalar(3, 0),
+                transfer.CITY: struct.pack('<H6xQII', 1024, component, 8, 0x21000001),
+                transfer.PRIOR_OWNER: scalar(2, 1),
+                transfer.TRANSFER: scalar(2, 3),
+            }
+            self.assertEqual(arguments.dispatch(h.pointer, transfer.KIND, 0x9000), 0)
+            record, = deferred.pending
+            self.assertEqual(struct.unpack_from('<III', record), (112, 115, 2))
+            self.assertEqual(struct.unpack_from('<HHIII', record, 88), (0, 2, 131073, 1, 3))
+            self.assertEqual(deferred.drain(), 1)
+            self.assertEqual((owner._foundation_borrow, deferred.pending), (None, []))
+            reader.fields.return_value = {
+                building.SELECTOR: scalar(3, 0),
+                building.POSITION: struct.pack('<H6xQII', 0, position, 8, 0x21000001),
+                building.VALUE: scalar(2, 17),
+            }
+            with patch.object(building, 'plot_snapshot', building_plot):
+                self.assertEqual(arguments.dispatch(h.pointer, building.KIND, 0x9000), 0)
+            self.assertEqual(struct.unpack_from('<III', deferred.pending[0]), (128, 168, 3))
+            self.assertEqual(deferred.drain(), 1)
+            for sequence, active, record_type in ((4, 0, 272), (5, 1, 273)):
+                reader.fields.return_value = {
+                    player.SELECTOR: scalar(3, 0), player.AVAILABLE: scalar(1, active),
+                    player.PLAYER: scalar(2, 1),
+                }
+                self.assertEqual(arguments.dispatch(h.pointer, player.KIND, 0x9000), 0)
+                self.assertEqual(struct.unpack_from('<III', deferred.pending[0]),
+                                 (96, record_type, sequence))
+                self.assertEqual(struct.unpack_from('<II', deferred.pending[0], 80), (sequence, 1))
+                self.assertEqual(deferred.drain(), 1)
+            payloads[component] = struct.pack('<HHI', 0, 2, 1)
+            with self.assertRaisesRegex(ValueError, 'component type differs'):
+                owner.dispatch(codec.EVENT_KIND, great_work_fields, 0)
+            self.assertEqual(calls, ['borrow', 'release'])
+            self.assertEqual((owner._foundation_borrow, deferred.pending), (None, []))
 
     def test_scalar_families_through_service_preserve_bits_sequence_and_cleanup(self):
         from qualify_xp1_configuration import a0_scalar_cases

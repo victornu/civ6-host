@@ -1,4 +1,4 @@
-"""Current XP2 building-removal notification on the existing plot query lease."""
+"""Building-removal notification on the existing plot query lease."""
 from .a0_policy_unlock_current import _require_image
 from .configuration_profiles import XP2_CORE_SHA256
 from .native import native_event_e074eef4 as codec
@@ -31,25 +31,31 @@ def decode_fields(fields, read):
 
 def dispatch(owner, fields):
     from .a0_foundation_events import require_borrow
-    from .native.native_deferred_empty_profile import validate_empty_profile_record
 
     backend = require_borrow(owner).owner
     image = getattr(backend.core, '_civ6_host_execution_image', None)
     _require_image(image)
+    return dispatch_record(owner, fields, execution_image=image, core_sha256=XP2_CORE_SHA256,
+                           proof_sha256=SOURCE[1])
+
+
+def dispatch_record(owner, fields, *, execution_image, core_sha256, proof_sha256):
+    from .native.native_deferred_empty_profile import validate_empty_profile_record
+
     owner._require_no_f391_reentry()
-    if (owner.active_kind != KIND or owner.foundation_core_sha256 != XP2_CORE_SHA256
+    if (owner.active_kind != KIND or owner.foundation_core_sha256 != core_sha256
             or not owner.ui_cache_callbacks_enabled or len(owner.pending) >= owner.limit
             or owner.normalizer_transform_present is not False
             or owner.per_thread_hook_present is not False
             or owner.writer_metadata_callback_present is not False):
-        raise ValueError('XP2 building removal requires its active native receiver')
-    state = dict(owner.empty_receiver_state, execution_image=image)
+        raise ValueError('Building removal requires its active native receiver')
+    state = dict(owner.empty_receiver_state, execution_image=execution_image)
     decoded = decode_fields(fields, owner.read)
     query = dict(position_bytes=decoded['position_bytes'], x=decoded['x'], y=decoded['y'],
                  selector=decoded['selector'], source_value=0,
                  descriptor_tail=decoded['source_scalar'])
     with plot_snapshot(owner.core, owner.context, query, read=owner.read,
-                       core_sha256=XP2_CORE_SHA256) as values:
+                       core_sha256=core_sha256) as values:
         descriptor = dict(snapshot_sbyte_20=values['owner'], snapshot_dword_4=values['city_id'],
                           snapshot_dword_8=values['district_id'], plot_flag=values['flag148'])
         record = codec._pack_record(owner._sequence + 1, decoded, descriptor)
@@ -57,7 +63,7 @@ def dispatch(owner, fields):
         owner._enqueue(record)
     owner.emit('native_deferred_host_event_enqueued', dispatch_kind=hex(KIND),
                queue_type=hex(RECORD_TYPE), record_hex=record.hex(),
-               source_proof_sha256=SOURCE[1], native_queries_executed=True,
+               source_proof_sha256=proof_sha256, native_queries_executed=True,
                plot_released_after_enqueue=True, payload_exposed_to_learner=False,
                eligible_for_training=False, native_dispatch_return=0)
     return 0

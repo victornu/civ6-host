@@ -2,6 +2,14 @@
 
 Model-independent Python API and headless host for the official Civilization VI GameCore.
 
+Development checkpoint, 17 November 2026: the API remains partial. Current
+Gathering Storm stock and BBG 7.5.1 adapters include opt-in rock-band information
+and concerts, alert, and automatic exploration. These latest additions have
+grouped software coverage and retain their explicit native-validation limits
+in [the client contract](docs/client.md). They do not establish whole-game
+equivalence. Qualified native runs still require the private pinned resources;
+game binaries, saves, databases and private traces are excluded from this repository.
+
 Contributors: see [the setup and contribution guide](docs/contributing.md) for
 the source/runtime boundary and private-resource requirements.
 
@@ -58,12 +66,19 @@ receipt: `evidence/host-current-xp2-static-validation-performance.json`.
 The current-image GS + BBG 7.5.1 API now exposes an opt-in v33 initial-diplomacy
 catalogue through `SessionClient.information('diplomacy')`. The native T25 witness
 reads the living, already-met major-player choices, saves and closes normally
-(415 MiB private peak). Its catalogue is empty: no initial request or major
-dialogue was exercised. Twenty direct-request mappings, explicit responses and
-factory guards are source/software prepared; that count is not native action
-coverage. Deal/alliance screens remain explicitly unsupported. See
+(415 MiB private peak). Its catalogue is empty. A separate T57 witness gives
+the Python client an offered delegation, sends it through `diplomacy_initiate`
+and receives the AI's refusal. The client closes the native dialogue
+explicitly. The treasury and delegation availability are preserved at Save.
+An independent process reopens that save with the same observation and choices,
+then delivers `CHOICE_DENOUNCE`. The target stays at peace and the catalogue
+withdraws denunciation, friendship and delegation before the next Save.
+Acceptance and the associated debit still need a witness. Deal and alliance
+screens remain explicitly unsupported. See
 [the client contract](docs/client.md#xp2-initial-diplomacy) and private lab evidence
-`evidence/host-xp2-initial-diplomacy-native.json`.
+`evidence/host-xp2-initial-diplomacy-native.json` and
+`evidence/host-xp2-direct-diplomatic-delegation-t57-native.json` and
+`evidence/host-xp2-direct-denounce-t57-native.json`.
 
 The local XP2 DLL was replaced during a Steam update/repair after the retained
 native witnesses. Its new SHA-256 is `092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f`;
@@ -97,15 +112,21 @@ is delivered. Five client decisions, Save v2 and native Unload/Destroy complete
 normally, with a 414 MiB private-memory peak and 1,977 monitored files unchanged.
 This qualifies that city-state path, not general war/diplomacy gameplay.
 
-The current-image major-player RequestSession/type-132 receiver and retained
-explicit dialogue route are integrated with pinned source and composed software
-checks. This native interval emits no major statement, so it does not qualify
-that route. The new XP2 dialogue envelope omits raw AI/opaque payloads. Its separately
-pinned official-text renderer and explicit response route have source/software
-checks; native major dialogue display remains unqualified. Missing receiver profiles
-still refuse before RequestSession; the legacy runtime remains unchanged.
-No learner or full game was launched. Private evidence:
+Private city-state evidence is recorded in
 `evidence/host-xp2-war-confirmation-native.json` in the local lab.
+
+On the same current Core, the T57 GS + BBG 7.5.1 witness exercises a surprise
+war against a major civilization. The Python client accepts the world-input
+prompt, receives the native diplomatic menu and rendered text, selects the
+offered `CHOICE_EXIT` and reads the new war state. Save and native teardown
+complete on this one-human-versus-AI branch. The public response omits the
+raw AI and opaque fields. Other statements and simultaneous human seats still
+need separate qualification. Private evidence:
+`evidence/host-xp2-major-war-t57-native-continuation.json` in the local lab.
+A second GameCore process restores the T57 observation and legal choices. The
+same border click then moves the selected unit into the other civilization's
+territory. The new position is saved. Private reload evidence:
+`evidence/host-xp2-major-war-t57-native-reload.json`.
 
 The public modal uses `civ6-host.network-diplomacy-decisions.v1`; the remote
 client validates it without importing the native runtime. A separate current-image
@@ -438,7 +459,7 @@ mixed diagnostic fields and is **not a globally player-only input dictionary**.
 | --- | --- | --- |
 | Loading and lifecycle | Installed Base/hotseat round-trip; source Base LAN loading, turns and resets; captured XP1 shared-client Load and fresh reset; installed XP2 LAN Load and clean close with relocated private resources | General community preparation, broader expansion continuations and additional capture profiles |
 | Explicit gameplay | Native Base choices including map movement, plot purchase, production/citizen controls, builder work and initial diplomacy; XP1 foundation/research/civic/current-production choices, forced EndTurn, world inputs, fortification and cancellation of a nonempty movement queue | Complete XP1 action families, parameters and interactions; native normal/Unready request witnesses |
-| Persistence/results | LAN checkpoint save/reload; installed XP2 foundation, save and reload with matching public observation and choices; XP2 LAN with one human and one AI resumed at turn 19, saved at turn 21, then reloaded and saved at turn 22 with clean shutdowns; retained native victory/loss evidence | Complete LAN terminal/reset cycle |
+| Persistence/results | LAN checkpoint Save/Load, retained native victory/loss evidence, stock XP2 one-human LAN loss at T116 followed by normal close and exact same-client reset to T111 | LAN terminal/reset coverage for other profiles and two-human games |
 | Multiplayer | One-human/five-AI Base LAN; separate player perspectives on hotseat. The retained Base, XP1 and XP2 LAN capture saves each declare one taken slot. | An exact capture with two live humans, then simultaneous interleaving, conflicts, readiness and timers |
 | Information | Four named Base public groups; separate optional administrative snapshots; partial XP1 player observation, choices and native turn availability through the common client | Complete gameplay information and XP1 public precision review |
 | Distribution | Separate reproducible client/runtime wheels; native XP2 installed checkpoint reload using an explicitly prepared private resource set | Independent resource preparation and release review |

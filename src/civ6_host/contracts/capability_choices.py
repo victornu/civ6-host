@@ -10,10 +10,23 @@ ACTION_FIELDS = {
     'civic': frozenset(('kind', 'index', 'hash')),
     'production': frozenset(('kind', 'city_id', 'category', 'index', 'hash', 'item_type')),
 }
+RESEARCH_KINDS = ('research', 'civic')
+FOUND_CITY_FIELDS = frozenset(('kind', 'unit_id', 'x', 'y'))
 
 
 def _uint(value, maximum=0xffffffff):
     return type(value) is int and 0 <= value <= maximum
+
+
+def validate_founder_action(action, own_units=None):
+    if (type(action) is not dict or set(action) != FOUND_CITY_FIELDS
+            or action['kind'] != 'found_city' or not _uint(action['unit_id'])
+            or not _uint(action['x'], 65535) or not _uint(action['y'], 65535)):
+        raise ValueError('Malformed foundation action')
+    if own_units is not None:
+        unit = own_units.get(action['unit_id'])
+        if unit is None or (unit['x'], unit['y']) != (action['x'], action['y']):
+            raise ValueError('Foundation action differs from its own-unit observation')
 
 
 def validate_action(action, own_cities=None):
@@ -32,12 +45,42 @@ def validate_action(action, own_cities=None):
             raise ValueError('Production choice differs from its owned city or native item')
 
 
+def research_actions(state):
+    """Validate current chooser indices and produce actions for every offered row."""
+    if type(state) is not dict or set(state) != set(RESEARCH_KINDS):
+        raise ValueError('Malformed research choices')
+    actions = {}
+    for kind in RESEARCH_KINDS:
+        row = state[kind]
+        if (type(row) is not dict or set(row) != {'current_index', 'choices'}
+                or (row['current_index'] is not None and not _uint(row['current_index']))
+                or type(row['choices']) is not list or len(row['choices']) > 4096):
+            raise ValueError('Malformed native research chooser')
+        offers, hashes, previous = [], set(), -1
+        for choice in row['choices']:
+            if type(choice) is not dict or set(choice) != {'index', 'hash'}:
+                raise ValueError('Malformed native research choice')
+            action = dict(kind=kind, **choice)
+            validate_action(action)
+            if choice['index'] <= previous or choice['hash'] in hashes:
+                raise ValueError('Ambiguous native research choice')
+            offers.append(action)
+            previous = choice['index']
+            hashes.add(choice['hash'])
+        actions[kind] = offers
+    return actions
+
+
 def project_state(research, production):
     """Only current choices, exact identifiers and queue count, no hidden precision."""
-    return dict(research=dict(research), production=[dict(
+    return dict(research=dict(research), production=project_production(production))
+
+
+def project_production(production):
+    return [dict(
         city_id=row['city_id'], queue_size=row['queue_size'], kind=row['kind'],
         item_index=row['item_index'], hash=row['current_production_hash'] & 0xffffffff,
-        formation=row['formation']) for row in production['cities']])
+        formation=row['formation']) for row in production['cities']]
 
 
 def validate_state(state, own_cities=None, *, unavailable=False):
@@ -47,11 +90,16 @@ def validate_state(state, own_cities=None, *, unavailable=False):
         return
     if (type(state) is not dict or set(state) != {'research', 'production'}
             or type(state['research']) is not dict or set(state['research']) != {'research', 'civic'}
-            or any(v is not None and not _uint(v) for v in state['research'].values())
-            or type(state['production']) is not list or len(state['production']) > 256):
+            or any(v is not None and not _uint(v) for v in state['research'].values())):
+        raise ValueError('Invalid public current-choice state')
+    validate_production_state(state['production'], own_cities)
+
+
+def validate_production_state(production, own_cities=None):
+    if type(production) is not list or len(production) > 256:
         raise ValueError('Invalid public current-choice state')
     ids = []
-    for row in state['production']:
+    for row in production:
         if (type(row) is not dict
                 or set(row) != {'city_id', 'queue_size', 'kind', 'item_index', 'hash', 'formation'}
                 or not _uint(row['city_id']) or not _uint(row['queue_size'], 65535)

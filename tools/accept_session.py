@@ -922,6 +922,70 @@ def exercise_unit_work(get_view, choose, advance, *, consume_all=False, reopen=N
     return result
 
 
+def exercise_restored_builder(get_view, choose, advance, *, unit_id, plot_id):
+    """Build on a specified public tile using a builder already in the save."""
+    initial = get_view()
+    observation = initial['observation']
+    target = next((p for p in observation['plots'] if p['index'] == plot_id), None)
+    if (target is None or not target['visible'] or target['owner'] != observation['player_id']
+            or target['water'] or target['impassable']):
+        raise ValueError('Builder witness requires a visible owned land tile')
+
+    def state():
+        rows = get_view()['decisions']['unit_work_state']['units']
+        return next((dict(row) for row in rows if row['unit_id'] == unit_id), None)
+
+    def queued_destination():
+        rows = get_view()['decisions']['queued_orders']['units']
+        return next(row['plot_id'] for row in rows if row['unit_id'] == unit_id)
+
+    starting = state()
+    if starting is None or starting['charges'] < 2:
+        raise ValueError('Builder witness requires its original own unit with at least two charges')
+    moves, advances = [], 0
+    while True:
+        current = state()
+        if current is None:
+            raise RuntimeError('Witness builder disappeared on the way to its tile')
+        if current['plot_id'] == plot_id and float(current['moves_token']) > 0:
+            break
+        if (current['plot_id'] != plot_id and float(current['moves_token']) > 0
+                and queued_destination() != plot_id):
+            if get_view()['decisions']['world_input']['selected_unit_id'] != unit_id:
+                choose('world_select_unit', unit_id=unit_id)
+            choose('world_plot_click', unit_id=unit_id, plot_id=plot_id)
+            after_click = state()
+            if after_click is None:
+                raise RuntimeError('Witness builder disappeared after its move request')
+            queued = queued_destination()
+            if after_click['plot_id'] == current['plot_id'] and queued != plot_id:
+                raise RuntimeError('Native click neither moved the builder nor queued its destination')
+            moves.append(dict(before_plot=current['plot_id'], after_plot=after_click['plot_id'],
+                              queued_plot=queued))
+            if after_click['plot_id'] == plot_id and float(after_click['moves_token']) > 0:
+                break
+        if advances >= 3:
+            raise RuntimeError('Builder did not reach an actionable tile within three turns')
+        advance()
+        advances += 1
+
+    before = state()
+    choices = [row['action'] for row in get_view()['decisions']['candidates']
+               if row['action']['kind'] == 'build_improvement'
+               and row['action']['unit_id'] == unit_id and row['action']['plot_id'] == plot_id]
+    if not choices:
+        raise RuntimeError('GameCore offered no construction on the reached tile')
+    action = min(choices, key=lambda candidate: (candidate['index'], candidate['selector']))
+    choose(**action)
+    after = state()
+    if (after is None or after['charges'] != before['charges'] - 1
+            or after['plot_id'] != plot_id or after['improvement'] != action['index']
+            or before['improvement'] == after['improvement']):
+        raise RuntimeError('Native build did not change the selected tile and consume one charge')
+    return dict(starting=starting, approach=moves, advances=advances,
+                build_action=action, before=before, after=after)
+
+
 def exercise_terrain_work(get_view, choose, advance, *, growth_only=False):
     """Use the retained prepared builder; never synthesize a pillaged tile.
 
@@ -1245,6 +1309,8 @@ def main():
         help='Save and reopen two successive native LAN component pairs through the existing client')
     parser.add_argument('--unit-work', action='store_true',
         help='Read public charges and execute native builder production/build/removal; UI parity stays explicit')
+    parser.add_argument('--restored-builder', type=int, nargs=2, metavar=('UNIT_ID', 'PLOT_ID'),
+        help='With --unit-work and a Rise and Fall checkpoint, build with an existing unit and verify Save/Load')
     parser.add_argument('--unit-panel-cycle', action='store_true',
         help='Verify the newly integrated native UnitPanel event guard over one turn, without repeating builder production')
     parser.add_argument('--consume-builder', action='store_true',
@@ -1329,6 +1395,11 @@ def main():
         parser.error('--terrain-work is a separate acceptance group')
     if args.consume_builder and not args.unit_work:
         parser.error('--consume-builder requires --unit-work')
+    if args.restored_builder is not None and (
+            not args.unit_work or args.consume_builder or config.get('input_profile') != 'xp1-lan'
+            or config.get('xp1_unit_work') is not True or config.get('checkpoint') is None
+            or any(not 0 <= value < 2**32 for value in args.restored_builder)):
+        parser.error('--restored-builder requires an opted-in Rise and Fall --unit-work checkpoint and exact IDs')
     if not 0 <= args.dialogue_turns <= 16:
         parser.error('--dialogue-turns must be between 0 and 16')
     if args.city_controls and (args.dialogue_turns or args.turn_action != 'normal'):
@@ -1353,6 +1424,8 @@ def main():
         config['round_limit'] = 24
         if args.consume_builder:
             config['checkpoint_on_close'] = True
+        if args.restored_builder is not None:
+            config.update(round_limit=5, checkpoint_on_close=True)
     if args.terrain_work or args.growth_harvest or args.production_inputs:
         config['round_limit']=24
     if args.placement_prepare_turns:config['round_limit']=args.placement_prepare_turns+1
@@ -1513,19 +1586,18 @@ def main():
         if args.unit_work or args.terrain_work or args.growth_harvest or args.production_inputs:
             def reopen_prepared_builder():
                 nonlocal backend,client,view
-                from civ6_host.runtime.native.native_session_resume import semantic_decisions
                 before=view
                 client.close(pid)
                 record['supervised_runs'].append(dict(run=str(backend.run),report=backend.report))
                 reference=backend.checkpoint
                 if reference is None:
                     raise RuntimeError('Prepared builder checkpoint was not saved')
+                if args.restored_builder is not None:
+                    record['output_checkpoint'] = copy.deepcopy(reference)
                 backend=NetworkBackend(**dict(config,checkpoint=reference,checkpoint_on_close=False))
                 client=SessionClient(backend)
                 view=client.reset();save_view(view)
-                if (view['episode_id']==before['episode_id'] or view['observation']!=before['observation']
-                        or semantic_decisions(view['decisions'])!=semantic_decisions(before['decisions'])):
-                    raise RuntimeError('Prepared builder reload changed public state, selection or choices')
+                compare_checkpoint_public(before, view)
                 return reference
             def advance_for_work():
                 nonlocal view
@@ -1540,6 +1612,25 @@ def main():
                     save_view(view)
                 raise RuntimeError('Builder exercise did not reach the next active turn')
             record['native_exercise'] = 'LAN public own-unit state and native builder operation diagnostic'
+            if args.restored_builder is not None:
+                unit_id, plot_id = args.restored_builder
+                record['input_checkpoint'] = copy.deepcopy(config['checkpoint'])
+                record['unit_work'] = exercise_restored_builder(
+                    lambda: view, choose, advance_for_work, unit_id=unit_id, plot_id=plot_id)
+                reopen_prepared_builder()
+                save_view(client.close(pid))
+                record['supervised_runs'].append(dict(run=str(backend.run), report=backend.report))
+                if (len({row['run'] for row in record['supervised_runs']}) != 2
+                        or any(row['report']['exit_code'] != 90 or row['report']['reaped'] is not True
+                               or row['report']['normal_destroy_called'] is not True
+                               or row['report']['error'] is not None
+                               or not all(row['report']['source_unchanged'].values())
+                               for row in record['supervised_runs'])):
+                    raise RuntimeError('Builder Save/Load requires two clean, independent native lifetimes')
+                record.update(status='native_xp1_existing_builder_save_reload_verified',
+                              native_exercise='Rise and Fall native builder effect and independent Save/Load',
+                              final_turn=view['observation']['turn'])
+                return 0
             if args.production_inputs:
                 record['native_exercise']='LAN public production stock, native completion and following queue item'
                 record['production_inputs']=exercise_production_inputs(lambda:view,choose,advance_for_work)
@@ -1955,7 +2046,8 @@ def main():
                           placement_action=action,checkpoint=backend.checkpoint,
                           final_turn=view['observation']['turn'])
             return 0
-        choose('found_city')
+        if not (args.city_controls and config.get('checkpoint') is not None):
+            choose('found_city')
         if args.checkpoint_cycle:
             from civ6_host.runtime.native.native_session_resume import semantic_decisions
             record['native_exercise']='LAN native checkpoint close/reopen and chained continuation'
@@ -2037,20 +2129,23 @@ def main():
             return 0
         if args.city_controls:
             from civ6_host.contracts.network_turn import CAPABILITY_CITY_CONTROLS_SCHEMA
-            if view['decisions']['schema'] == CAPABILITY_CITY_CONTROLS_SCHEMA:
-                record['native_exercise'] = 'Expansion native focus and citizen controls'
-                record['city_controls'] = exercise_city_controls(
-                    lambda: view, choose, include_queue=False)
-                save_view(client.close(pid))
-                record['supervised_runs'].append(dict(run=str(backend.run), report=backend.report))
-                record['status'] = 'native_expansion_city_controls_observed'
-                record['final_turn'] = view['observation']['turn']
-                return 0
-            record['native_exercise'] = 'LAN source-admitted city controls and production queue'
-            record['city_controls'] = exercise_city_controls(lambda: view, choose)
-            client.close(pid)
+            rise_and_fall = config.get('input_profile') == 'xp1-lan'
+            include_queue = (not rise_and_fall
+                             and view['decisions']['schema'] != CAPABILITY_CITY_CONTROLS_SCHEMA)
+            record['native_exercise'] = ('LAN source-admitted city controls and production queue'
+                                         if include_queue else 'Expansion native focus and citizen controls')
+            record['city_controls'] = exercise_city_controls(lambda: view, choose, include_queue=include_queue)
+            save_view(client.close(pid))
             record['supervised_runs'].append(dict(run=str(backend.run), report=backend.report))
-            record['status'] = 'native_lan_city_controls_verified'
+            if config.get('checkpoint_on_close', False):
+                if backend.checkpoint is None:
+                    raise RuntimeError('Native city-control exercise did not return a Save checkpoint')
+                record['checkpoint'] = backend.checkpoint
+            if rise_and_fall:
+                record['status'] = 'native_xp1_city_controls_observed'
+            else:
+                record['status'] = ('native_lan_city_controls_verified' if include_queue
+                                    else 'native_expansion_city_controls_observed')
             record['final_turn'] = view['observation']['turn']
             return 0
         if args.dialogue_turns:
@@ -2133,7 +2228,12 @@ def main():
         if backend.run:
             if not record['supervised_runs'] or record['supervised_runs'][-1]['run'] != str(backend.run):
                 record['supervised_runs'].append(dict(run=str(backend.run), report=backend.report))
-            path = backend.run / 'client-acceptance.json'
+        receipt_run = backend.run
+        if receipt_run is None and record.get('output_checkpoint') and record['supervised_runs']:
+            # Retain the witnessed effect and Save if a later Load is refused before spawn.
+            receipt_run = Path(record['supervised_runs'][-1]['run'])
+        if receipt_run is not None:
+            path = receipt_run / 'client-acceptance.json'
             path.write_text(json.dumps(record, indent=2), encoding='utf-8')
             print(json.dumps(dict(status=record['status'], error=record.get('error'),
                                   result=str(path), seconds=record['seconds'])))

@@ -1,4 +1,4 @@
-"""Current XP2 player notification selected by the registered callback."""
+"""Player notification selected by the registered expansion callback."""
 import struct
 
 from .a0_policy_unlock_current import _require_image
@@ -42,22 +42,27 @@ def encode_record(sequence, fields):
 
 def dispatch(owner, fields):
     from .a0_foundation_events import require_borrow
-    from .native.native_deferred_empty_profile import validate_empty_profile_record
 
     backend = require_borrow(owner).owner
     image = getattr(backend.core, '_civ6_host_execution_image', None)
     _require_image(image)
+    return dispatch_record(owner, fields, execution_image=image, proof_sha256=SOURCE[1])
+
+
+def dispatch_record(owner, fields, *, execution_image, proof_sha256):
+    from .native.native_deferred_empty_profile import validate_empty_profile_record
+
     owner._require_no_f391_reentry()
     if (owner.active_kind != KIND or owner.normalizer_transform_present is not False
             or owner.per_thread_hook_present is not False
             or owner.writer_metadata_callback_present is not False
             or len(owner.pending) >= owner.limit):
-        raise ValueError('XP2 player notification requires its owned receiver')
+        raise ValueError('Player notification requires its owned receiver')
     record = encode_record(owner._sequence + 1, fields)
-    validate_empty_profile_record(record, execution_image=image, **owner.empty_receiver_state)
+    validate_empty_profile_record(record, execution_image=execution_image, **owner.empty_receiver_state)
     owner._enqueue(record)
     owner.emit('native_deferred_host_event_enqueued', dispatch_kind=hex(KIND),
                queue_type=hex(struct.unpack_from('<I', record, 4)[0]), record_hex=record.hex(),
-               source_proof_sha256=SOURCE[1], payload_exposed_to_learner=False,
+               source_proof_sha256=proof_sha256, payload_exposed_to_learner=False,
                native_queries_executed=False, eligible_for_training=False, native_dispatch_return=0)
     return 0

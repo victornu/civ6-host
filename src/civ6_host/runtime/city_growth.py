@@ -9,7 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
-from civ6_host.contracts.city_growth import SCHEMA, TEXT_FIELDS, validate
+from civ6_host.contracts.city_growth import EXPANSION_SCHEMA, EXPANSION_TEXT_FIELDS, SCHEMA, TEXT_FIELDS, validate
 
 SOURCE=('work/host-simultaneous/city-management/growth-ui-lexical-source.json',
         '0dcb05574b0b1335486bcaa47d8d0754a128a94d1e3c10a265f7cb4b9de336a5')
@@ -50,9 +50,22 @@ def display_source():
     return body
 
 
-def projection_source():
+def projection_source(expansion_panel=None):
     """Local environment exposes only the presentation methods actually used."""
-    names=','.join("'"+k+"'" for k in (*TEXT_FIELDS,'GrowthLongNum'))
+    fields = EXPANSION_TEXT_FIELDS if expansion_panel is not None else TEXT_FIELDS
+    names=','.join("'"+k+"'" for k in (*fields,'GrowthLongNum'))
+    projection = 'ui.ViewPanelCitizensGrowth=ViewPanelCitizensGrowth'
+    if expansion_panel is not None:
+        first = expansion_panel.index('function ViewPanelCitizensGrowth(')
+        last = expansion_panel.index('\nend', first) + len('\nend')
+        wrapper = re.sub(r':\s*(?:number|boolean|table|string)\b', '', expansion_panel[first:last])
+        projection = (
+            'local BASE_ViewPanelCitizensGrowth=ViewPanelCitizensGrowth\n'
+            'local city, iModifiedFood, total\n'
+            'local UI={GetHeadSelectedCity=function() return city end}\n'
+            'local ' + wrapper + '\n'
+            'function ui.ViewPanelCitizensGrowth(data, ownCity)\n'
+            ' city=ownCity\n ViewPanelCitizensGrowth(data)\n city=nil\nend')
     return ("\nlocal ui={math=math,Locale={Lookup=Locale.Lookup}}\n"
         "function ui.Locale.ToNumber(value,pattern)\n"
         " assert(type(value)=='number' and value==value and math.abs(value)<=1e12,'invalid display number')\n"
@@ -68,13 +81,14 @@ def projection_source():
         "local name=key;ui.Controls[key]={SetColorByName=function(self,v) assert(type(v)=='string');rendered[name..'_color']=v end}\nend\n"
         "ui.Controls.CitizenGrowthStatus2.SetTextureOffsetVal=function(self,u,v) rendered.icon_u=u;rendered.icon_v=v end\n"
         "do\nlocal math,Locale,Controls=ui.math,ui.Locale,ui.Controls\n"+display_source()+
-        "\nui.Round=Round;ui.ViewPanelCitizensGrowth=ViewPanelCitizensGrowth\nend\n").encode('utf-8')
+        "\nui.Round=Round\n"+projection+"\nend\n").encode('utf-8')
 
 
-def source(player_id,turn):
+def source(player_id,turn,*,expansion_panel=None):
     if type(player_id) is not int or not 0<=player_id<64 or type(turn) is not int or not 0<=turn<2**31:
         raise ValueError('Invalid growth viewpoint')
-    return f'local pid,turn={player_id},{turn}\n'.encode()+projection_source()+r'''
+    version = 2 if expansion_panel is not None else 1
+    return f'local pid,turn,version={player_id},{turn},{version}\n'.encode()+projection_source(expansion_panel)+r'''
 local function ready()
  assert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid and Game.GetCurrentGameTurn()==turn,'growth perspective changed')
 end
@@ -88,7 +102,7 @@ local function hex(v)
  assert(type(v)=='string' and #v<=4096 and not string.find(v,'\0',1,true),'invalid growth text')
  return (string.gsub(v,'.',function(c) return string.format('%02x',string.byte(c)) end))
 end
-ready();local player=assert(Players[pid]);local out={'city-growth-v1|'..whole(pid)..'|'..whole(turn)}
+ready();local player=assert(Players[pid]);local out={'city-growth-v'..version..'|'..whole(pid)..'|'..whole(turn)}
 local cities={};local seen={}
 for _,city in player:GetCities():Members() do
  local id=city:GetID();whole(id);assert(not seen[id] and city:GetOwner()==pid,'growth city ownership');seen[id]=true
@@ -106,7 +120,7 @@ for _,city in ipairs(cities) do
   Occupied=city:IsOccupied(),HappinessGrowthModifier=growth:GetHappinessGrowthModifier(),
   OtherGrowthModifiers=growth:GetOtherGrowthModifier(),HousingMultiplier=growth:GetHousingGrowthModifier(),
   OccupationMultiplier=growth:GetOccupationGrowthModifier()}
- rendered={};ui.ViewPanelCitizensGrowth(data)
+ rendered={};ui.ViewPanelCitizensGrowth(data,city)
  out[#out+1]=table.concat({'C',id,whole(city:GetPopulation()),b(data.Occupied),
   n(growth:GetHousing()),n(growth:GetAmenities()),n(growth:GetAmenitiesNeeded()),whole(growth:GetHappiness())},'|')
  for key,value in pairs(rendered) do
@@ -122,10 +136,12 @@ ready();return table.concat(out,'\n')
 '''.encode()
 
 
-def parse(raw,player_id,turn):
+def parse(raw,player_id,turn,*,expansion=False):
     if type(raw) is not bytes or len(raw)>CAPACITY:raise ValueError('Unbounded growth frame')
     lines=raw.decode('ascii').splitlines()
-    if not lines or lines[0]!=f'city-growth-v1|{player_id}|{turn}':raise ValueError('Foreign growth frame')
+    version = 2 if expansion else 1
+    fields = EXPANSION_TEXT_FIELDS if expansion else TEXT_FIELDS
+    if not lines or lines[0]!=f'city-growth-v{version}|{player_id}|{turn}':raise ValueError('Foreign growth frame')
     cities={};renders={};private={}
     def number(v):
         x=float(v)
@@ -169,13 +185,14 @@ def parse(raw,player_id,turn):
     rows=[]
     for cid,row in sorted(cities.items()):
         v=renders[cid]
-        if set(v)!=set(TEXT_FIELDS)|{'GrowthLongNum','starving','CitizenGrowthStatus2_color','CitizenGrowthStatusIcon2_color','icon_u','icon_v'}:
+        if set(v)!=set(fields)|{'GrowthLongNum','starving','CitizenGrowthStatus2_color','CitizenGrowthStatusIcon2_color','icon_u','icon_v'}:
             raise ValueError('Unexpected growth display output')
         if v['CitizenGrowthStatus2_color']!=v['CitizenGrowthStatusIcon2_color']:raise ValueError('Growth icon colors differ')
-        row.update(display={k:v[k] for k in (*TEXT_FIELDS,'GrowthLongNum')},starving=v['starving'],
+        row.update(display={k:v[k] for k in (*fields,'GrowthLongNum')},starving=v['starving'],
             growth_icon=dict(color=v['CitizenGrowthStatus2_color'],u=v['icon_u'],v=v['icon_v']))
         rows.append(row)
-    result=validate(dict(schema=SCHEMA,player_id=player_id,turn=turn,cities=rows),player_id,turn)
+    result=validate(dict(schema=EXPANSION_SCHEMA if expansion else SCHEMA,
+        player_id=player_id,turn=turn,cities=rows),player_id,turn)
     return result,[private[k] for k in sorted(private)]
 
 

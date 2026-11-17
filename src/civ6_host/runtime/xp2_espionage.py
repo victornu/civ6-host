@@ -6,6 +6,7 @@ reports native order readback; a running mission has not yet produced a result.
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
+from struct import pack
 
 from civ6_host.contracts import espionage as contract
 from .configuration_profiles import XP2_CORE_SHA256
@@ -51,6 +52,52 @@ def _invalidate(c):
     c.explicit_espionage = None
 
 
+def borrowed_enabled(saved, requested=None):
+    enabled = getattr(saved, 'espionage_diagnostic', False) is True
+    if requested is None:
+        return enabled
+    if type(requested) is not bool or (requested and not enabled):
+        raise ValueError('Borrowed espionage requires the admitted Gathering Storm option')
+    return requested
+
+
+def borrowed_catalogue(saved, observation):
+    from .native import native_saved_espionage as native
+    from .xp1_session_view import _borrowed_xp2_reference
+
+    pid, turn = observation['player_id'], observation['turn']
+    _borrowed_xp2_reference(saved, pid)
+    if not borrowed_enabled(saved):
+        raise ValueError('Borrowed espionage is unavailable in this session')
+    b, c, p, _ = _owner(saved, active=True)
+    source_dependencies(execution_image=getattr(b.core, '_civ6_host_execution_image', None))
+    c.transport.require_empty_native_queue()
+    b.control(empty=True)
+    state = native.catalog(p, turn, player_id=pid)
+    contract.compare_own(state, observation)
+    c.transport.require_empty_native_queue()
+    b.control(empty=True)
+    return state
+
+
+def verify_borrowed_archive(archive, player, action):
+    if type(archive) is not bytes:
+        raise RuntimeError('Spy request did not produce a native byte archive')
+    kind = action['kind']
+    if kind == 'spy_escape':
+        header = pack('<II', 0xc45de12f, player)
+        minimum = 24
+    elif kind == 'spy_cancel':
+        if archive != pack('<IHH3I', 0x493830af, player, 1, action['unit_id'], 1, 0):
+            raise RuntimeError('Spy cancellation archive differs from the selected unit or actor')
+        return
+    else:
+        header = pack('<IHHI', 0x8c0f3f36, player, 1, action['unit_id'])
+        minimum = 28
+    if len(archive) < minimum or not archive.startswith(header):
+        raise RuntimeError('Spy archive differs from the selected route or actor')
+
+
 def catalogue(saved, observation):
     from .native import native_saved_espionage as native
     b, c, p, identity = _owner(saved, active=False)
@@ -79,28 +126,57 @@ def catalogue(saved, observation):
 
 def apply(saved, action, before):
     """Revalidate an offered command in the engine and read its actual state."""
-    from .native import native_saved_espionage as native
-    from .native.native_player_observation import observe_player
     _, c, _, _ = _owner(saved, active=True)
     record = getattr(c, '_xp2_espionage_catalogue', None)
-    b, c, p, _ = _current(saved, record, active=True)
+    _current(saved, record, active=True)
     if before != record.observation or action not in contract.actions(record.espionage):
         raise ValueError('Espionage command was not offered at this observation')
+    return _apply(saved, action, before, record.espionage)
+
+
+def apply_borrowed(saved, action, observation, *, expected, available):
+    command = dict(status='refused', requested_action=action)
+    if not available or expected is None:
+        return dict(command, reason='native_spy_choice_unavailable'), None
+    contract.compare_own(expected, observation)
+    if action not in contract.actions(expected):
+        return dict(command, reason='native_spy_choice_unavailable'), None
+    current = borrowed_catalogue(saved, observation)
+    if action not in contract.actions(current):
+        return dict(command, reason='native_spy_choice_unavailable'), None
+    result = _apply(saved, action, observation, current, borrowed=True)
+    if result['status'] == 'refused':
+        if result['observation'] != observation:
+            raise RuntimeError('Refused spy order changed the player observation')
+        return dict(command, reason=result['refusal_code']), None
+    pending = result['status'] == 'pending'
+    return dict(command, status='submitted' if pending else 'completed',
+                reason='native_spy_effect_unresolved' if pending else None), result['observation']
+
+
+def _apply(saved, action, before, state, *, borrowed=False):
+    from .native import native_saved_espionage as native
+    from .native.native_player_observation import observe_player
+
+    b, c, p, _ = _owner(saved, active=True)
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     count = c.publication_count
-    request = native.request_source(action, record.espionage)
+    request = native.request_source(action, state)
     raw = p.runtime.evaluate_text(p.ui_child, request, b'@xp2_espionage_request', capacity=1048576)
     if raw == b'refused':
         c.transport.require_empty_native_queue()
         b.control(empty=True)
         after = observe_player(p.runtime, p.ui_child, before['player_id'])
-        _invalidate(c)
+        if not borrowed:
+            _invalidate(c)
         return dict(status='refused', refusal_code='native_spy_choice_unavailable',
                     observation=deepcopy(after), receipt=dict(action=deepcopy(action),
                         native_archive_delivered=False, native_effect_readback=False))
     if raw != b'submitted' or len(p.actions.pending) != 1:
         raise RuntimeError('Native spy request did not enqueue exactly one action')
+    if borrowed:
+        verify_borrowed_archive(p.actions.pending[0], before['player_id'], action)
     archive_sha256 = hashlib.sha256(p.actions.pending[0]).hexdigest()
     p.actions.deliver_one()
     p.deferred_events.drain_empty_receivers()
@@ -111,11 +187,13 @@ def apply(saved, action, before):
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     after = observe_player(p.runtime, p.ui_child, before['player_id'])
+    if (after['player_id'], after['turn']) != (before['player_id'], before['turn']):
+        raise RuntimeError('Espionage command crossed its player or turn boundary')
     refreshed = native.catalog(p, after['turn'], player_id=after['player_id'])
     contract.compare_own(refreshed, after)
     # Query native order state after publication, using the same official
     # operation identity as dispatch.  Archive delivery alone is not an effect.
-    effect = native.read_effect(p, action, record.espionage, refreshed)
+    effect = native.read_effect(p, action, state, refreshed)
     if (type(effect) is not dict or set(effect) != {'applied', 'pending'}
             or any(type(effect[k]) is not bool for k in effect)
             or effect['applied'] == effect['pending']):
@@ -127,9 +205,10 @@ def apply(saved, action, before):
         native_effect_readback=effect['applied'], native_order_pending=effect['pending'],
         mission_completion_claimed=False, automatic_choices_applied=False,
         gameplay_feedback=deepcopy(feedback), espionage_after=deepcopy(refreshed))
-    _invalidate(c)
+    if not borrowed:
+        _invalidate(c)
     saved.emit(receipt['stage'], receipt=deepcopy(receipt),
         observation_before=deepcopy(before), observation_after=deepcopy(after),
-        catalogue_before=deepcopy(record.espionage), catalogue_after=deepcopy(refreshed))
+        catalogue_before=deepcopy(state), catalogue_after=deepcopy(refreshed))
     return dict(status='completed' if effect['applied'] else 'pending', refusal_code=None,
                 observation=deepcopy(after), receipt=receipt)

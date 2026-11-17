@@ -15,10 +15,25 @@ ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_fil
 PROOF_PATH = ROOT / 'work/native-checkpoint-job-state-source343.json'
 PROOF_SHA256 = '4b035fe2b0dfb0b4be35ae46c24b8b8d42affd95e98f97363e2ef1bebbd855bd'
 HOST_SHA256 = '2b938551555af92ef37bbda8631d0a90c585c3e89c9d7710d0758e85e2b01334'
+HOST_PATH = 'work/native-script-services-host41/civ6rl-native-python.exe'
 PROFILE = 'owned-synchronous-host-idle-controller-v1'
 RVA = dict(free_head=8726696, slots=8726704, active_head=8728752, lock=8728760, runtime_thread=8530044, spawn_active=8728768, groups=8728776, submission_sequence=8728784)
 UINT64_MAX = (1 << 64) - 1
 GROUP_MAGIC = 4848501265015980593
+
+
+def host_reference(execution_image=None):
+    if execution_image is None:
+        return ROOT / HOST_PATH, HOST_SHA256
+    from civ6_host.runtime.execution_images import _BASE_PROFILE
+    from civ6_host.runtime.source_build_identity import (
+        BASE_CURRENT_HOST_REFERENCE, verify_base_current_host_transition,
+    )
+    if execution_image is not _BASE_PROFILE:
+        raise ValueError('Base job snapshot requires its exact registered execution image')
+    verify_base_current_host_transition()
+    path, digest = BASE_CURRENT_HOST_REFERENCE
+    return ROOT / path, digest
 
 def verify_source():
     raw = _resolve_resource_path(PROOF_PATH).read_bytes()
@@ -49,18 +64,20 @@ def _fragments(proof):
         for fragment in body['fragments']:
             yield (int(fragment['start_va'], 16) - 5368709120, bytes.fromhex(''.join((ins['bytes'] for ins in fragment['instructions']))))
 
-def verify_live_image(read, host_base, host_image_bytes):
+def verify_live_image(read, host_base, host_image_bytes, *, execution_image=None):
     """Pin the on-disk host identity and all six actual export bodies."""
     proof = verify_source()
     _positive_int(host_base, 'actual host image base')
-    if type(host_image_bytes) is not bytes or hashlib.sha256(host_image_bytes).hexdigest() != HOST_SHA256:
-        raise ValueError('Actual executable must be the pinned Host41 image')
+    _, host_sha256 = host_reference(execution_image)
+    if type(host_image_bytes) is not bytes or hashlib.sha256(host_image_bytes).hexdigest() != host_sha256:
+        raise ValueError('Actual executable does not match the selected Base job image')
     for rva, expected in _fragments(proof):
         if _read_exact(read, host_base + rva, len(expected)) != expected:
             raise ValueError('Live Host41 job method bytes differ from pinned image')
     return proof
 
-def capture_snapshot(read, host_base, host_image_bytes, current_thread_id, *, profile, exclusive_owner_entry, max_items=4096, max_groups=4096):
+def capture_snapshot(read, host_base, host_image_bytes, current_thread_id, *, profile,
+                     exclusive_owner_entry, max_items=4096, max_groups=4096, execution_image=None):
     """Capture real counts/items for all64 lists; pending is visible, not drained.
 
     Call require_quiescent on the result before Save. ``exclusive_owner_entry``
@@ -72,13 +89,15 @@ def capture_snapshot(read, host_base, host_image_bytes, current_thread_id, *, pr
     _positive_int(current_thread_id, 'actual Win32 thread ID', 4294967295)
     _positive_int(max_items, 'max_items', 65536)
     _positive_int(max_groups, 'max_groups', 65536)
-    verify_live_image(read, host_base, host_image_bytes)
+    verify_live_image(read, host_base, host_image_bytes, execution_image=execution_image)
     from civ6_host.runtime.job_registry_snapshot import capture_registry
     result = capture_registry(read, {name: host_base + rva for name, rva in RVA.items()}, current_thread_id, max_items=max_items, max_groups=max_groups)
-    return dict(result, schema='civ6rl.native_checkpoint_host41_job_snapshot.v1', source_proof_sha256=PROOF_SHA256, host_sha256=HOST_SHA256, profile=profile)
+    return dict(result, schema='civ6rl.native_checkpoint_host41_job_snapshot.v1',
+                source_proof_sha256=PROOF_SHA256, host_sha256=host_reference(execution_image)[1], profile=profile)
 
-def require_quiescent(snapshot):
-    if type(snapshot) is not dict or snapshot.get('schema') != 'civ6rl.native_checkpoint_host41_job_snapshot.v1' or snapshot.get('source_proof_sha256') != PROOF_SHA256 or (snapshot.get('host_sha256') != HOST_SHA256) or (snapshot.get('profile') != PROFILE) or (snapshot.get('stable_read') is not True) or (type(snapshot.get('spawn_active')) is not int) or (snapshot['spawn_active'] != 0) or (type(snapshot.get('pending_items')) is not int) or (snapshot['pending_items'] != 0) or (len(snapshot.get('slots', ())) != 64):
+def require_quiescent(snapshot, *, execution_image=None):
+    _, host_sha256 = host_reference(execution_image)
+    if type(snapshot) is not dict or snapshot.get('schema') != 'civ6rl.native_checkpoint_host41_job_snapshot.v1' or snapshot.get('source_proof_sha256') != PROOF_SHA256 or (snapshot.get('host_sha256') != host_sha256) or (snapshot.get('profile') != PROFILE) or (snapshot.get('stable_read') is not True) or (type(snapshot.get('spawn_active')) is not int) or (snapshot['spawn_active'] != 0) or (type(snapshot.get('pending_items')) is not int) or (snapshot['pending_items'] != 0) or (len(snapshot.get('slots', ())) != 64):
         raise ValueError('No verified quiescent Host41 job snapshot')
     for index, slot in enumerate(snapshot['slots'], 1):
         if slot.get('handle') != index or type(slot.get('count')) is not int or slot['count'] != 0 or (slot.get('items') != []):

@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import struct
 
+from .source_verification import file_sha256, verify_pinned_json_bytes
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
@@ -70,7 +71,7 @@ def _require_instructions(proof, expected):
 
 def _file(reference):
     path=resolve_path(resource_root()/reference['path']).resolve()
-    if hashlib.sha256(path.read_bytes()).hexdigest()!=reference['sha256']:
+    if file_sha256(path)!=reference['sha256']:
         raise ValueError('XP2 unit-order source file changed: '+str(path))
     return path
 
@@ -138,7 +139,8 @@ def source():
             or ui['sources']['base']!=proof['official_ui']):
         raise ValueError('XP2 UnitPanel parameterless delegation differs')
     for row in ui['sources'].values():_file(row)
-    for ref in (*proof['references'],*transport['references']):_source((ref['path'],ref['sha256']))
+    for ref in (*proof['references'],*transport['references']):
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     return proof
 
 
@@ -168,7 +170,7 @@ def source_dependencies(*, execution_image=None):
     for ref in refs:
         path=Path(resolve_path(resource_root()/ref['path'])).resolve()
         if execution_image is None or ref != proof['image']:
-            if hashlib.sha256(path.read_bytes()).hexdigest()!=ref['sha256']:
+            if file_sha256(path)!=ref['sha256']:
                 raise ValueError('XP2 unit-order source dependency changed: '+str(path))
         pins[str(path)]=ref['sha256']
     from .runtime_source_dependencies import materialize_runtime_source_pins

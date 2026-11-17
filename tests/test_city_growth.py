@@ -6,11 +6,12 @@ from civ6_host.contracts import network_turn
 from civ6_host.runtime import city_growth as growth
 
 
-def fixture(**changes):
+def fixture(*, expansion_panel=None, **changes):
     from lupa.lua51 import LuaRuntime
     state=dict(food=4.12345,threshold=20,surplus=2.34,growing=7,starving=-1,occupied=False,
                housing=5,amenities=0,needed=1,happiness=3,happy_modifier=0,other_modifier=0,
-               housing_modifier=1,occupation_modifier=1,food_yield=6.375,population=2)
+               housing_modifier=1,occupation_modifier=1,food_yield=6.375,population=2,
+               loyalty_modifier=1)
     state.update(changes)
     lua=LuaRuntime(encoding=None)
     lua.globals().s=lua.table_from({k.encode():v for k,v in state.items()})
@@ -24,10 +25,14 @@ local g={GetFood=function() return s.food end,GetGrowthThreshold=function() retu
  GetHousing=function() return s.housing end,GetAmenities=function() return s.amenities end,GetAmenitiesNeeded=function() return s.needed end,
  GetHappiness=function() return s.happiness end,GetHappinessGrowthModifier=function() return s.happy_modifier end,
  GetOtherGrowthModifier=function() return s.other_modifier end,GetHousingGrowthModifier=function() return s.housing_modifier end,
- GetOccupationGrowthModifier=function() return s.occupation_modifier end}
+ GetOccupationGrowthModifier=function() return s.occupation_modifier end,
+ GetLoyaltyGrowthModifier=function() return s.loyalty_modifier end}
+local identity={GetLoyaltyLevel=function() return 2 end}
 local city={GetID=function() return 11 end,GetOwner=function() return 0 end,GetGrowth=function() return g end,
- GetPopulation=function() return s.population end,IsOccupied=function() return s.occupied end,GetYield=function() return s.food_yield end}
+ GetPopulation=function() return s.population end,IsOccupied=function() return s.occupied end,
+ GetYield=function() return s.food_yield end,GetCulturalIdentity=function() return identity end}
 Players={[0]={GetCities=function() return {Members=function() return ipairs({city}) end} end}}
+GameInfo={LoyaltyLevels={[2]={Name='LOC_CULTURAL_IDENTITY_LOYALTY_WAVERING'}}}
 YieldTypes={FOOD=0};lookup_calls={}
 Locale={Lookup=function(key,...)
  local args={...};lookup_calls[#lookup_calls+1]={key=key,args=args}
@@ -36,8 +41,8 @@ Locale={Lookup=function(key,...)
 end}
 '''
     lua.execute(setup)
-    raw=lua.execute(growth.source(0,7))
-    public,private=growth.parse(raw,0,7)
+    raw=lua.execute(growth.source(0,7,expansion_panel=expansion_panel))
+    public,private=growth.parse(raw,0,7,expansion=expansion_panel is not None)
     return public,private,raw,lua
 
 

@@ -1624,6 +1624,9 @@ def main():
     prior_map_path=target/'source-map.json'
     prior_map=json.loads(prior_map_path.read_text(encoding='utf-8')) if prior_map_path.is_file() else {}
     maintained_overlays = {
+        'civ6rl.native_diplomacy_choices': (
+            'host-maintained XP2 surprise-war close verification and secondary saved-seat context',
+            '940e9ae5a9adb2d1da0f5730547027f4b012629ba1599288c7ee7c78d2e33577'),
         'civ6rl.native_official_bundle': (
             'host-maintained exact stock XP2 response writer source archive validation',
             '7eb90487b13b23e2bdc2def6a8862c985e083a3d5d27ea1afc150c01864294bd'),
@@ -1657,6 +1660,9 @@ def main():
         'civ6rl.native_saved_trade': (
             'host-maintained opt-in World A BBG trade quote helper; stock legality and default helper preserved',
             'c4ff4f42cd482edcc581853378a96b708b2acfdde08398f94707c9b1a3a4bbeb'),
+        'civ6rl.native_player_operation_request': (
+            'host-maintained sealed XP2 direct requests including archaeology',
+            '9183423d0da7e95c409591fc9eb7c66ba5d3553909f52950e88f00dd336ba84c'),
         'civ6rl.native_deferred_empty_profile': (
             'host-maintained current XP2 FeatureAddedToMap empty receiver row through the shared FIFO',
             'f1709d7135f7e78e29d56d923918f515f71e233d9e6c8e23f83a06982db684b9'),

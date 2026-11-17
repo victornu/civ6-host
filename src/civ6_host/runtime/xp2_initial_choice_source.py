@@ -9,6 +9,7 @@ from types import MappingProxyType
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_verification import _identity as _file_identity, file_sha256
 
 SOURCE = ('work/host-extensions/xp2-initial-choices/source-profile-v2.json',
  'dd224972c1d91878fc14ce79bf7ebb31ecb78c572a4b43304da151eabd97060a')
@@ -194,6 +195,7 @@ SLOTS = ((10551784, 536, 5838096),
  (11270424, 56, 10110048))
 
 _VALIDATED_BODY_PROFILE = None
+_RETAINED_SOURCE = None
 
 
 def _validate_complete_bodies(p):
@@ -227,9 +229,18 @@ def _validate_complete_bodies(p):
 
 
 def source(family):
+    global _RETAINED_SOURCE
     if type(family) is not str or family not in CALLBACKS:
         raise ValueError('Unknown XP2 initial-choice source family')
-    p=_source(SOURCE)
+    path = resolve_path(resource_root() / SOURCE[0]).resolve(strict=True)
+    before = _file_identity(path)
+    identity = (path, SOURCE[1], before)
+    # The complete-body validator already holds this immutable proof. Keep
+    # using the same object after the general cache evicts it.
+    if _RETAINED_SOURCE is not None and _RETAINED_SOURCE[0] == identity:
+        p = _RETAINED_SOURCE[1]
+    else:
+        p = _source(SOURCE)
     if (p['schema']!='civ6-host.xp2-initial-choices.static.v2'
             or p['image']['sha256']!=XP2_CORE_SHA256
             or any(p[k] is not False for k in ('native_execution','process_memory_read','runtime_modified'))
@@ -252,6 +263,10 @@ def source(family):
                     or b['lua_callback_abi']!='int __cdecl(LuaState*) / Windows x64'
                     or hex(rva) not in p['functions']):raise ValueError('XP2 named registration changed')
     _validate_complete_bodies(p)
+    if _file_identity(path) != before:
+        raise ValueError('XP2 initial-choice source changed during validation')
+    if type(p) is MappingProxyType:
+        _RETAINED_SOURCE = identity, p
     return p
 
 
@@ -266,11 +281,21 @@ def source_dependencies(family="status", *, execution_image=None):
         pins.update(transport_dependencies(execution_image=execution_image))
     for ref in (dict(path=SOURCE[0],sha256=SOURCE[1]),*p['references'],*p['extractors']):
         path=resolve_path(resource_root()/ref['path']).resolve(strict=True)
-        actual=hashlib.sha256(path.read_bytes()).hexdigest();name=str(path)
+        actual=file_sha256(path);name=str(path)
         if actual!=ref['sha256'] or name in pins and pins[name]!=actual:
             raise ValueError('XP2 initial-choice dependency changed: '+name)
         pins[name]=actual
     return pins
+
+
+def referenced_source(reference):
+    """Join an exact proof reference to the same validated initial-choice object."""
+    root = resource_root()
+    selected = resolve_path(root / reference['path']).resolve(strict=True)
+    expected = resolve_path(root / SOURCE[0]).resolve(strict=True)
+    if selected != expected or reference['sha256'] != SOURCE[1]:
+        raise ValueError('XP2 initial-choice reference differs')
+    return source('status')
 
 
 def verify_live(base,read,family,*,execution_image=None):

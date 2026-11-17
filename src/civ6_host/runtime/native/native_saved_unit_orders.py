@@ -1,7 +1,7 @@
 """Official parameterless rest/wake routes; all rules stay in GameCore."""
 from civ6_host.runtime.configuration_profiles import BASE_CORE_SHA256 as _UNIT_ORDERS_BASE_CORE_SHA256
 from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
-from civ6_host.contracts.capability_unit_orders import SKIP_TURN
+from civ6_host.contracts.capability_unit_orders import SKIP_TURN, EXTENDED_OPERATIONS, extension_metadata
 from civ6_host.runtime.provenance import historical_source_file as _historical_source_file, historical_module_file as _historical_module_file, worker_path as _worker_path, pin_key as _pin_key, installed_source_pins as _installed_source_pins
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
 from pathlib import Path
@@ -11,7 +11,7 @@ from civ6_host.runtime.native.native_player_observation import observe_player
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_saved_unit_orders.py')))).resolve().parents[1]
 PROOF = ROOT / 'work/unit-orders958/source.json'
 PROOF_SHA = '8ba82b2b22f594348e10fc3708e9156eb626d317f311f8367ca6031227e0b04f'
-NAMES = {'command': ('UNITCOMMAND_WAKE',), 'operation': ('UNITOPERATION_SLEEP', 'UNITOPERATION_FORTIFY', 'UNITOPERATION_HEAL', 'UNITOPERATION_RELIGIOUS_HEAL', SKIP_TURN)}
+NAMES = {'command': ('UNITCOMMAND_WAKE',), 'operation': ('UNITOPERATION_SLEEP', 'UNITOPERATION_FORTIFY', 'UNITOPERATION_HEAL', 'UNITOPERATION_RELIGIOUS_HEAL', SKIP_TURN, *EXTENDED_OPERATIONS)}
 CANCEL_NAME = 'UNITCOMMAND_CANCEL'
 CANCEL_PROOF = ROOT / 'work/unit-order-cancel/source.json'
 CANCEL_PROOF_SHA = '31014e4b1e4342b057c6a1f96aa93a1c98023bc85e32f579750b2af0d174f497'
@@ -72,7 +72,7 @@ def wire(a):
     return '|'.join((str(a[k]) for k in ('unit_id', 'route', 'item_type', 'hash')))
 LUA = "\nlocal function integer(v,label,lo,hi) assert(type(v)=='number' and v%1==0 and v>=lo and v<=hi,'invalid order '..label);return v end\nlocal function bool(v,label) assert(type(v)=='boolean','invalid order '..label);return v end\nlocal function n(v) return string.format('%.0f',v) end\nlocal function bits(v) integer(v,'hash',-2147483648,2147483647);return v<0 and v+4294967296 or v end\nlocal function ready()\n assert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid and Game.GetCurrentGameTurn()==turn,'stale order perspective')\n assert(Game.IsAllowStrategicCommands(pid)==true,'strategic orders unavailable')\n local p=Players[pid];assert(p and p:IsAlive()==true and p:IsTurnActive()==true and p:IsTurnActiveComplete()==true,'order player not ready');return p\nend\nlocal player=ready()\nlocal function snapshot()\n local units,offers,seen={},{},{}\n for _,u in player:GetUnits():Members() do\n  assert(#units<4096 and u:GetOwner()==pid,'unbounded or foreign own unit')\n  local id=integer(u:GetID(),'unit',0,4294967295);assert(not seen[id],'duplicate order unit');seen[id]=true\n  local activity=integer(UnitManager.GetActivityType(u),'activity',-2147483648,2147483647)\n  local fortify=integer(u:GetFortifyTurns(),'fortify turns',0,2147483647)\n  local readyToSelect=bool(u:IsReadyToSelect(),'readiness')\n  units[#units+1]={id=id,wire=table.concat({n(id),n(activity),n(fortify),readyToSelect and '1' or '0'},'|')}\n  local moves=u:GetMovesRemaining();assert(type(moves)=='number' and moves==moves and moves>=0 and moves<=2147483648,'order movement')\n  local specs={{'command','UNITCOMMAND_WAKE'},{'operation','UNITOPERATION_SLEEP'},{'operation','UNITOPERATION_FORTIFY'},{'operation','UNITOPERATION_HEAL'},{'operation','UNITOPERATION_RELIGIOUS_HEAL'}}\n  if include_cancel then\n   local row=GameInfo.Units[u:GetType()];assert(row and type(row.Spy)=='boolean','missing cancel unit type')\n   -- Espionage has a different official dialog, not this parameterless route.\n   if not row.Spy then specs[#specs+1]={'command','UNITCOMMAND_CANCEL'} end\n  end\n  for _,spec in ipairs(specs) do\n   local route,name=spec[1],spec[2]\n   local row=(route=='command' and GameInfo.UnitCommands or GameInfo.UnitOperations)[name]\n   if row and row.VisibleInUI and (route=='command' or moves>0) then\n    assert(row.InterfaceMode==nil or DB.MakeHash(row.InterfaceMode)==InterfaceModeTypes.NONE,'unit order requires interface mode')\n    local hash=bits(row.Hash);local visible,legal\n    if route=='command' then\n     visible=bool(UnitManager.CanStartCommand(u,row.Hash,true),'command visibility')\n     if visible then legal=bool(UnitManager.CanStartCommand(u,row.Hash,false,true),'command legality') end\n    else\n     visible=bool(UnitManager.CanStartOperation(u,row.Hash,nil,true),'operation visibility')\n     if visible then legal=bool(UnitManager.CanStartOperation(u,row.Hash,nil,false,OperationResultsTypes.NO_TARGETS),'operation legality') end\n    end\n    if visible then\n     assert(#offers<4096,'order offer bound')\n     offers[#offers+1]={unit=u,route=route,hash=row.Hash,legal=legal,wire=table.concat({n(id),route,name,n(hash)},'|')}\n    end\n   end\n  end\n end\n table.sort(units,function(a,b) return a.id<b.id end)\n table.sort(offers,function(a,b) return a.wire<b.wire end)\n ready();return units,offers\nend\n"
 
-def preamble(pid, turn, *, include_cancel=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
+def preamble(pid, turn, *, include_cancel=False, include_extended=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
     if type(include_cancel) is not bool:
         raise ValueError('Exact unit cancel option required')
     uint(pid, 'player', 63)
@@ -81,19 +81,28 @@ def preamble(pid, turn, *, include_cancel=False, core_sha256=_UNIT_ORDERS_BASE_C
     if include_cancel:
         verify_cancel_source(core_sha256=core_sha256)
     source = LUA
+    if type(include_extended) is not bool or include_extended and core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Additional unit orders require explicit Gathering Storm admission')
+    if include_extended:
+        from civ6_host.runtime.xp2_extra_unit_orders import verify_source as extra_source
+        extra_source()
+        marker = '  if include_cancel then'
+        assert source.count(marker) == 1
+        source = source.replace(marker, ''.join(
+            "  specs[#specs+1]={'operation','"+name+"'}\n" for name in EXTENDED_OPERATIONS)+marker)
     if core_sha256 == XP2_CORE_SHA256:
         marker = '  if include_cancel then'
         assert source.count(marker) == 1
         source = source.replace(marker, f"  specs[#specs+1]={{'operation','{SKIP_TURN}'}}\n" + marker)
     return f'local pid,turn={pid},{turn}\nlocal include_cancel={str(include_cancel).lower()}\n'.encode() + source.encode()
 
-def catalog_source(pid, turn, *, include_cancel=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
-    return preamble(pid, turn, include_cancel=include_cancel, core_sha256=core_sha256) + b"local units,offers=snapshot();local out={'orders-v1|'..n(pid)..'|'..n(turn)}\nfor _,u in ipairs(units) do out[#out+1]='U|'..u.wire end\nfor _,a in ipairs(offers) do out[#out+1]='A|'..a.wire..'|'..(a.legal and '1' or '0') end\nreturn table.concat(out,'\\n')"
+def catalog_source(pid, turn, *, include_cancel=False, include_extended=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
+    return preamble(pid, turn, include_cancel=include_cancel, include_extended=include_extended, core_sha256=core_sha256) + b"local units,offers=snapshot();local out={'orders-v1|'..n(pid)..'|'..n(turn)}\nfor _,u in ipairs(units) do out[#out+1]='U|'..u.wire end\nfor _,a in ipairs(offers) do out[#out+1]='A|'..a.wire..'|'..(a.legal and '1' or '0') end\nreturn table.concat(out,'\\n')"
 
 def validate_catalog(v, pid, turn):
     uint(pid, 'player', 63)
     uint(turn, 'turn', 2147483647)
-    if type(v) is not dict or set(v) != {'player_id', 'turn', 'units', 'offers'} or type(v['player_id']) is not int or (v['player_id'] != pid) or (type(v['turn']) is not int) or (v['turn'] != turn):
+    if type(v) is not dict or set(v) not in ({'player_id', 'turn', 'units', 'offers'}, {'player_id', 'turn', 'units', 'offers', 'extensions'}) or type(v['player_id']) is not int or (v['player_id'] != pid) or (type(v['turn']) is not int) or (v['turn'] != turn):
         raise ValueError('Foreign unit orders')
     if any((type(v[k]) is not list or len(v[k]) > 4096 for k in ('units', 'offers'))):
         raise ValueError('Unbounded unit orders')
@@ -116,15 +125,20 @@ def validate_catalog(v, pid, turn):
         if a['unit_id'] not in ids or key in seen:
             raise ValueError('Foreign or duplicate order offer')
         seen.add(key)
-    return v
+    from civ6_host.contracts.capability_unit_orders import validate_catalog as public_catalog
+    return public_catalog(v, pid, turn)
 
-def parse_catalog(raw, pid, turn):
+def parse_catalog(raw, pid, turn, *, include_extended=False):
+    if type(include_extended) is not bool:
+        raise ValueError('Explicit extra unit-order parser option required')
     if type(raw) is not bytes or len(raw) > LIMIT:
         raise ValueError('Unbounded order wire')
     lines = raw.decode('ascii').splitlines()
     if not lines or lines[0] != f'orders-v1|{pid}|{turn}' or len(lines) > 8193:
         raise ValueError('Foreign order wire')
     out = dict(player_id=pid, turn=turn, units=[], offers=[])
+    if include_extended:
+        out['extensions'] = extension_metadata()
     for line in lines[1:]:
         v = line.split('|')
         if v[0] == 'U' and len(v) == 5 and (v[4] in ('0', '1')):
@@ -143,18 +157,18 @@ def parse_catalog(raw, pid, turn):
             raise ValueError('Malformed unit order wire')
     return validate_catalog(out, pid, turn)
 
-def catalog(prefix, turn, *, player_id=0, include_cancel=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
-    raw = prefix.runtime.evaluate_text(prefix.ui_child, catalog_source(player_id, turn, include_cancel=include_cancel, core_sha256=core_sha256), b'@explicit_unit_orders', capacity=LIMIT + 1)
-    return parse_catalog(raw, player_id, turn)
+def catalog(prefix, turn, *, player_id=0, include_cancel=False, include_extended=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
+    raw = prefix.runtime.evaluate_text(prefix.ui_child, catalog_source(player_id, turn, include_cancel=include_cancel, include_extended=include_extended, core_sha256=core_sha256), b'@explicit_unit_orders', capacity=LIMIT + 1)
+    return parse_catalog(raw, player_id, turn, include_extended=include_extended)
 
 def actions(v):
     return [r['action'] for r in v['offers'] if r['legal']]
 
-def request_source(a, pid, turn, *, include_cancel=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
+def request_source(a, pid, turn, *, include_cancel=False, include_extended=False, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256):
     w = wire(a)
-    return preamble(pid, turn, include_cancel=include_cancel, core_sha256=core_sha256) + f"\nlocal _,offers=snapshot();local chosen=nil\nfor _,a in ipairs(offers) do if a.wire=='{w}' then assert(not chosen,'duplicate selected order');chosen=a end end\nassert(chosen and chosen.legal,'order is stale or unavailable');ready()\nif chosen.route=='command' then UnitManager.RequestCommand(chosen.unit,chosen.hash)\nelse UnitManager.RequestOperation(chosen.unit,chosen.hash) end\nreturn 'submitted'\n".encode()
+    return preamble(pid, turn, include_cancel=include_cancel, include_extended=include_extended, core_sha256=core_sha256) + f"\nlocal _,offers=snapshot();local chosen=nil\nfor _,a in ipairs(offers) do if a.wire=='{w}' then assert(not chosen,'duplicate selected order');chosen=a end end\nassert(chosen and chosen.legal,'order is stale or unavailable');ready()\nif chosen.route=='command' then UnitManager.RequestCommand(chosen.unit,chosen.hash)\nelse UnitManager.RequestOperation(chosen.unit,chosen.hash) end\nreturn 'submitted'\n".encode()
 
-def apply(owner, prefix, action, turn, before, *, player_id=0, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256, include_cancel=None):
+def apply(owner, prefix, action, turn, before, *, player_id=0, core_sha256=_UNIT_ORDERS_BASE_CORE_SHA256, include_cancel=None, include_extended=False):
     from civ6_host.runtime.xp1_unit_orders_profile import selected_proof
     if include_cancel is None:
         options = dict(include_cancel=True) if _action_feature_enabled(owner, 'unit_order_cancel') is True else {}
@@ -162,6 +176,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0, core_sha256=_UNIT
         if type(include_cancel) is not bool:
             raise ValueError('Exact unit cancel option required')
         options = dict(include_cancel=include_cancel)
+    if include_extended:
+        options['include_extended'] = True
     validate_action(action)
     start = catalog(prefix, turn, player_id=player_id, **options, core_sha256=core_sha256)
     if start != getattr(owner, 'explicit_unit_orders', None) or action not in actions(start):

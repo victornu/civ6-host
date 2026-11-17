@@ -3,7 +3,7 @@
 The extracted adapter retains the results of its existing availability calls.
 No extra availability query, rule formula, or privileged state is introduced.
 """
-from civ6_host.contracts.unit_work_info import SCHEMA, MAX_BYTES, validate
+from civ6_host.contracts.unit_work_info import SCHEMA, VISIBLE_WORK_SCHEMA, MAX_BYTES, validate
 
 _XP2_PANEL_SOURCE = (
     'evidence/host-xp2-adjacent-improvement-ui-route.json',
@@ -12,12 +12,13 @@ _XP2_PANEL_SOURCE = (
 
 
 def xp2_source_dependencies(*, execution_image=None):
-    """Pin the Base panel and the two installed XP2 replacements that include it."""
+    """Pin the panel and world-input script used by the selected work route."""
     from pathlib import Path
     from .configuration_profiles import XP2_CORE_SHA256, _source
     from .native.native_saved_unit_work import ROOT, SOURCE_SHA
     from .native.native_source_cache import load_pinned_json
     from .resource_resolution import resolve_path
+    from .xp2_unit_attack_source import current_lifecycle_image
 
     ui_path = 'Base/Assets/UI/Panels/UnitPanel.lua'
     source_path = resolve_path(ROOT / 'work/unit-work932/source.json')
@@ -30,6 +31,8 @@ def xp2_source_dependencies(*, execution_image=None):
     game_root = resolve_path(Path(base_panel['path'])).parents[4]
     files = (ui_path, 'DLC/Expansion2/UI/Replacements/UnitPanel_Expansion1.lua',
              'DLC/Expansion2/UI/Replacements/UnitPanel_Expansion2.lua')
+    if current_lifecycle_image(execution_image):
+        files += ('DLC/Expansion2/UI/Replacements/WorldInput_Expansion2.lua',)
     pins = {
         str(resolve_path(ROOT / _XP2_PANEL_SOURCE[0])): _XP2_PANEL_SOURCE[1],
         **{str(resolve_path(game_root / path)): selected['sources'][path] for path in files},
@@ -39,7 +42,7 @@ def xp2_source_dependencies(*, execution_image=None):
 
 
 LUA = r'''
-local out={'work-info-v1|'..n(pid)..'|'..n(turn)}
+local out={(adjacentEnabled and 'work-info-v2|' or 'work-info-v1|')..n(pid)..'|'..n(turn)}
 local function hex(s)
  assert(type(s)=='string' and #s<=4096 and not string.find(s,'\0',1,true),'invalid UnitPanel text')
  return (string.gsub(s,'.',function(c) return string.format('%02x',string.byte(c)) end))
@@ -84,24 +87,42 @@ for _,u in ipairs(ownUnits()) do
   bool(p:IsImprovementPillaged(),'improvement pillaged') and '1' or '0',
   n(integer(p:GetRouteType(),'route',-1,2147483647)),bool(p:IsRoutePillaged(),'route pillaged') and '1' or '0'},'|')
 end
+if adjacentEnabled then
+ local count=integer(Map.GetPlotCount(),'map size',1,16384)
+ for id=0,count-1 do
+  local p=Map.GetPlotByIndex(id);assert(p,'missing visible work plot')
+  if bool(visibility:IsVisible(p:GetX(),p:GetY()),'map work visibility') then
+   assert(visibility:IsRevealed(id)==true and p:GetIndex()==id,'visible work plot identity')
+   local improvement=integer(p:GetImprovementType(),'improvement',-1,2147483647)
+   local route=integer(p:GetRouteType(),'route',-1,2147483647)
+   local pillaged=bool(p:IsImprovementPillaged(),'improvement pillaged')
+   local routePillaged=bool(p:IsRoutePillaged(),'route pillaged')
+   if improvement~=-1 or route~=-1 or pillaged or routePillaged then
+    out[#out+1]=table.concat({'V',n(id),n(improvement),pillaged and '1' or '0',
+     n(route),routePillaged and '1' or '0'},'|')
+   end
+  end
+ end
+end
 ready();return table.concat(out,'\n')
 '''
 
 
-def source(player_id, turn, processing=True):
+def source(player_id, turn, processing=True, *, adjacent=False):
     if type(processing) is not bool:raise ValueError('Invalid processing guard')
     from .native.native_saved_unit_work import preamble
-    return preamble(player_id,turn)+f'\nlocal processing={str(processing).lower()}\n'.encode()+LUA.encode()
+    return preamble(player_id,turn,adjacent=adjacent)+f'\nlocal processing={str(processing).lower()}\n'.encode()+LUA.encode()
 
 
-def parse(raw, player_id, turn, processing=True):
+def parse(raw, player_id, turn, processing=True, *, adjacent=False):
     if type(raw) is not bytes or len(raw)>MAX_BYTES:
         raise ValueError('Unbounded UnitPanel information frame')
     lines=raw.decode('ascii').splitlines()
-    if not lines or lines[0]!=f'work-info-v1|{player_id}|{turn}':
+    version = 2 if adjacent else 1
+    if not lines or lines[0]!=f'work-info-v{version}|{player_id}|{turn}':
         raise ValueError('Foreign UnitPanel information frame')
     from .native.native_saved_unit_work import parse_catalog
-    wires=[];info=[];targets=[]
+    wires=[];info=[];targets=[];visible=[]
     def integer(token,lo=0,hi=2**32-1):
         v=int(token)
         if str(v)!=token or not lo<=v<=hi:raise ValueError('Invalid UnitPanel integer')
@@ -121,6 +142,11 @@ def parse(raw, player_id, turn, processing=True):
                 raise ValueError('Invalid UnitPanel targets')
             targets.append(dict(unit_id=integer(v[1]),plot_id=integer(v[2]),improvement=integer(v[3],-1,2**31-1),
                 improvement_pillaged=v[4]=='1',route=integer(v[5],-1,2**31-1),route_pillaged=v[6]=='1'))
+        elif adjacent and tag=='V' and len(v)==6:
+            if len(visible)>=16384 or v[3] not in ('0','1') or v[5] not in ('0','1'):
+                raise ValueError('Invalid visible map work row')
+            visible.append(dict(plot_id=integer(v[1],0,16383),improvement=integer(v[2],-1,2**31-1),
+                improvement_pillaged=v[3]=='1',route=integer(v[4],-1,2**31-1),route_pillaged=v[5]=='1'))
         elif tag in ('A','F','D','R') and len(v)==(4 if tag=='F' else 3):
             index=integer(v[1],1,4096)
             if index!=len(info):raise ValueError('UnitPanel detail not bound to current offer')
@@ -136,16 +162,19 @@ def parse(raw, player_id, turn, processing=True):
                 if len(dest)>=64:raise ValueError('Unbounded UnitPanel details')
                 dest.append(text(v[2]))
         else:raise ValueError('Unknown UnitPanel information record')
-    catalog=parse_catalog(('\n'.join([f'work-v1|{player_id}|{turn}',*wires])+'\n').encode(),player_id,turn)
+    catalog=parse_catalog(('\n'.join([f'work-v1|{player_id}|{turn}',*wires])+'\n').encode(),
+                          player_id,turn,adjacent=adjacent)
     if not processing:
         if wires:raise ValueError('Closed guard returned UnitPanel offers')
         catalog['enabled']=False
     for row,offer in zip(info,catalog['offers']):row.update(action=offer['action'],legal=offer['legal'])
     result=dict(schema=SCHEMA,player_id=player_id,turn=turn,offers=info,targets=targets)
-    return catalog,validate(result,player_id,turn,work_catalog=catalog)
+    if adjacent:
+        result.update(schema=VISIBLE_WORK_SCHEMA,visible_plots_with_work=visible)
+    return catalog,validate(result,player_id,turn,work_catalog=catalog,visible_work=adjacent)
 
 
-def read_catalog(prefix, turn, *, player_id, processing):
-    raw=prefix.runtime.evaluate_text(prefix.ui_child,source(player_id,turn,processing),
+def read_catalog(prefix, turn, *, player_id, processing, adjacent=False):
+    raw=prefix.runtime.evaluate_text(prefix.ui_child,source(player_id,turn,processing,adjacent=adjacent),
         b'@public_unit_panel_work_information',capacity=MAX_BYTES+1)
-    return parse(raw,player_id,turn,processing)
+    return parse(raw,player_id,turn,processing,adjacent=adjacent)

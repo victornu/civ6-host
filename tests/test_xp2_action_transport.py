@@ -16,6 +16,7 @@ from civ6_host.runtime import action_transport_profiles as profiles
 from civ6_host.runtime import unit_operation_ui_profile as units
 from civ6_host.runtime import xp1_log_event_profile as logs
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+from civ6_host.runtime.execution_images import _PROFILE as INSTALLED_XP2
 from civ6_host.runtime.paths import resource_root
 from civ6_host.runtime.saved_load_services import SavedLoadServices
 from civ6_host.runtime.xp1_action_transport import SavedActionTransport
@@ -131,7 +132,7 @@ class Fixture:
         b=OfficialLoadBackend.__new__(OfficialLoadBackend);b.thread=threading.get_ident()
         b.runtime=NS(thread=threading.get_ident,read=m.read);b.stage='prepared';b.prefix=None
         b.destroyed=b.poisoned=False;b.host=h;b.context=m.context;b.fixture=self.directory/'fixture.json'
-        b.core=NS(_name=m.proof['image']['path'],_handle=m.base)
+        b.core=NS(_name=INSTALLED_XP2.path,_handle=m.base,_civ6_host_execution_image=INSTALLED_XP2)
         b.load_abi=b.configuration_abi=NS(core_sha256=XP2_CORE_SHA256);b.emit=h.emit
         s=SavedLoadServices.__new__(SavedLoadServices)
         s.backend=b;s.host=h;s.core=b.core;s.context=b.context;s.core_sha256=XP2_CORE_SHA256;s.emit=h.emit
@@ -156,6 +157,26 @@ class Fixture:
 
 
 class XP2TransportTests(unittest.TestCase):
+    def test_current_dependency_hashes_do_not_allocate_whole_files(self):
+        from civ6_host.runtime.execution_images import _PROFILE
+
+        root = resource_root()
+        reviewed = source.source(root)
+        expected = {(root / row['path']).resolve(): row['sha256']
+                    for row in reviewed['references'] if row['bytes'] > 2 * 1024**2}
+        expected[Path(_PROFILE.path).resolve()] = _PROFILE.image_sha256
+        self.assertGreaterEqual(len(expected), 3)
+        original = Path.read_bytes
+
+        def require_stream(path):
+            if path.resolve() in expected:
+                self.fail(f'whole-file read for digest-only dependency {path.name}')
+            return original(path)
+
+        with patch.object(Path, 'read_bytes', require_stream):
+            pins = source.source_dependencies(root, execution_image=_PROFILE)
+        self.assertEqual({path: pins[str(path)] for path in expected}, expected)
+
     def fixture(self):
         f=Fixture();self.addCleanup(f.close);return f
 
@@ -172,19 +193,22 @@ class XP2TransportTests(unittest.TestCase):
                 m.bytes[at]^=1
         at=m.base+0xA101E8+0x230;m.bytes[at]^=1
         with self.assertRaisesRegex(ValueError,'slot'):source.verify_live(m.base,m.read,family='transport')
-        pins=source.source_dependencies()
+        options=dict(execution_image=INSTALLED_XP2)
+        pins=source.source_dependencies(**options)
         for path,digest in pins.items():self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(),digest)
-        self.assertEqual(profiles.source_dependencies(core_sha256=XP2_CORE_SHA256),pins)
-        self.assertEqual(units.source_dependencies(core_sha256=XP2_CORE_SHA256),pins)
-        self.assertEqual(logs.source_dependencies(core_sha256=XP2_CORE_SHA256),pins)
+        self.assertEqual(profiles.source_dependencies(core_sha256=XP2_CORE_SHA256,**options),pins)
+        self.assertEqual(units.source_dependencies(core_sha256=XP2_CORE_SHA256,**options),pins)
+        self.assertEqual(logs.source_dependencies(core_sha256=XP2_CORE_SHA256,**options),pins)
 
     def test_selected_profiles_and_wrong_engine_refuse(self):
-        m=Memory();core=NS(_name=m.proof['image']['path'],_handle=m.base)
+        m=Memory();core=NS(_name=INSTALLED_XP2.path,_handle=m.base,
+                           _civ6_host_execution_image=INSTALLED_XP2)
         self.assertIs(profiles.transport_profile(XP2_CORE_SHA256,core,m.context,m.read),source.ABI)
         self.assertEqual(units.verify_live(m.base,m.read,core_sha256=XP2_CORE_SHA256)['callbacks'],source.CALLBACKS)
         self.assertEqual(logs.verify_live(m.base,m.read,core_sha256=XP2_CORE_SHA256)['source_sha256'],source.SOURCE[1])
         for fn in (profiles.source_dependencies,units.source_dependencies,logs.source_dependencies):
             with self.assertRaises(ValueError):fn(core_sha256='unknown')
+        del core._civ6_host_execution_image
         with self.assertRaisesRegex(ValueError,'binary changed'):profiles.transport_profile(XP1_CORE_SHA256,core,m.context,m.read)
         with self.assertRaisesRegex(ValueError,'Incomplete'):source.verify_live(m.base,lambda at,n:m.read(at,n)[:-1],family='unit')
 

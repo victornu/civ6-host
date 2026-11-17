@@ -717,14 +717,45 @@ def _load_rows() -> dict[int, dict[str, str]]:
 
 def resolve_empty_receiver_row(record_type, *, execution_image=None):
     if type(record_type) is int and execution_image is not None:
-        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
+        if execution_image is _XP1_PROFILE and record_type in (0xdf, 0xe2, 0xe3):
+            from civ6_host.runtime.xp1_governors_source import receiver_row
+            return receiver_row(record_type)
+        if execution_image is _XP1_PROFILE and record_type == 0x10b:
+            from civ6_host.runtime.xp1_turn_history_source import receiver_row
+            return receiver_row()
+        if execution_image is _XP1_PROFILE and record_type == 0xc9:
+            from civ6_host.runtime.xp1_wmd_fallout_visibility import receiver_row
+            return receiver_row()
+        if execution_image is _XP1_PROFILE and record_type in (0x107, 0x108):
+            from civ6_host.runtime.xp1_player_age_source import receiver_row
+            return receiver_row(record_type)
+        if (execution_image is _XP1_PROFILE or execution_image is _PROFILE) and record_type in (129, 130, 131):
+            from civ6_host.runtime.xp1_diplomacy_meet_source import receiver_row
+            return receiver_row(record_type, execution_image=execution_image)
+        if (execution_image is _XP1_PROFILE or execution_image is _PROFILE) and record_type in (210, 212):
+            from civ6_host.runtime.a0_notification_scope_source import city_state_receiver_row
+            return city_state_receiver_row(execution_image, record_type)
+        if (execution_image is _XP1_PROFILE or execution_image is _PROFILE) and record_type == 0xdd:
+            from civ6_host.runtime.xp2_great_work import moved_receiver_row
+            return moved_receiver_row()
         if execution_image is _PROFILE:
             if record_type in (126, 127):
                 from civ6_host.runtime.xp2_diplomacy_events import receiver_row
                 return receiver_row(record_type)
+            if record_type == 0x10d:
+                from civ6_host.runtime.xp2_culture_changed import receiver_row
+                return receiver_row()
+            if record_type == 0x112:
+                from civ6_host.runtime.xp2_local_player_changed import receiver_row
+                return receiver_row(execution_image)
+            if record_type == 0xf6:
+                from civ6_host.runtime.xp2_national_park_visibility import receiver_row
+                return receiver_row()
             if record_type == 19:
                 from civ6_host.runtime.xp2_player_restored import receiver_row
                 return receiver_row()
+        if execution_image is _PROFILE or execution_image is _XP1_PROFILE:
             from civ6_host.runtime.xp2_capture_notification_source import RECORD_TYPES, receiver_row
             if record_type in RECORD_TYPES:
                 return receiver_row(record_type)

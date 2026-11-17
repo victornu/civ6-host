@@ -9,8 +9,12 @@ import json
 from pathlib import Path
 from civ6_host.contracts.action_budget import LAN_EVENT_LINE_BYTES
 from .configuration_profiles import BASE_CORE_SHA256, XP1_CORE_SHA256, XP2_CORE_SHA256, _source
+from .execution_images import BASE_INSTALLED_CORE_SHA256, BASE_INSTALLED_SOURCE
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_build_identity import (
+    BASE_CURRENT_HOST_PROOF, BASE_CURRENT_HOST_REFERENCE, verify_base_current_host_transition,
+)
 
 BASE_SOURCE=('work/native-stdout-transport490/1480668dd8cb634c258e7ec862663a2b6b511397e8a02153e898019d315121fa.json',
              '1480668dd8cb634c258e7ec862663a2b6b511397e8a02153e898019d315121fa')
@@ -49,6 +53,28 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
     if (core_sha256,host_sha256)==(BASE_CORE_SHA256,BASE_HOST):
         base_verify(source_path)
         return BASE_SOURCE[1]
+    if core_sha256 == BASE_INSTALLED_CORE_SHA256 and host_sha256 in (BASE_HOST, BASE_CURRENT_HOST_REFERENCE[1]):
+        original = base_verify(None)
+        selected = BASE_INSTALLED_SOURCE if host_sha256 == BASE_HOST else BASE_CURRENT_HOST_PROOF
+        try:
+            proof = _source(BASE_INSTALLED_SOURCE)
+            if source_path is not None:
+                _source((str(source_path), selected[1]))
+        except RuntimeError as exc:
+            raise ValueError('Installed Base stdout comparison source changed') from exc
+        if (proof['schema'] != 'civ6-host.base-installed-image-comparison.v1'
+                or proof['reference_core']['sha256'] != BASE_CORE_SHA256
+                or proof['installed_core']['sha256'] != BASE_INSTALLED_CORE_SHA256
+                or proof['mapped_comparison']['every_mapped_file_byte_outside_reviewed_metadata_matches'] is not True
+                or proof['stdout_transport'] != dict(
+                    reference_sha256=BASE_SOURCE[1], host_sha256=BASE_HOST,
+                    complete_producer_bodies=2, producer_instructions=150,
+                    imports_matched=len(original['imports']), literal_sha256=original['literal']['sha256'])
+                or proof['static_only'] is not True or proof['native_execution_admitted'] is not False):
+            raise ValueError('Installed Base stdout comparison differs from its scoped proof')
+        if host_sha256 != BASE_HOST:
+            verify_base_current_host_transition()
+        return selected[1]
     from .xp2_bbg_inputs import UI_HOSTS
     from .source_build_identity import CURRENT_UNSIGNED_LOG_HOST_REFERENCE
     ui_hosts = (*UI_HOSTS, CURRENT_UNSIGNED_LOG_HOST_REFERENCE)
@@ -76,17 +102,19 @@ def verify_selected(core_sha256,host_sha256,*,source_path=None,base_verify):
 
 def _verify_installed_xp1_host(host_sha256):
     from .execution_images import _XP1_PROFILE, _verify_native_host_build
+    from .source_build_identity import CURRENT_STRINGS_HOST_REFERENCE
     from .xp1_session_inputs import current_session_join
-    if host_sha256 != _XP1_PROFILE.native_host_build.executable_sha256:
+    historical_host_sha = CURRENT_STRINGS_HOST_REFERENCE[1]
+    if host_sha256 not in (historical_host_sha, _XP1_PROFILE.native_host_build.executable_sha256):
         raise ValueError('No qualified stdout source for this exact Core/host pair')
     source = verify_xp1()
     row = current_session_join(_XP1_PROFILE)['stdout']
-    if (tuple(row['source']) != XP1_SOURCE or row['host_sha256'] != host_sha256
+    if (tuple(row['source']) != XP1_SOURCE or row['host_sha256'] != historical_host_sha
             or row['producer_instruction_spans'] != source['verification']['instructions_rechecked']
             or row['literal_matches'] is not True or row['iat_imports_matched'] != len(source['imports'])
             or row['wait_source_matches'] is not True or row['wait_source_sha256'] != _WAIT_SOURCE):
         raise ValueError('Installed XP1 stdout grammar differs from the reviewed source')
-    _verify_native_host_build(_XP1_PROFILE)
+    _verify_native_host_build(_XP1_PROFILE, historical_xp1=host_sha256 == historical_host_sha)
 
 
 @lru_cache(maxsize=3)
@@ -124,7 +152,9 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256):
     # prepare_sources. Historical extraction scripts and failed traces are
     # attribution, not files the runtime reads to decode future occurrences.
     refs=(XP1_SOURCE,BASE_SOURCE)
-    if core_sha256==XP2_CORE_SHA256:
+    if core_sha256 == BASE_INSTALLED_CORE_SHA256:
+        refs = (BASE_SOURCE, BASE_INSTALLED_SOURCE, BASE_CURRENT_HOST_PROOF)
+    elif core_sha256==XP2_CORE_SHA256:
         p=verify_xp2();refs=(*refs,XP2_SOURCE,
             *((row['path'],row['sha256']) for row in (*p['references'],p['extractor'])))
     elif core_sha256!=XP1_CORE_SHA256:

@@ -56,11 +56,14 @@ def configure_requested(backend,closure):
         raise ValueError('XP2 Load service scope was already selected')
     # Backend.inputs is bound by run_experiment, after this pre-Load step.
     validate_candidate_inputs(backend.captured_bundle.inputs,backend.captured_bundle)
-    from .captured_session_profile import for_backend
+    from .captured_session_profile import for_backend, saved_geometry
     from .session_configuration import read_saved_roster
     selected = for_backend(backend)
-    saved_roster = read_saved_roster(backend.captured_bundle.inputs.configuration)
-    if tuple(saved_roster['taken_slot_ids']) != selected.human_ids:
+    bundle = backend.captured_bundle
+    expected_humans = (saved_geometry(bundle)['taken_player_ids'] if contract.family == 'xp2-lan'
+                       else selected.human_ids)
+    saved_roster = read_saved_roster(bundle.inputs.configuration)
+    if tuple(saved_roster['taken_slot_ids']) != expected_humans:
         raise ValueError('Saved taken seats differ from the captured LAN human roster')
     from .xp1_action_transport import configure_requested as configure_actions
     configure_actions(backend,closure)
@@ -192,8 +195,37 @@ def control_snapshot(backend, *, empty, allow_diplomacy=False, pending_round_act
     core_sha = _sha(backend.captured_bundle)
     if backend.prefix is None or backend.prefix.core_sha256 != core_sha:
         raise ValueError('Captured Load control graph belongs to another engine')
-    return xp1.control_snapshot(backend, empty=empty, allow_diplomacy=allow_diplomacy,
-                                pending_round_actor=pending_round_actor)
+    if core_sha == XP1_CORE_SHA256 or pending_round_actor is not None:
+        return xp1.control_snapshot(backend, empty=empty, allow_diplomacy=allow_diplomacy,
+                                    pending_round_actor=pending_round_actor)
+    if type(allow_diplomacy) is not bool:
+        raise TypeError('XP2 Load diplomacy control flag must be Boolean')
+    snapshot = xp1.control_snapshot(backend, empty=empty)
+    deferred = backend.prefix.deferred_events
+    ledger = deferred.pending_diplomacy_statements
+    if type(ledger) is not list:
+        raise RuntimeError('XP2 Load has an invalid pending diplomacy ledger')
+    if ledger and not allow_diplomacy:
+        raise RuntimeError('XP2 Load retains an unanswered diplomacy statement')
+    if allow_diplomacy:
+        from .native.native_combat_map_owner import CombatMapRegistry
+        from .native.native_diplomacy_statement import StatementReceiver
+        from .xp2_statement_source import PROFILE
+        owner = backend.prefix.host._a0_family_owner
+        if (owner.statement_event_profile is not PROFILE or owner._statement_event_profile is not PROFILE
+                or owner._foundation_backend is not backend
+                or deferred.diplomacy_statement_receiver is not deferred):
+            raise ValueError('XP2 Load has no admitted action/interrupted-turn control without its statement receiver')
+        consumer = deferred.statement_consumer
+        if (owner._statement_producing or owner._statement_poisoned or len(ledger) > 1
+                or ((consumer is not None or ledger) and type(consumer) is not StatementReceiver)
+                or (consumer is not None and (consumer.busy or consumer.poisoned))):
+            raise RuntimeError('XP2 Load diplomacy receiver is active, poisoned or retains invalid work')
+        registry = deferred.combat_map_registry
+        if ledger and (type(registry) is not CombatMapRegistry or registry.core_sha256 != core_sha
+                       or registry.entries or registry.poisoned):
+            raise RuntimeError('XP2 Load diplomacy retained an owned native argument map')
+    return snapshot
 
 
 def make_job_observer(backend):

@@ -1,5 +1,6 @@
 """Bind ordinary tile, unit and building purchases to the exact XP2 route."""
 
+from hashlib import sha256
 from pathlib import Path
 import struct
 
@@ -90,10 +91,10 @@ def _bind(saved, *, active):
     saved._xp2_plot_purchase_lifetime = lifetime
 
 
-def catalogue(saved, observation, *, allow_faith=False):
+def catalogue(saved, observation, *, allow_faith=False, active=False):
     if type(allow_faith) is not bool:
         raise ValueError('Explicit faith purchase catalogue flag required')
-    _bind(saved, active=False)
+    _bind(saved, active=active)
     prefix = saved.prefix
     turn, player_id = observation['turn'], observation['player_id']
     plot_rows, city_rows = [], []
@@ -113,3 +114,78 @@ def apply(saved, action, observation, *, allow_faith=False):
     provider = plots if 'plot_id' in action else purchases
     return provider.apply(saved, saved.prefix, action, observation['turn'], observation,
                           player_id=observation['player_id'])
+
+
+def validate_archive(payload, actor, action):
+    from civ6_host.contracts.plot_purchases import validate_purchase_action
+
+    validate_purchase_action(action, allow_faith=True)
+    if type(actor) is not int or not 0 <= actor < 64:
+        raise ValueError('City purchase archive requires a native actor')
+    head = struct.pack('<IHH5I', 0x346b0a13, actor, 2, action['city_id'], 0, 0, 1, 0)
+    if 'plot_id' in action:
+        tail = struct.pack('<4I', 4, 0xffffffff, action['x'], action['y'])
+    else:
+        currency = {'YIELD_GOLD': 2, 'YIELD_FAITH': 5}[action['currency']]
+        if action['category'] == 'unit':
+            tail = struct.pack('<IIiIii', 0, action['index'], -1, currency, -9999, -9999)
+        else:
+            tail = struct.pack('<IIIii', 1, action['index'], currency, -9999, -9999)
+    if type(payload) is not bytes or payload != head + tail:
+        raise ValueError('Borrowed purchase archive differs from actor, city, currency or item')
+    return sha256(payload).hexdigest()
+
+
+def borrowed_enabled(saved):
+    return getattr(saved, '_xp2_lan_purchases_enabled', False) is True
+
+
+def borrowed_catalogue(saved, observation, *, strategic_allowed):
+    from .xp1_session_view import _borrowed_xp2_reference
+
+    if not borrowed_enabled(saved) or not strategic_allowed:
+        return None
+    _borrowed_xp2_reference(saved, observation['player_id'])
+    return catalogue(saved, observation, allow_faith=True, active=True)
+
+
+def apply_borrowed(saved, action, observation, quotes):
+    """Apply an already published XP2 quote with the shared native effect checks."""
+    from civ6_host.contracts.plot_purchases import actions
+    from .xp1_session_view import _borrowed_xp2_reference
+
+    offered = [] if quotes is None else actions(quotes[0] + quotes[1])
+    if action not in offered:
+        item = {key: value for key, value in action.items() if key != 'price_token'}
+        price_changed = any(all(candidate.get(key) == value for key, value in item.items())
+                            for candidate in offered)
+        reason = 'native_purchase_quote_changed' if price_changed else 'native_purchase_unavailable'
+        return dict(status='refused', reason=reason, requested_action=action), None
+
+    _bind(saved, active=True)
+    pid, turn = observation['player_id'], observation['turn']
+    _borrowed_xp2_reference(saved, pid)
+    token = saved.continuation
+    token.transport.require_empty_native_queue()
+    saved.backend.control(empty=True)
+    publications = token.publication_count
+    options = dict(player_id=pid, archive_validator=validate_archive)
+    if 'plot_id' in action:
+        result = plots.apply(saved, saved.prefix, action, turn, observation, **options)
+    else:
+        result = purchases.apply(saved, saved.prefix, action, turn, observation, **options,
+                                 allow_faith=True, verified_stage='xp2_explicit_city_purchase_verified')
+    receipt, after = result['receipt'], result['observation']
+    if (receipt['action'] != action or receipt['exact_treasury_debit_verified'] is not True
+            or token.publication_count != publications + 1):
+        raise RuntimeError('Borrowed purchase lacked its exact native debit and effect')
+    feedback = token.trade_feedback
+    if feedback is not None and feedback.events:
+        delivered = token.flush_trade_feedback()
+        if delivered:
+            saved.emit('xp2_bbg_trade_gameplay_delivered', feedback=delivered)
+        from .native.native_player_observation import observe_player
+
+        after = observe_player(saved.prefix.runtime, saved.prefix.ui_child, pid)
+    token.transport.require_empty_native_queue()
+    return dict(status='completed', reason=None, requested_action=action), after

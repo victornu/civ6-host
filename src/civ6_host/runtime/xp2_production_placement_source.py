@@ -7,6 +7,7 @@ import struct
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_verification import file_sha256, verify_pinned_json_bytes
 
 SOURCE = ('work/host-extensions/xp2-production-placement-static/source-profile-v1.json',
           'c50b9e653dccbbf75b7093759be5c02d2dba2789d0562827b8093397a15a50d9')
@@ -80,7 +81,7 @@ def _official_route(proof):
 
 
 def enum_source():
-    from .xp2_initial_choice_source import SOURCE as original
+    from .xp2_initial_choice_source import SOURCE as original, referenced_source
     p=_source(ENUM_SOURCE)
     if (p['schema']!='civ6-host.xp2-placement-enum-source.v1' or p['native_execution'] is not False
             or p['process_memory_read'] is not False or p['image']['sha256']!=XP2_CORE_SHA256
@@ -88,7 +89,7 @@ def enum_source():
             or set(p['enums'])!=set(ENUMS)
             or set(p['owners'])!={'CityOperationTypes','CityOperationResults'}):
         raise ValueError('XP2 placement enum source changed')
-    body=_source((p['body_reference']['path'],p['body_reference']['sha256']))['functions'][p['body_key']]
+    body=referenced_source(p['body_reference'])['functions'][p['body_key']]
     if body['sha256']!=p['body_sha256']:raise ValueError('XP2 placement enum owner body changed')
     rows=[r for f in body['fragments'] for r in f['instructions']]
     by_rva={int(r['rva'],16):r for r in rows}
@@ -156,7 +157,8 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
             or contract['targets_native'] is not True or contract['visibility_before_plot'] is not True
             or contract['hidden_targets_public'] is not False or contract['effects_admitted'] is not False):
         raise ValueError('XP2 placement action/visibility boundary changed')
-    for ref in p['references']:_source((ref['path'],ref['sha256']))
+    for ref in p['references']:
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     queue_source(core_sha256)
     enum_source()
     _official_route(p)
@@ -185,7 +187,7 @@ def source_dependencies(core_sha256=XP2_CORE_SHA256, *, execution_image=None):
         if ref is p['image'] and execution_image is not None:
             continue
         path=str(resolve_path(resource_root()/ref['path']).resolve())
-        if (hashlib.sha256(Path(path).read_bytes()).hexdigest()!=ref['sha256']
+        if (file_sha256(Path(path))!=ref['sha256']
                 or path in result and result[path]!=ref['sha256']):
             raise ValueError('XP2 placement dependency changed: '+path)
         result[path]=ref['sha256']
@@ -204,7 +206,8 @@ def verify_live(base,read,core_sha256=XP2_CORE_SHA256):
     spans.extend((int(t['rva'],16),bytes.fromhex(t['raw_hex'])) for t in p['embedded_tables'].values())
     spans.extend((int(b['name_va'],16)-_BASE,n.split('.')[1].encode()+b'\0') for n,b in p['bindings'].items())
     enum=enum_source()
-    enum_body=_source((enum['body_reference']['path'],enum['body_reference']['sha256']))['functions'][enum['body_key']]
+    from .xp2_initial_choice_source import referenced_source
+    enum_body=referenced_source(enum['body_reference'])['functions'][enum['body_key']]
     spans.extend((int(f['start_rva'],16),bytes.fromhex(f['raw_hex'])) for f in enum_body['fragments'])
     spans.extend((e['name_rva'],bytes.fromhex(e['name_raw_hex'])) for e in (*enum['enums'].values(),*enum['owners'].values()))
     for rva,raw in spans:

@@ -179,6 +179,41 @@ class DistrictTests(unittest.TestCase):
         a.close()
         d.close()
 
+    def test_installed_xp1_uses_the_current_district_receiver(self):
+        import pefile
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import resolve_empty_receiver_row
+
+        h, d, a, c, _, _, _ = self.service()
+        core, read, api, calls, _ = memory_fixture()
+        d.core, d.context, c.read = core, 20480, read
+        core._civ6_host_execution_image = _PROFILE
+        with self.assertRaisesRegex(ValueError, 'different reference ABI'):
+            c.enable_district_events()
+
+        core._civ6_host_execution_image = _XP1_PROFILE
+        image = pefile.PE(_XP1_PROFILE.path, fast_load=True)
+        self.addCleanup(image.close)
+        c.read = lambda address, size: (read(address, size) if address < core._handle
+                                       else bytes(image.get_data(address - core._handle, size)))
+        c.enable_district_events()
+        receiver = resolve_empty_receiver_row(event.codec.RECORD_TYPE, execution_image=_XP1_PROFILE)
+        self.assertEqual(receiver['event_name'], 'GameCoreEvent::DistrictRemovedFromMap')
+        self.assertEqual(receiver['handler_va'], hex(0x140000000 + 0xd9230))
+
+        with patch.object(event.codec, 'decode_fields', return_value=self.fields), patch.object(event, '_api', return_value=api):
+            self.assertEqual(a.dispatch(h.pointer, event.codec.EVENT_KIND, 4660), 0)
+        event_log = c.emit.call_args_list[-1].kwargs
+        self.assertEqual(event_log['source_sha256'], event.XP1_CURRENT_SOURCE[1])
+        self.assertEqual([name for name, _ in calls], [
+            'get_player', 'player_collection', 'collection_index', 'release_collection',
+            'release_player', 'item_variant', 'item_raw', 'release_item',
+        ])
+        self.assertEqual(d.drain(), 1)
+        self.assertEqual(d.pending, [])
+        a.close()
+        d.close()
+
     def test_admission_pending_duplicate_profile_and_failure_quarantine(self):
         h, d, a, c, r, _, _ = self.service()
         r.fields.return_value = {}

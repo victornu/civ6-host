@@ -4,7 +4,7 @@ This is a read-only UI collector. It never consults host placement history,
 production legality, a progress threshold, or an inferred placement date.
 """
 from .configuration_profiles import XP1_CORE_SHA256
-from .placement_inventory_profile import verify_source
+from .placement_inventory_profile import _check_pillage_mode, verify_source
 from ..contracts.placement_inventory import SCHEMA, SCOPE, MAX_ROWS, validate
 from ..contracts.production_queue import _uint, _type_name
 
@@ -109,10 +109,10 @@ local function metadata(category,index)
  return row,bits(row.Hash),name
 end
 local rows={}
-local function add(cityID,category,index,hash,name,input,complete,districtID)
+local function add(cityID,category,index,hash,name,input,complete,districtID,pillaged)
  assert(type(complete)=='boolean','invalid inventory native completion Boolean')
  assert(#rows<32768,'inventory row bound exceeded')
- rows[#rows+1]={cityID,category,index,hash,name,input[1],input[2],input[3],complete,districtID}
+ rows[#rows+1]={cityID,category,index,hash,name,input[1],input[2],input[3],complete,districtID,pillaged}
 end
 for _,input in ipairs(visiblePlots) do
  -- Visibility gates precede even the lookup of the live Plot userdata.
@@ -137,11 +137,23 @@ for _,input in ipairs(visiblePlots) do
     local internal=flag(row.InternalOnly,'district InternalOnly')
     if required and not internal then
      local districtID=uint(plot:GetDistrictID(),'district ID',4294967295)
-     local complete=city:GetDistricts():IsComplete(districtType,input[1])
-     -- The native plot-specific completion query does not itself check type.
+     local districts=city:GetDistricts()
+     local complete=districts:IsComplete(districtType,input[1])
+     -- Neither plot-specific getter checks district type on this ABI.
      assert(plot:GetDistrictType()==districtType and plot:GetDistrictID()==districtID,
             'inventory district identity changed during completion')
-     add(cityID,'district',districtType,hash,name,input,complete,districtID)
+     local pillaged
+     if includePillage then
+      visible(input)
+      assert(plot:GetOwner()==pid and ownCityIdentity(Cities.GetPlotPurchaseCity(plot))==cityID,
+             'inventory district ownership changed before pillage read')
+      assert(type(districts.IsPillaged)=='function','native district pillage API unavailable')
+      pillaged=districts:IsPillaged(districtType,input[1])
+      assert(type(pillaged)=='boolean','invalid inventory native pillage Boolean')
+      assert(plot:GetDistrictType()==districtType and plot:GetDistrictID()==districtID,
+             'inventory district identity changed during pillage read')
+     end
+     add(cityID,'district',districtType,hash,name,input,complete,districtID,pillaged)
     end
    end
    if wonderType>=0 then
@@ -168,23 +180,32 @@ table.sort(rows,function(a,b)
  if a[2]~=b[2] then return a[2]<b[2] end
  return a[6]<b[6]
 end)
-local output={'placement-inventory-v1|'..n(pid)..'|'..n(expectedTurn)..'|'..n(#rows)}
+local tag=includePillage and 'placement-inventory-v2' or 'placement-inventory-v1'
+local output={tag..'|'..n(pid)..'|'..n(expectedTurn)..'|'..n(#rows)}
 for _,r in ipairs(rows) do
- output[#output+1]=table.concat({n(r[1]),r[2],n(r[3]),n(r[4]),r[5],n(r[6]),n(r[7]),n(r[8]),
-                                 r[9] and '1' or '0',r[10] and n(r[10]) or '-'},'|')
+ local fields={n(r[1]),r[2],n(r[3]),n(r[4]),r[5],n(r[6]),n(r[7]),n(r[8]),
+               r[9] and '1' or '0',r[10] and n(r[10]) or '-'}
+ if includePillage then fields[11]=r[2]=='district' and (r[11] and '1' or '0') or '-' end
+ output[#output+1]=table.concat(fields,'|')
 end
 return table.concat(output,'\n')
 '''
 
 
-def readback_source(player_id,turn,observation,*,core_sha256=XP1_CORE_SHA256):
-    verify_source(core_sha256)
+def readback_source(player_id,turn,observation,*,core_sha256=XP1_CORE_SHA256,include_pillage=False):
+    verify_source(core_sha256,include_pillage=include_pillage)
+    return _readback_source(player_id,turn,observation,include_pillage)
+
+
+def _readback_source(player_id,turn,observation,include_pillage):
     width,height,plots,cities=_inputs(player_id,turn,observation)
     # Only checked numeric public identities enter the Lua source. No observed
     # strings, tracking dictionaries, candidate actions or hidden plots do.
     plot_literal=','.join('{'+','.join(map(str,row))+'}' for row in plots)
     city_literal=','.join(map(str,cities))
+    flag='true' if include_pillage else 'false'
     header=(f'local pid,expectedTurn,width,height={player_id},{turn},{width},{height}\n'
+            f'local includePillage={flag}\n'
             f'local visiblePlots={{{plot_literal}}}\nlocal cityIDs={{{city_literal}}}\n')
     return (header+_LUA).encode('ascii')
 
@@ -195,7 +216,9 @@ def _number(token,label,maximum=4294967295):
     return _uint(int(token),label,maximum)
 
 
-def parse_readback(payload,player_id,turn,observation):
+def parse_readback(payload,player_id,turn,observation,*,include_pillage=False):
+    if type(include_pillage) is not bool:
+        raise ValueError('Placement inventory pillage mode must be Boolean')
     _,_,plots,_=_inputs(player_id,turn,observation)
     maximum=128+len(plots)*2*256
     if type(payload) is not bytes or len(payload)>maximum:
@@ -203,14 +226,16 @@ def parse_readback(payload,player_id,turn,observation):
     try:lines=payload.decode('ascii').split('\n')
     except UnicodeError as exc:raise ValueError('Non-ASCII placement inventory payload') from exc
     header=lines[0].split('|')
-    if len(header)!=4 or header[:3]!=['placement-inventory-v1',str(player_id),str(turn)]:
+    tag='placement-inventory-v2' if include_pillage else 'placement-inventory-v1'
+    if len(header)!=4 or header[:3]!=[tag,str(player_id),str(turn)]:
         raise ValueError('Foreign placement inventory readback')
     count=_number(header[3],'row count',min(MAX_ROWS,2*len(plots)))
     if len(lines)!=count+1:raise ValueError('Truncated placement inventory readback')
     rows=[];previous=None;plot_inputs={p[0]:p for p in plots}
     for line in lines[1:]:
         fields=line.split('|')
-        if len(fields)!=10 or fields[1] not in ('district','building') or fields[8] not in ('0','1'):
+        if (len(fields)!=(11 if include_pillage else 10)
+                or fields[1] not in ('district','building') or fields[8] not in ('0','1')):
             raise ValueError('Invalid native placement inventory row')
         category=fields[1]
         row=dict(city_id=_number(fields[0],'city ID'),category=category,
@@ -218,6 +243,11 @@ def parse_readback(payload,player_id,turn,observation):
           item_type=_type_name(category,fields[4]),plot_id=_number(fields[5],'plot',65535),
           x=_number(fields[6],'x',65535),y=_number(fields[7],'y',65535),complete=fields[8]=='1',
           district_id=None if fields[9]=='-' else _number(fields[9],'district ID'))
+        if include_pillage:
+            token=fields[10]
+            if token not in (('0','1') if category=='district' else ('-',)):
+                raise ValueError('Invalid native placement inventory pillage field')
+            row['pillaged']=None if category=='building' else token=='1'
         key=(row['city_id'],category,row['plot_id'])
         if previous is not None and key<=previous:raise ValueError('Unsorted or duplicate placement inventory rows')
         previous=key
@@ -225,16 +255,26 @@ def parse_readback(payload,player_id,turn,observation):
         if expected!=(row['plot_id'],row['x'],row['y'],player_id):
             raise ValueError('Placement inventory row differs from own visible plot input')
         rows.append(row)
-    value=dict(schema=SCHEMA,scope=SCOPE,player_id=player_id,turn=turn,rows=rows)
+    schema=SCHEMA
+    if include_pillage:
+        from ..contracts.placement_inventory import DETAILS_SCHEMA
+        schema=DETAILS_SCHEMA
+    value=dict(schema=schema,scope=SCOPE,player_id=player_id,turn=turn,rows=rows)
     return validate(value,player_id,turn,observation=observation)
 
 
-def read(prefix,player_id,turn,observation,*,core_sha256=XP1_CORE_SHA256):
+def read(prefix,player_id,turn,observation,*,core_sha256=XP1_CORE_SHA256,include_pillage=False):
     """Copy a fresh native inventory; caller binds its exact live source owner."""
-    source=readback_source(player_id,turn,observation,core_sha256=core_sha256)
+    _check_pillage_mode(core_sha256,include_pillage)
+    if include_pillage:
+        from .xp2_placement_inventory_source import require_pillage_binding
+        require_pillage_binding(prefix.backend)
+        source=_readback_source(player_id,turn,observation,include_pillage=True)
+    else:
+        source=readback_source(player_id,turn,observation,core_sha256=core_sha256)
     capacity=max(4096,128+2*len(observation['plots'])*256)
     payload=prefix.runtime.evaluate_text(prefix.ui_child,source,b'@native_placement_inventory',capacity=capacity)
-    return parse_readback(payload,player_id,turn,observation)
+    return parse_readback(payload,player_id,turn,observation,include_pillage=include_pillage)
 
 _BUILDING_PRESENCE_LUA=r'''
 local building=GameInfo.Buildings[buildingType]
@@ -255,9 +295,10 @@ return table.concat({'own-city-building-v1',n(pid),n(expectedTurn),n(cityID),
 def read_building_presence(prefix, player_id, turn, observation, city_id, building_type, *, core_sha256):
     """Copy one own-city native HasBuilding result under the inventory owner binding."""
     from .configuration_profiles import XP2_CORE_SHA256
+    from .xp2_placement_inventory_source import require_inventory_binding
     if core_sha256!=XP2_CORE_SHA256:
         raise ValueError('Own-city building presence requires the exact XP2 Core')
-    verify_source(core_sha256)
+    require_inventory_binding(prefix.backend)
     width,height,_,cities=_inputs(player_id,turn,observation)
     if _uint(city_id,'building presence city') not in cities:
         raise ValueError('Building presence requires an observed own city')

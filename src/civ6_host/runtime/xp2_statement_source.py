@@ -17,6 +17,10 @@ SOURCE=('work/bbg751-turn-source-scope/war-confirmation/request-session-closure-
         '5c76284af04f07fc754dcceffdd499b3769c12f49b198ff628671a721932d566')
 PRESENTATION=('work/bbg751-turn-source-scope/war-confirmation/statement-headless-presentation-scope-v1.json',
               'eca8c2da5d761f0cf0b4934c9387d62a37cde64152255a073491da0bdf41cbaa')
+CONTACT_SCOPE_COMPATIBILITY = ('evidence/host-xp2-statement-contact-scope-compatibility.json',
+                               'fa10cac81476fcd58b23722ca3d77aea83ad154ffd6d1b1e286c70b5b7a26bed')
+_CONTACT_SCOPE_HOST = 'src/civ6_host/runtime/native/native_host_events.py'
+_CONTACT_SCOPE_HASH = '258173e1ef2e3addf38878064bbd5b2e383989661696e0b0fe2d83fdfee9036c'
 KIND=0xfc731e25
 
 
@@ -58,8 +62,23 @@ def source_dependencies(*,execution_image):
     host=Path(__file__).resolve().parents[3]
     for row in presentation['consulted_host_source_files']:
         path=host/row['path']
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual == row['sha256']:
+            continue
+        if (row['path'], actual) != (_CONTACT_SCOPE_HOST, _CONTACT_SCOPE_HASH):
             raise ValueError('Statement presentation scope changed: '+row['path'])
+        compatibility = load_pinned_json(resolve_path(root / CONTACT_SCOPE_COMPATIBILITY[0]),
+                                         CONTACT_SCOPE_COMPATIBILITY[1])
+        if (compatibility['schema'] != 'civ6-host.xp2-statement-contact-scope-compatibility.v1'
+                or (compatibility['parent']['path'], compatibility['parent']['sha256']) != PRESENTATION
+                or compatibility['source_path'] != row['path']
+                or compatibility['previous_sha256'] != row['sha256']
+                or compatibility['current_sha256'] != actual
+                or compatibility['statement_semantics_changed'] is not False
+                or compatibility['checked_other_consulted_sources'] is not True):
+            raise ValueError('Statement contact scope compatibility changed')
+        refs.append(dict(path=CONTACT_SCOPE_COMPATIBILITY[0], sha256=CONTACT_SCOPE_COMPATIBILITY[1]))
+        refs.append(compatibility['contact_source'])
     pins={}
     for row in refs:
         path=resolve_path(root/row['path'])

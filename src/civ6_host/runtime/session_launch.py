@@ -14,8 +14,18 @@ from .native.native_episode_identity import DiagnosticEpisodeIdentity
 
 
 def launch(self, HOST, worker, closure, env, captured, reset_started):
-    from .native.native_saved_session import MEMORY_LIMIT, MAX_STDERR, ROOT
+    from .native.native_saved_session import (
+        DEFAULT_MEMORY_RESERVE_MIB, MEMORY_LIMIT, MAX_STDERR, ROOT, RUNNING_MEMORY_FLOOR_BYTES,
+    )
     from .native.native_official_bundle import LOCALIZATION_HANDOFF_ENV
+    if self.memory_reserve_mib < DEFAULT_MEMORY_RESERVE_MIB:
+        self._check_reset_resources('before_spawn')
+        self.supervisor_memory = {
+            'launch_reserve_mib': self.memory_reserve_mib,
+            'running_system_floor_bytes': RUNNING_MEMORY_FLOOR_BYTES,
+            'parent_private_limit_bytes': MEMORY_LIMIT,
+            'runtime_samples': 0,
+        }
     self.process = None
     self.job = None
     self.protocol = None

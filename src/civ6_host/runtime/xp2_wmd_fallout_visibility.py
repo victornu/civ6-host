@@ -83,9 +83,6 @@ def dispatch(owner, fields):
     from .a0_foundation_events import require_borrow
     from .native.native_application_mirror import decode_scalar
     from .native.native_event_827289e6 import _copy_blob
-    from .native.native_notification_metadata import metadata_scope_transition
-    from .native.native_player_event_domains import validate_sequence
-    from .native.native_unary_event_family import _METADATA
 
     require_borrow(owner)
     owner._require_no_f391_reentry()
@@ -103,6 +100,14 @@ def dispatch(owner, fields):
     if PLAYER in fields:
         decode_scalar(fields[PLAYER],2)
     position=_copy_blob(fields[POSITION],owner.read,13,'WMD visibility position')
+    return enqueue(owner, position, value, source_sha256=SOURCE[1])
+
+
+def enqueue(owner, position, value, *, source_sha256):
+    from .native.native_notification_metadata import metadata_scope_transition
+    from .native.native_player_event_domains import validate_sequence
+    from .native.native_unary_event_family import _METADATA
+
     notification=owner.host_notification_counter
     metadata=owner.host_metadata_counter
     flag,next_metadata=metadata_scope_transition(notification,metadata)
@@ -117,7 +122,7 @@ def dispatch(owner, fields):
     owner.host_metadata_counter=next_metadata
     owner.emit('native_deferred_host_event_enqueued',dispatch_kind=hex(KIND),
                queue_type=hex(RECORD_TYPE),record_hex=record.hex(),pending_count=len(owner.pending),
-               source_proof_sha256=SOURCE[1],host_notification_counter=notification,
+               source_proof_sha256=source_sha256,host_notification_counter=notification,
                metadata_counter_before=metadata,metadata_counter_after=next_metadata,
                scope_flag=flag,native_queries_executed=False,consumer_validated=False,
                eligible_for_training=False,native_dispatch_return=0)

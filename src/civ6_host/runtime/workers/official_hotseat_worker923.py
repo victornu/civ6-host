@@ -180,7 +180,12 @@ def ui_profile_admission(closure):
     reference = closure.get('official_bundle')
     if type(reference) is not dict or set(reference) != {'path', 'sha256'}:
         raise ValueError('UI profile requires its official bundle reference')
-    fresh = admit(recorded.get('profile_id'), official_bundle=(reference['path'], reference['sha256']), input_profile=closure.get('input_profile'))
+    execution_image = None
+    if 'execution_image' in closure:
+        from civ6_host.runtime.execution_images import from_identity
+        execution_image = from_identity(closure['execution_image'])
+    fresh = admit(recorded.get('profile_id'), official_bundle=(reference['path'], reference['sha256']),
+                  input_profile=closure.get('input_profile'), execution_image=execution_image)
     if fresh != recorded:
         raise ValueError('Worker UI admission differs from parent receipt')
     return fresh
@@ -213,6 +218,8 @@ def main(path, *, forced_endturn_diagnostic=False, unit_work_diagnostic=False):
             raise ValueError('Unsupported explicit hotseat profile or bounds')
         from civ6_host.runtime.native.native_official_bundle import validate_closure_profile
         validate_closure_profile(closure)
+        from civ6_host.runtime.base_capture_inputs import checkpoint_enabled
+        save_on_close = checkpoint_enabled(closure)
         admitted_ui = ui_profile_admission(closure)
         from civ6_host.runtime.workers.run_official_postload909 import open_official_backend
         from civ6_host.runtime.native.native_official_hotseat import prepare_interactive
@@ -279,7 +286,8 @@ def main(path, *, forced_endturn_diagnostic=False, unit_work_diagnostic=False):
             emit('forced_endturn_diagnostic_scope', native_reason='UserForced', official_keyboard_effect_parity_proven=False, tutorial_gate_qualified=False, production_stack_effect_verified=False, strategic_training_ready=False)
         if owner.production_queue_diagnostic:
             emit('production_queue_diagnostic_scope', tutorial_gate_qualified=False, automatic_choices_applied=False, strategic_training_ready=False)
-        protocol = HotseatActionProtocol(require_episode(owner.prefix), closure['nonce'], round_limit=closure['rounds'])
+        protocol = HotseatActionProtocol(require_episode(owner.prefix), closure['nonce'],
+            round_limit=closure['rounds'], initial_player=observation['player_id'] if observation is not None else 0)
         if owner.inputs.official_bundle is not None:
             protocol.initial_turn = closure['initial_turn']
             if observation is not None and observation['turn'] != protocol.initial_turn:
@@ -299,7 +307,25 @@ def main(path, *, forced_endturn_diagnostic=False, unit_work_diagnostic=False):
             observation = None
             decisions = None
         else:
-            observation, decisions = read_decisions(owner, 0, 0, round_limit=protocol.limit, player_id=0, player_ids=PLAYERS)
+            observation, decisions = read_decisions(owner, 0, 0, round_limit=protocol.limit,
+                player_id=protocol.player_id, player_ids=PLAYERS)
+        if owner.inputs.checkpoint is not None:
+            from civ6_host.runtime.base_capture_inputs import checkpoint_manifest
+            from civ6_host.runtime.native.native_session_resume import plain, semantic_decisions
+            manifest = checkpoint_manifest(owner.inputs.checkpoint)
+            if (protocol.ended or observation != plain(manifest['observation'])
+                    or semantic_decisions(decisions) != semantic_decisions(manifest['decisions'])):
+                from civ6_host.runtime.network_checkpoint import _comparison_differences
+                expected = plain(manifest['observation'])
+                expected_choices = semantic_decisions(manifest['decisions'])
+                actual_choices = semantic_decisions(decisions) if decisions is not None else None
+                emit('hotseat_checkpoint_readback_refused',
+                     observation_differences=_comparison_differences(expected, observation),
+                     decision_differences=_comparison_differences(expected_choices, actual_choices),
+                     strategic_training_ready=False)
+                raise ValueError('Reloaded Hotseat observation or choices differ')
+            emit('hotseat_checkpoint_readback_matched', player_id=protocol.player_id, turn=observation['turn'],
+                 decision_count=len(decisions['candidates']), strategic_training_ready=False)
         protocol.decisions = decisions
 
         def reply(operation, action):
@@ -329,6 +355,18 @@ def main(path, *, forced_endturn_diagnostic=False, unit_work_diagnostic=False):
                 except NativeVictoryReached as exc:
                     native = exc.result
                     observation = None
+            if operation == 'close' and save_on_close:
+                if native['episode_terminated']:
+                    raise ValueError('Terminal Hotseat checkpoint is not qualified')
+                from civ6_host.runtime.native.native_session_checkpoint import save_checkpoint
+                save_checkpoint(owner, observation, decisions, closure, _resolve_resource_path(Path(path)))
+                checked_observation, checked_decisions = read_decisions(
+                    owner, protocol.sequence, protocol.rounds, closed=protocol.closed,
+                    round_limit=protocol.limit, player_id=protocol.player_id, player_ids=PLAYERS)
+                if checked_observation != observation or checked_decisions != decisions:
+                    raise RuntimeError('Native Save changed the Hotseat observation or choices')
+                emit('official_session_checkpoint_readback_unchanged', sequence=protocol.sequence,
+                     turn=observation['turn'], player_id=protocol.player_id, strategic_training_ready=False)
             protocol.commit(request, native_terminated=native['episode_terminated'], native=native, turn_reactivation=getattr(owner, 'explicit_turn_reactivation', None))
             if native['episode_terminated']:
                 decisions = None

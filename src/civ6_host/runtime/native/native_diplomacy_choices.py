@@ -7,6 +7,7 @@ from civ6_host.runtime.provenance import historical_source_file as _historical_s
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
 import copy, hashlib, json, re
 from pathlib import Path
+from civ6_host.contracts.diplomacy_decisions import PROMISE_RESPONSES, PROMISE_STATEMENTS, is_received_promise
 from civ6_host.runtime.native import native_pending_diplomacy as pending
 from civ6_host.runtime.native import native_turn_continuation as continuation
 from civ6_host.runtime.native.native_diplomacy_statement import PROOF_SHA256
@@ -30,7 +31,7 @@ def is_catalog(value):
     return type(value) is dict and value.get('schema') in (SCHEMA, CURRENT_SCHEMA)
 
 def lua_source(statement, player_id, configuration=None, *, public_display=False,
-               execution_image=None):
+               execution_image=None, promise_responses=False):
     verify_source_evidence()
     official_source('DiplomacyActionView.lua', VIEW_SHA)
     head = b'local function identity()\n' + pending.source(statement, player_id) + b'\nend\nlocal identityText=identity()\n'
@@ -40,6 +41,18 @@ def lua_source(statement, player_id, configuration=None, *, public_display=False
     body = '\nlocal pid=%d\nlocal sid=%d\nlocal from=%d\nlocal to=%d\nlocal inputMood=%d\nlocal initiator=%d\nlocal other=from==pid and to or from\nlocal name=DiplomacyManager.GetKeyName(%d)\nlocal subtype=DiplomacyManager.GetKeyName(%d)\nassert(name~=\'MAKE_DEAL\' and name~=\'MAKE_DEMAND\', \'Special native statement handler not implemented\')\nassert(DiplomacyManager.IsSessionIDOpen(sid)==true, \'Conversation no longer open\')\nassert(Players[from] and Players[pid], \'Missing statement player\')\nlocal mood=inputMood\nif mood==DiplomacyMoodTypes.UNDEFINED then\n mood=DiplomacySupport_GetPlayerMood(Players[from],from==pid and other or pid)\nend\nlocal handler=GetStatementHandler(name)\nassert(handler==DefaultHandlers,\'Special statement handler not implemented\')\nlocal parsed=handler.ExtractStatement(handler,name,subtype,from,mood,initiator)\nhandler.RemoveInvalidSelections(parsed,pid,other)\nassert(type(parsed.Selections)==\'table\' and #parsed.Selections>0 and #parsed.Selections<=64,\'Missing or excessive choices\')\nlocal function quote(s)\n if s==nil then return \'null\' end\n assert(type(s)==\'string\' and #s<=4096,\'Malformed diplomacy text\')\n local parts={\'"\'}\n for i=1,#s do\n  local n=string.byte(s,i);local c=string.sub(s,i,i)\n  if n==34 or n==92 then parts[#parts+1]=string.char(92)..c\n  elseif n<32 then parts[#parts+1]=string.char(92)..string.format(\'u%%04x\',n)\n  else parts[#parts+1]=c end\n end\n parts[#parts+1]=\'"\';return table.concat(parts)\nend\nlocal out,seen={},{}\nfor _,s in ipairs(parsed.Selections) do\n assert(type(s.Key)==\'string\' and not seen[s.Key],\'Duplicate choice\')\n assert(s.Key==\'CHOICE_POSITIVE\' or s.Key==\'CHOICE_EXIT\',\'Unsupported native response choice\')\n assert(type(s.Sort)==\'number\' and s.Sort%%1==0,\'Invalid choice order\')\n assert(s.IsDisabled==nil or type(s.IsDisabled)==\'boolean\',\'Invalid disabled choice\')\n seen[s.Key]=true\n out[#out+1]=\'{"key":\'..quote(s.Key)..\',"sort":\'..tostring(s.Sort)..\',"text":\'..quote(s.Text)..\n  \',"tooltip":\'..quote(s.Tooltip)..\',"diplomatic_action_type":\'..quote(s.DiplomaticActionType)..\n  \',"disabled":\'..(s.IsDisabled==true and \'true\' or \'false\')..\'}\'\n assert(not s.IsDisabled or s.FailureReasons==nil,\'Disabled explanation transport not yet implemented\')\nend\nreturn \'{"identity":\'..quote(identityText)..\',"statement_text":\'..quote(parsed.StatementText)..\n \',"mood":\'..tostring(mood)..\',"selections":[\'..table.concat(out,\',\')..\']}\'\n' % (player_id, f['SessionID'], f['FromPlayer'], f['ToPlayer'], signed(f['FromPlayerMood']), signed(f['Initiator']), signed(f['StatementType']), signed(f['StatementSubType']))
     from civ6_host.runtime.native.native_diplomacy_configuration import lua_bindings
     from civ6_host.runtime.native.native_diplomacy_default import handler_source
+    if type(promise_responses) is not bool:
+        raise ValueError('Invalid promise response option')
+    if promise_responses:
+        status = 'local out,seen={},{}'
+        original = "s.Key=='CHOICE_POSITIVE' or s.Key=='CHOICE_EXIT'"
+        if body.count(status) != 1 or body.count(original) != 1:
+            raise ValueError('Diplomacy selection scope changed')
+        kinds = ' or '.join(f'name=={json.dumps(kind)}' for kind in sorted(PROMISE_STATEMENTS))
+        keys = ' or '.join(f's.Key=={json.dumps(key)}' for key in PROMISE_RESPONSES)
+        scope = f'local receivedPromise=to==pid and from~=pid and subtype=="NONE" and ({kinds})\n'
+        body = body.replace(status, scope + status).replace(
+            original, f'(receivedPromise and ({keys})) or (not receivedPromise and ({original}))')
     if type(public_display) is not bool:
         raise ValueError('Invalid public display option')
     if public_display:
@@ -51,7 +64,7 @@ def lua_source(statement, player_id, configuration=None, *, public_display=False
     bindings = b'' if configuration is None else lua_bindings(configuration)
     return bindings + head + support + b'\n' + handler_source() + body.encode('ascii')
 
-def parse(raw, statement, player_id):
+def parse(raw, statement, player_id, *, promise_responses=False):
     if type(raw) is not bytes or len(raw) > 131072:
         raise ValueError('Unbounded diplomacy catalogue')
     value = json.loads(raw)
@@ -59,10 +72,10 @@ def parse(raw, statement, player_id):
         raise ValueError('Malformed diplomacy data')
     session = pending.parse(value.pop('identity').encode('ascii'), statement, player_id)
     value['session'] = session
-    validate_data(value, statement, player_id)
+    validate_data(value, statement, player_id, promise_responses=promise_responses)
     return value
 
-def validate_data(data, statement, pid):
+def validate_data(data, statement, pid, *, promise_responses=False):
     if type(data) is not dict or set(data) != {'statement_text', 'mood', 'selections', 'session'}:
         raise ValueError('Malformed native diplomacy catalogue')
     s = data['session']
@@ -77,8 +90,9 @@ def validate_data(data, statement, pid):
         raise ValueError('Unbounded native selections')
     seen = set()
     order = []
+    kinds = PROMISE_RESPONSES if promise_responses and is_received_promise(s, pid) else KINDS
     for row in data['selections']:
-        if type(row) is not dict or set(row) != {'key', 'sort', 'text', 'tooltip', 'diplomatic_action_type', 'disabled'} or row['key'] not in KINDS or (row['key'] in seen) or (type(row['sort']) is not int) or (type(row['disabled']) is not bool):
+        if type(row) is not dict or set(row) != {'key', 'sort', 'text', 'tooltip', 'diplomatic_action_type', 'disabled'} or type(row['key']) is not str or row['key'] not in kinds or (row['key'] in seen) or (type(row['sort']) is not int) or (type(row['disabled']) is not bool):
             raise ValueError('Malformed native selection')
         for key in ('text', 'tooltip', 'diplomatic_action_type'):
             if row[key] is not None and (type(row[key]) is not str or len(row[key]) > 4096):
@@ -105,6 +119,10 @@ def _snapshot(owner,phase,saved_context=None):
     saved=saved_context.saved
     if type(saved) is not SavedLoadOwner or saved.backend is not owner:
         raise ValueError('Diplomacy snapshot requires its exact saved-session owner')
+    from ..xp2_diplomacy import BorrowedWarDialogue
+    if type(saved_context) is BorrowedWarDialogue:
+        saved._check_active()
+        return owner.jobs_snapshot(phase)
     saved._check('commands',requested='unit_commands_candidate')
     with saved._attempt():
         return owner.jobs.query_snapshot(saved,phase)
@@ -140,7 +158,10 @@ def read(owner, sequence, *, closed=False, saved_context=None):
         p.runtime.namespaces.register(p.ui_child, 'DB')
         owner.diplomacy_database_namespace_attached = True
         owner.emit('native_diplomacy_database_namespace_attached', borrowed_gameplay_connection=True, new_database_connection=False, strategic_training_ready=False)
-    data = parse(p.runtime.evaluate_text(p.ui_child, lua_source(statement, pid, configuration), b'@official_diplomacy_choices', capacity=131072), statement, pid)
+    promise_responses = saved_context is not None
+    code = lua_source(statement, pid, configuration, promise_responses=promise_responses)
+    data = parse(p.runtime.evaluate_text(p.ui_child, code, b'@official_diplomacy_choices', capacity=131072),
+                 statement, pid, promise_responses=promise_responses)
     offers = [] if closed else actions(data, statement)
     identity = require_episode(p)
     result = dict(schema=SCHEMA if saved_context is not None else CURRENT_SCHEMA,
@@ -212,10 +233,12 @@ def validate_catalog(value, identity, sequence, turn, *, player_id, actions_clos
 def deliver_response(transport, choice):
     from civ6_host.runtime.native.native_source_cache import load_pinned_json
     proof = load_pinned_json(ROOT / 'evidence/native-diplomacy-transport' / (TRANSPORT_SHA + '.json'), TRANSPORT_SHA)
-    expected = proof['contract']['message_kinds'][choice]
+    # AddResponse uses the same native archive constructor for each response key.
+    transport_choice = 'CHOICE_POSITIVE' if choice in PROMISE_RESPONSES else choice
+    expected = proof['contract']['message_kinds'][transport_choice]
     _deliver_request(transport, expected, proof)
 
-def deliver_statement_request(transport):
+def deliver_statement_request(transport, *, check_followup=None):
     """Deliver the native statement message, including generated action archives.
 
     RequestSession and AddResponse use A4172391. This is transport reuse, not
@@ -223,9 +246,10 @@ def deliver_statement_request(transport):
     """
     from civ6_host.runtime.native.native_source_cache import load_pinned_json
     proof = load_pinned_json(ROOT / 'evidence/native-diplomacy-transport' / (TRANSPORT_SHA + '.json'), TRANSPORT_SHA)
-    _deliver_request(transport, proof['contract']['message_kinds']['CHOICE_POSITIVE'], proof)
+    _deliver_request(transport, proof['contract']['message_kinds']['CHOICE_POSITIVE'], proof,
+                     check_followup=check_followup)
 
-def _deliver_request(transport, expected, proof):
+def _deliver_request(transport, expected, proof, *, check_followup=None):
     if len(transport.pending) != 1 or type(transport.pending[0]) is not bytes or (not 4 < len(transport.pending[0]) <= 6784) or (int.from_bytes(transport.pending[0][:4], 'little') != expected):
         raise RuntimeError('Native diplomatic request did not queue exactly one expected command')
     transport.deliver_one()
@@ -233,7 +257,11 @@ def _deliver_request(transport, expected, proof):
         if not transport.pending:
             return
         payload = transport.pending[0]
-        if type(payload) is not bytes or not 4 < len(payload) <= 6784 or int.from_bytes(payload[:4], 'little') != proof['contract']['native_followup_kind']:
+        if type(payload) is not bytes or not 4 < len(payload) <= 6784:
+            raise RuntimeError('Diplomatic delivery produced an unqualified command')
+        if check_followup is not None:
+            check_followup(payload, proof['contract']['native_followup_kind'])
+        elif int.from_bytes(payload[:4], 'little') != proof['contract']['native_followup_kind']:
             raise RuntimeError('Diplomatic delivery produced an unqualified command')
         transport.deliver_one()
     if transport.pending:
@@ -255,14 +283,26 @@ def apply(owner, action, *, saved_context=None):
         raise RuntimeError('Diplomacy response overlapping a round-completion echo is not qualified')
     code = pending.source(current['statement'], pid)
     source = b'local function check()\n' + code + b'\nend\ncheck()\n'
-    if action['choice'] == 'CHOICE_POSITIVE':
-        source += ('local ok=DiplomacyManager.AddResponse(%d,%d,"POSITIVE")\nassert(type(ok)=="boolean" and ok,"Native response refused")\nreturn "accepted"' % (sid, pid)).encode()
+    choice = action['choice']
+    session = current['data']['session']
+    verify_war_exit = (saved_context is not None and choice == 'CHOICE_EXIT'
+                       and session['statement_type'] == 'DECLARE_SURPRISE_WAR')
+    if verify_war_exit:
+        from civ6_host.runtime import xp2_world_war
+        xp2_world_war.verify_close_writer(owner)
+    if choice in PROMISE_RESPONSES:
+        if choice != 'CHOICE_POSITIVE' and (saved_context is None
+                or not is_received_promise(current['data']['session'], pid)):
+            raise ValueError('This response requires a received promise request')
+        response = PROMISE_RESPONSES[choice]
+        source += ('local ok=DiplomacyManager.AddResponse(%d,%d,"%s")\nassert(type(ok)=="boolean" and ok,"Native response refused")\nreturn "accepted"' % (sid, pid, response)).encode()
     elif action['choice'] == 'CHOICE_EXIT':
         source += ('assert(DiplomacyManager.HasQueuedSession(%d)==false,"Queued-session EXIT choreography not yet qualified")\nlocal ok=DiplomacyManager.CloseSession(%d)\nassert(type(ok)=="boolean" and ok,"Native close refused")\nreturn "accepted"' % (pid, sid)).encode()
     else:
         raise ValueError('Unknown explicit diplomatic response')
     owner.emit('before_official_explicit_action', action=action, player_id=pid, turn=obs['turn'], jobs_before=before, automatic_choices_applied=False, strategic_training_ready=False)
     response_started = False
+    was_busy = owner.busy
     if saved_context is not None:
         saved_context.begin_response(owner)
         response_started = True
@@ -271,7 +311,13 @@ def apply(owner, action, *, saved_context=None):
         raw = p.runtime.evaluate_text(p.ui_child, source, b'@explicit_native_diplomacy_response', capacity=1024)
         if raw != b'accepted':
             raise RuntimeError('Native response result differs')
+        if verify_war_exit:
+            if len(p.actions.pending) != 1:
+                raise RuntimeError('Native surprise-war exit must queue one close archive')
+            xp2_world_war.verify_exit_archive(p.actions.pending[0], pid, sid)
         deliver_response(p.actions, action['choice'])
+        if verify_war_exit:
+            xp2_world_war.require_closed_war(p, session, obs['turn'])
         ledger = p.deferred_events.pending_diplomacy_statements
         if not ledger or ledger[0] != current['statement']:
             raise RuntimeError('Pending statement identity changed')
@@ -285,7 +331,7 @@ def apply(owner, action, *, saved_context=None):
             saved_context.poison(owner)
         raise
     finally:
-        owner.busy = False
+        owner.busy = was_busy and not owner.poisoned
         if response_started and not owner.poisoned:
             saved_context.end_response(owner)
     owner.emit('official_explicit_diplomacy_response_applied', action=action, pending_statement_removed=True, native_success=True, native_command_delivered=True, transport_source_sha256=TRANSPORT_SHA, automatic_choices_applied=False, strategic_training_ready=False)

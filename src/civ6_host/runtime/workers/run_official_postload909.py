@@ -25,12 +25,18 @@ def sha(data):
 def open_official_backend(closure, emit, win):
     candidate = closure.get('input_profile') in ('xp1-lan', 'xp2-lan')
     execution_image = None
+    installed_base = False
     if 'execution_image' in closure:
-        from civ6_host.runtime.execution_images import _XP1_PROFILE, from_identity
+        from civ6_host.runtime.execution_images import _BASE_PROFILE, _XP1_PROFILE, from_identity
         execution_image = from_identity(closure['execution_image'])
-        expected_family = 'xp1-lan' if execution_image is _XP1_PROFILE else 'xp2-lan'
+        installed_base = execution_image is _BASE_PROFILE
+        if installed_base:
+            expected_family = 'hotseat-four'
+        else:
+            expected_family = 'xp1-lan' if execution_image is _XP1_PROFILE else 'xp2-lan'
         if closure.get('input_profile') != expected_family:
-            raise ValueError('Execution image compatibility requires its exact expansion owner')
+            scope = 'hotseat' if installed_base else 'expansion'
+            raise ValueError('Execution image compatibility requires its exact ' + scope + ' owner')
         if execution_image is _XP1_PROFILE:
             from civ6_host.runtime.network_protocol import CLOSURE_SCHEMA
             private = closure.get('schema') == 'civ6-host.xp1-saved-load-candidate.v1'
@@ -65,7 +71,11 @@ def open_official_backend(closure, emit, win):
         if actual != digest:
             raise ValueError('Worker source/input changed: ' + name)
     from civ6_host.runtime.native.native_official_bundle import consume_parent_localization_handoff
-    if candidate:
+    if installed_base:
+        if 'parent_localization_validation' in closure or 'prepared_capture' in closure:
+            raise ValueError('Installed Base worker requires its own exact retained inputs')
+        handoff_receipt = None
+    elif candidate:
         from civ6_host.runtime.capture_admission import consume_prepared_closure
         handoff_receipt = consume_prepared_closure(closure, _candidate_profile=candidate_contract.family)
         if handoff_receipt is None:
@@ -91,7 +101,12 @@ def open_official_backend(closure, emit, win):
         from civ6_host.runtime.captured_saved_load import validate_closure_profile
         if not (candidate and closure.get('network_checkpoint') is not None):
             validate_closure_profile(closure)
-        if candidate:
+        if installed_base:
+            from civ6_host.runtime.base_capture_inputs import verify_worker
+            captured = verify_worker(closure, executable=sys.executable)
+            emit('native_base_hotseat_inputs_verified', dependencies=len(captured.dependencies),
+                 private_databases=len(captured.fixture['databases']), native_library_loaded=False)
+        elif candidate:
             from civ6_host.runtime.capture_candidates import consume_input_handoff
             captured = consume_input_handoff(candidate_contract.family, closure['prepared_capture'],
                 official_bundle=candidate_contract.reference,
@@ -108,9 +123,10 @@ def open_official_backend(closure, emit, win):
         if captured.initial_turn != closure['initial_turn']:
             raise ValueError('Worker initial turn differs from captured bundle')
         inputs = captured.inputs
-        validate_bundle_fixture(captured, _resolve_resource_path(Path(closure['fixture'])))
+        if not installed_base:
+            validate_bundle_fixture(captured, _resolve_resource_path(Path(closure['fixture'])))
     else:
-        if closure.get('database_profile') == 'official-captured-bundle-diagnostic':
+        if installed_base or closure.get('database_profile') == 'official-captured-bundle-diagnostic':
             raise ValueError('Captured database profile requires its explicit official bundle')
         inputs = read_inputs(selected)
     if closure.get('resume_checkpoint') is not None:

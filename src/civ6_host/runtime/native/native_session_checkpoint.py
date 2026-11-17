@@ -15,15 +15,18 @@ from civ6_host.runtime.native.native_checkpoint_job_observer import JobObserver
 from civ6_host.runtime.native.native_player_observation import observe_player
 from civ6_host.runtime.native.native_saved_actions import boundary
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_session_checkpoint.py')))).resolve().parents[1]
-SCHEMA = 'civ6rl.session_checkpoint939.v1'
+HOTSEAT_SCHEMA = 'civ6_host.base_capture09_native_checkpoint.v1'
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 def validate_option(closure):
     value = closure.get('checkpoint_on_close', False)
+    if closure.get('input_profile') == 'hotseat-four':
+        from civ6_host.runtime.base_capture_inputs import checkpoint_enabled
+        return checkpoint_enabled(closure)
     if type(value) is not bool or (value and closure.get('input_profile') not in ('single', 'lan')):
-        raise ValueError('Checkpoint requires the explicit Single administrative option')
+        raise ValueError('Unsupported administrative checkpoint option')
     return value
 
 def private_paths(closure_path):
@@ -67,16 +70,36 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
     """Reuse prepare/stream/provider/Save/job/postflight methods already witnessed."""
 
     def __init__(self, owner, observation, decisions, closure, closure_path):
-        if type(owner) is not official.OfficialLoadBackend or owner.inputs.profile not in (official.SINGLE_PROFILE, official.LAN_PROFILE):
-            raise TypeError('Session Save requires the official Base Single owner')
-        _checkpoint_boundary(owner)
+        if type(owner) is not official.OfficialLoadBackend or owner.inputs.profile not in (
+                official.SINGLE_PROFILE, official.LAN_PROFILE, official.HOTSEAT_FOUR_PROFILE):
+            raise TypeError('Session Save requires an admitted official Base owner')
         if not validate_option(closure):
             raise ValueError('Administrative Save was not enabled')
+        self.player_id = 0
+        self.execution_image = getattr(owner.core, '_civ6_host_execution_image', None)
+        hotseat = owner.inputs.profile is official.HOTSEAT_FOUR_PROFILE
+        if hotseat:
+            from civ6_host.runtime.base_capture_inputs import REFERENCE, checkpoint_manifest
+            from civ6_host.runtime.execution_images import _BASE_PROFILE
+            from civ6_host.runtime.native.native_official_hotseat import PLAYERS
+            parent = owner.inputs.checkpoint
+            parent_reference = dict(path=parent[0], sha256=parent[1]) if parent is not None else None
+            if (closure.get('input_profile') != 'hotseat-four' or self.execution_image is not _BASE_PROFILE
+                    or owner.inputs.official_bundle != REFERENCE or closure.get('hotseat_checkpoint') != parent_reference
+                    or getattr(owner, 'turn_continuation', None) is not None):
+                raise ValueError('Checkpoint does not belong to its installed Base Hotseat session')
+            self.player_id = owner.hotseat_actor
+            boundary(owner, player_id=self.player_id, player_ids=PLAYERS)
+        else:
+            _checkpoint_boundary(owner)
         if json.loads(_resolve_resource_path(_resolve_resource_path(Path(closure_path))).read_bytes()) != closure:
             raise ValueError('Private closure changed')
         if getattr(owner, 'session_checkpoint_attempt', None) is not None:
             raise RuntimeError('One Save per session')
-        if type(observation) is not dict or type(decisions) is not dict or observation['player_id'] != 0 or (decisions['player_id'] != 0) or (decisions['turn'] != observation['turn']):
+        if (type(observation) is not dict or type(decisions) is not dict
+                or observation['player_id'] != self.player_id or decisions['player_id'] != self.player_id
+                or decisions['turn'] != observation['turn']
+                or hotseat and owner.hotseat_turn != observation['turn']):
             raise ValueError('Save observation identity differs')
         self.owner = owner
         self.prefix = owner.prefix
@@ -87,10 +110,25 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
         self.closure_path = _resolve_resource_path(_resolve_resource_path(Path(closure_path))).resolve()
         self.closure = copy.deepcopy(closure)
         from civ6_host.runtime.native.native_session_resume import save_provenance
-        self.execution_image = getattr(owner.core, '_civ6_host_execution_image', None)
+        if hotseat:
+            from civ6_host.runtime.execution_images import identity
+            from civ6_host.runtime.native.native_official_bundle import _manifest
+            capture = _manifest(self.inputs.official_bundle)[1]
+            self.origin_save_sha256 = capture['save']['source']['sha256']
+            self.provenance = dict(schema=HOTSEAT_SCHEMA,
+                source_official_bundle=copy.deepcopy(closure['official_bundle']),
+                execution_image=identity(self.execution_image))
+            if parent is not None:
+                from civ6_host.runtime.native.native_session_resume import MAX_CHAIN_DEPTH
+                depth = checkpoint_manifest(parent).get('lineage_depth', 0) + 1
+                if depth > MAX_CHAIN_DEPTH:
+                    raise ValueError('Hotseat checkpoint ancestry exceeds its bound')
+                self.provenance.update(parent_checkpoint=parent_reference, lineage_depth=depth)
+        else:
+            self.origin_save_sha256 = self.inputs.profile.save_sha
         if self.execution_image is None:
             self.provenance = save_provenance(self.inputs, self.closure)
-        else:
+        elif not hotseat:
             from civ6_host.runtime.network_checkpoint import save_provenance as lan_save_provenance
             self.provenance = lan_save_provenance(self.inputs, self.closure,
                 execution_image=self.execution_image)
@@ -103,7 +141,11 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
 
     def enter(self):
         b = self.owner
-        _checkpoint_boundary(b)
+        if self.inputs.profile is official.HOTSEAT_FOUR_PROFILE:
+            from civ6_host.runtime.native.native_official_hotseat import PLAYERS
+            boundary(b, player_id=self.player_id, player_ids=PLAYERS)
+        else:
+            _checkpoint_boundary(b)
         if b.session_checkpoint_attempt is not self or type(b.jobs) is not JobObserver or b.stage != self.stage or (self.publisher is None) or (self.facade is None):
             raise RuntimeError('Save lost its owner, publisher or scheduler')
         self.memory = LocalMemory()
@@ -124,7 +166,7 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
         return dict(topology=topology, context=b.context, provider=b.owner.pointer, publisher=id(self.publisher), facade=id(self.facade), prefix=id(self.prefix))
 
     def state(self):
-        current = observe_player(self.prefix.runtime, self.prefix.ui_child, 0)
+        current = observe_player(self.prefix.runtime, self.prefix.ui_child, self.player_id)
         if current != self.expected_state:
             raise RuntimeError('Save changed the current player observation')
         return current
@@ -148,7 +190,7 @@ class SessionSaveBackend(NativeRetainedSaveBackend):
         from civ6_host.runtime.xp1_session_checkpoint import manifest_sources
         selected_core, selected_sources = manifest_sources(
             self, reference, execution_image=self.execution_image)
-        manifest = dict(**self.provenance, components=components, observed_game_turn=self.expected_state['turn'], player_id=0, observation=self.expected_state, decisions=self.decisions, input_profile=profile.name, origin_official_save_sha256=profile.save_sha, input_components_sha256=dict(gamecore=sha(self.inputs.game), application_configuration=sha(self.inputs.configuration)), session_closure=reference(self.closure_path), fixture=reference(_resolve_resource_path(Path(self.closure['fixture']))), database_profile=self.closure['database_profile'], core_sha256=selected_core, source_proofs=selected_sources, configuration_receipt=receipt, native_save_status=0, game_version_prefix=data[:4].hex(), game_stream_calls=self.stream.transport.calls, stream_closed=True, control=control, jobs_before=before_jobs, jobs_after=after_jobs, jobs_quiescent_unchanged=True, host_placement_tracking=[dict(key=list(k), choice=copy.deepcopy(v)) for k, v in getattr(getattr(self, 'host_state_owner', self.owner), 'explicit_placements', {}).items()], native_load_of_new_pair_validated=False, full_civ6save_container=False, scheduler_load_ledger_postrun_required=True, scheduler_load_ledger_reconciled=False, exact_save_database_content_scripts_proven=False, dlc_mod_compatibility_proven=False, eligible_for_training=False)
+        manifest = dict(**self.provenance, components=components, observed_game_turn=self.expected_state['turn'], player_id=self.player_id, observation=self.expected_state, decisions=self.decisions, input_profile=profile.name, origin_official_save_sha256=self.origin_save_sha256, input_components_sha256=dict(gamecore=sha(self.inputs.game), application_configuration=sha(self.inputs.configuration)), session_closure=reference(self.closure_path), fixture=reference(_resolve_resource_path(Path(self.closure['fixture']))), database_profile=self.closure['database_profile'], core_sha256=selected_core, source_proofs=selected_sources, configuration_receipt=receipt, native_save_status=0, game_version_prefix=data[:4].hex(), game_stream_calls=self.stream.transport.calls, stream_closed=True, control=control, jobs_before=before_jobs, jobs_after=after_jobs, jobs_quiescent_unchanged=True, host_placement_tracking=[dict(key=list(k), choice=copy.deepcopy(v)) for k, v in getattr(getattr(self, 'host_state_owner', self.owner), 'explicit_placements', {}).items()], native_load_of_new_pair_validated=False, full_civ6save_container=False, scheduler_load_ledger_postrun_required=True, scheduler_load_ledger_reconciled=False, exact_save_database_content_scripts_proven=False, dlc_mod_compatibility_proven=False, eligible_for_training=False)
         if self.inputs.profile.name in ('base-lan-official-capture', 'xp1-lan-official-capture-inputs', 'xp2-lan-official-capture-inputs'):
             from civ6_host.runtime.network_checkpoint import finalize_manifest
             manifest = finalize_manifest(self, manifest)

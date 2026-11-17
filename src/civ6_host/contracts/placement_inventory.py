@@ -3,22 +3,26 @@
 This validates a same-boundary read. It does not infer placement dates,
 availability of a production action, or completeness of hidden constructs.
 """
+from copy import deepcopy
+
 from .action_budget import MAP_CELL_LIMIT
 from .production_queue import _uint, _type_name
 
 SCHEMA='civ6-host.placement-inventory.v1'
+DETAILS_SCHEMA='civ6-host.placement-inventory.v2'
 SCOPE='native_visible_own_city'
 MAX_ROWS=2*MAP_CELL_LIMIT
 FIELDS=frozenset(('schema','scope','player_id','turn','rows'))
 ROW_FIELDS=frozenset(('city_id','category','index','hash','item_type','plot_id',
                       'x','y','complete','district_id'))
+DETAILS_ROW_FIELDS=ROW_FIELDS | {'pillaged'}
 
 
 def validate(value,player_id,turn,*,observation=None):
     """Validate exact public rows; null means that this read was unavailable."""
     _uint(player_id,'inventory player',63);_uint(turn,'inventory turn',2147483647)
     if value is None:return None
-    if (type(value) is not dict or set(value)!=FIELDS or value['schema']!=SCHEMA
+    if (type(value) is not dict or set(value)!=FIELDS or value['schema'] not in (SCHEMA,DETAILS_SCHEMA)
             or value['scope']!=SCOPE or type(value['player_id']) is not int
             or value['player_id']!=player_id or type(value['turn']) is not int
             or value['turn']!=turn or type(value['rows']) is not list
@@ -37,12 +41,17 @@ def validate(value,player_id,turn,*,observation=None):
             raise ValueError('Placement inventory map geometry exceeds the public bound')
         own={r['id'] for r in observation['cities'] if r['owner']==player_id}
         visible={r['index'] for r in observation['plots'] if r['visible'] is True}
+    details=value['schema']==DETAILS_SCHEMA
+    row_fields=DETAILS_ROW_FIELDS if details else ROW_FIELDS
     seen=set()
     for row in value['rows']:
-        if (type(row) is not dict or set(row)!=ROW_FIELDS
+        if (type(row) is not dict or set(row)!=row_fields
                 or row['category'] not in ('district','building')
                 or type(row['complete']) is not bool):
             raise ValueError('Malformed native placement inventory row')
+        if details and ((row['category']=='district' and type(row['pillaged']) is not bool)
+                        or (row['category']=='building' and row['pillaged'] is not None)):
+            raise ValueError('District pillage requires an exact Boolean; building pillage is unqualified')
         for name in ('city_id','hash'):_uint(row[name],'inventory '+name)
         _uint(row['index'],'inventory index',2147483647)
         for name in ('plot_id','x','y'):_uint(row[name],'inventory '+name,65535)
@@ -60,3 +69,14 @@ def validate(value,player_id,turn,*,observation=None):
                     or row['plot_id']!=row['y']*width+row['x'] or row['plot_id'] not in visible):
                 raise ValueError('Placement inventory differs from the currently visible public map')
     return value
+
+
+def project_legacy(value,player_id,turn,*,observation=None):
+    """Comparison copy retaining every historical v1 field and row identity."""
+    validate(value,player_id,turn,observation=observation)
+    projected=deepcopy(value)
+    if projected is not None and projected['schema']==DETAILS_SCHEMA:
+        projected['schema']=SCHEMA
+        for row in projected['rows']:
+            del row['pillaged']
+    return projected

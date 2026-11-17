@@ -8,6 +8,7 @@ import hashlib
 from pathlib import Path
 import re
 
+from .source_verification import file_sha256, verify_pinned_json_bytes
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
@@ -169,7 +170,7 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
             or proof['contracts']['public_schema'] != 'civ6rl.production_queue.public.v2'):
         raise ValueError('XP2 queue route contract changed')
     for ref in proof['references']:
-        _source((ref['path'], ref['sha256']))
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     _ui_source(proof)
     _witness(proof)
     return proof
@@ -187,7 +188,7 @@ def source_dependencies(*, execution_image=None):
         if ref is proof['image'] and execution_image is not None:
             continue
         path = resolve_path(resource_root()/ref['path']).resolve()
-        if (hashlib.sha256(path.read_bytes()).hexdigest() != ref['sha256']
+        if (file_sha256(path) != ref['sha256']
                 or str(path) in result and result[str(path)] != ref['sha256']):
             raise ValueError('XP2 queue dependency changed: ' + str(path))
         result[str(path)] = ref['sha256']

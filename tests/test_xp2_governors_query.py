@@ -246,6 +246,28 @@ function IsPromotionHidden(hash,pid,index) return true end
         with self.assertRaises(LuaError):
             lua.execute(query.catalogue_source(0, 17, self.SUPPORT_STUB))
 
+    def test_rise_and_fall_uses_assigned_identity_and_two_argument_city_state_query(self):
+        lua = self._query_fixture()
+        lua.execute(b"""
+local governor=GetAppointedGovernor(0,1)
+governor.GetID=function() return 123 end
+governor.CanAssignToMajorCiv=nil
+PlayerManager.GetAliveMajors=function() error('foreign major list is unavailable') end
+manager.GetAssignedGovernor=function(_,city)
+ if city:GetOwner()==0 and city:GetID()==11 then return governor end
+end
+manager.CanAssignGovernor=function(_,hash,city,...)
+ assert(select('#',...)==0)
+ return city:GetOwner()==19
+end
+""")
+        catalogue = query.parse_catalogue(lua.execute(
+            query.catalogue_source(0, 17, self.SUPPORT_STUB, rise_and_fall=True)), 0, 17)
+        governor = catalogue['governors'][0]
+        self.assertFalse(governor['status']['can_assign_to_major_civ'])
+        self.assertEqual([(row['owner'], row['city_id']) for row in governor['assignment_targets']],
+                         [(0, 12), (0, 99), (19, 11), (19, 99)])
+
     def test_query_source_uses_engine_getters_and_preserves_ui_filtered_targets(self):
         lua = self._query_fixture()
         source = query.catalogue_source(0, 17, self.SUPPORT_STUB)

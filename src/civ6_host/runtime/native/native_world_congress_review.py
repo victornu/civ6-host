@@ -343,7 +343,9 @@ def source_dependencies(*, execution_image):
     result[str(resolve_path(resource_root() / SOURCE[0]).resolve())] = SOURCE[1]
     for row in [proof['parent'], *proof['files'], proof['provider_implementation'], proof['topology_reference']]:
         path = resolve_path(Path(row['path']))
-        if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+        with path.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual != row['sha256']:
             raise ValueError('Congress review installed caller changed')
         result[str(path.resolve())] = row['sha256']
     private_proof = _source(PRIVATE_SOURCE)
@@ -354,7 +356,9 @@ def source_dependencies(*, execution_image):
     result[str(resolve_path(resource_root() / PRIVATE_SOURCE[0]).resolve())] = PRIVATE_SOURCE[1]
     for row in [*private_proof['parents'], *private_proof['files']]:
         path = resolve_path(Path(row['path']))
-        if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+        with path.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual != row['sha256']:
             raise ValueError('Congress administrative own-target caller changed')
         result[str(path.resolve())] = row['sha256']
     numeric = _source(NUMERIC_SOURCE)
@@ -370,7 +374,9 @@ def source_dependencies(*, execution_image):
     result[str(resolve_path(resource_root() / NUMERIC_SOURCE[0]).resolve())] = NUMERIC_SOURCE[1]
     for row in [*numeric['parents'].values(),*numeric['images'].values(),numeric['ui']]:
         path = resolve_path(Path(row['path']))
-        if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+        with path.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual != row['sha256']:
             raise ValueError('Congress review signed numeric source dependency changed')
         result[str(path.resolve())] = row['sha256']
     return result

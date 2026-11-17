@@ -59,18 +59,55 @@ def bind_policy_provenance(value, core_sha256):
     return value
 
 
-def read(saved, player_id=None, *, allow_diplomacy=False):
-    """Read the current local UI result from one exact live SavedLoadOwner."""
-    from .xp1_saved_load_owner import SavedLoadOwner
+def _observe_result(saved, player_id, turn, *, active, allow_inactive_observer=False,
+                    control_options=None):
     from .native.native_episode_identity import require_episode
     from .native import native_winning_team as winning, native_episode_facts as facts
     from .native.native_victory_episode import FirstOfficialVictory
+
+    b, p, c = saved.backend, saved.prefix, saved.continuation
+    core_sha256 = b.load_abi.core_sha256
+    control_options = control_options or {}
+    identity = require_episode(p)
+    bound = bind_owner(b, saved.core, b.runtime.read)
+    if bound.owner is not b or bound.core is not saved.core or bound.core_sha256 != core_sha256:
+        raise ValueError('Result source lost its exact backend/module owner')
+    policy = getattr(p, '_first_official_victory_policy', None)
+    if policy is not None and (type(policy) is not FirstOfficialVictory
+            or policy.episode_id != identity.episode_id or policy._core_sha256 != core_sha256):
+        raise ValueError('Result policy belongs to another episode or engine')
+    first = winning.parse(p.runtime.evaluate_text(p.ui_child,
+        winning.source(core_sha256=core_sha256), b'@xp1_session_winner', capacity=48))
+    payload = p.runtime.evaluate_text(p.ui_child,
+        facts.build_source(player_id, turn, core_sha256=core_sha256,
+                           allow_inactive_observer=allow_inactive_observer),
+        b'@xp1_session_episode_facts', capacity=facts.MAX_RESPONSE)
+    parsed = facts.parse_facts(payload, player_id, turn, core_sha256=core_sha256)
+    if first != {key: parsed[key] for key in ('winner_present', 'winning_team', 'victory_type')}:
+        raise ValueError('Consecutive native XP1 winner reads disagree')
+    c.check(active=active)
+    c.transport.require_empty_native_queue()
+    b.control(empty=True, **control_options)
+    if policy is None:
+        policy = FirstOfficialVictory(identity.episode_id, core_sha256=core_sha256)
+        p._first_official_victory_policy = policy
+    result = policy.observe(payload, player_id, turn)
+    result['game_generation'] = identity.game_generation
+    p.emit('native_victory_episode_policy_observed', result=result,
+           engine_state_modified=False, eligible_for_training=False)
+    return result
+
+
+def read(saved, player_id=None, *, allow_diplomacy=False, allow_inactive_observer=False):
+    """Read the current local UI result from one exact live SavedLoadOwner."""
+    from .xp1_saved_load_owner import SavedLoadOwner
     if type(saved) is not SavedLoadOwner:
         raise TypeError('Result read requires the exact saved-Load owner')
     saved._check('commands',requested='unit_commands_candidate')
     b,p,c = saved.backend,saved.prefix,saved.continuation
-    if type(allow_diplomacy) is not bool:
-        raise ValueError('Exact result dialogue read mode required')
+    if (type(allow_diplomacy) is not bool or type(allow_inactive_observer) is not bool
+            or allow_diplomacy and allow_inactive_observer):
+        raise ValueError('Exact result dialogue or neutral observer mode required')
     context=None
     if allow_diplomacy:
         from .xp2_diplomacy import _SavedDialogueContext
@@ -82,36 +119,32 @@ def read(saved, player_id=None, *, allow_diplomacy=False):
     core_sha256=b.load_abi.core_sha256
     verify_reader_source(core_sha256)
     c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True,**control_options)
-    identity = require_episode(p)
     current = c.observation
     local,turn = current['player_id'],current['turn']
     if player_id is None:player_id = local
     if type(player_id) is not int or player_id != local:
         raise ValueError('Additional XP1 result perspective is not qualified')
-    bound = bind_owner(b,saved.core,b.runtime.read)
-    if bound.owner is not b or bound.core is not saved.core or bound.core_sha256 != core_sha256:
-        raise ValueError('Result source lost its exact backend/module owner')
-    policy = getattr(p,'_first_official_victory_policy',None)
-    if policy is not None and (type(policy) is not FirstOfficialVictory
-            or policy.episode_id != identity.episode_id
-            or policy._core_sha256 != core_sha256):
-        raise ValueError('Result policy belongs to another episode or engine')
     with saved._attempt():
-        first = winning.parse(p.runtime.evaluate_text(p.ui_child,
-            winning.source(core_sha256=core_sha256),b'@xp1_session_winner',capacity=48))
-        payload = p.runtime.evaluate_text(p.ui_child,
-            facts.build_source(player_id,turn,core_sha256=core_sha256),
-            b'@xp1_session_episode_facts',capacity=facts.MAX_RESPONSE)
-        parsed = facts.parse_facts(payload,player_id,turn,core_sha256=core_sha256)
-        if first != {key:parsed[key] for key in ('winner_present','winning_team','victory_type')}:
-            raise ValueError('Consecutive native XP1 winner reads disagree')
-        c.check(active=False);c.transport.require_empty_native_queue();b.control(empty=True,**control_options)
-        if policy is None:
-            policy = FirstOfficialVictory(identity.episode_id,core_sha256=core_sha256)
-            p._first_official_victory_policy = policy
-        result = policy.observe(payload,player_id,turn)
-        result['game_generation'] = identity.game_generation
-        p.emit('native_victory_episode_policy_observed',result=result,
-               engine_state_modified=False,eligible_for_training=False)
+        result = _observe_result(saved, player_id, turn, active=False,
+            allow_inactive_observer=allow_inactive_observer, control_options=control_options)
     if context is not None:context.validate(b)
     return result
+
+
+def read_borrowed_xp2(saved, player_id, turn, *, dialogue=None):
+    """Read the native outcome while the borrowed human is both actor and observer."""
+    saved._check_active()
+    if saved.backend.load_abi.core_sha256 != XP2_CORE_SHA256:
+        raise ValueError('Borrowed result read requires Gathering Storm')
+    if dialogue is not None:
+        from .xp2_diplomacy import BorrowedWarDialogue
+
+        if type(dialogue) is not BorrowedWarDialogue or dialogue.saved is not saved:
+            raise ValueError('Invalid borrowed result dialogue')
+        if (dialogue.player_id, dialogue.turn) != (player_id, turn):
+            raise ValueError('Borrowed result dialogue belongs to another actor')
+        dialogue.validate(saved.backend)
+    # The existing Lua reader asserts the live actor, observer and turn.
+    verify_reader_source(XP2_CORE_SHA256)
+    return _observe_result(saved, player_id, turn, active=True,
+                           control_options={'allow_diplomacy': True} if dialogue is not None else None)

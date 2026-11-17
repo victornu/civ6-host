@@ -106,13 +106,15 @@ def _requests(raw, origin=None):
 
 
 class TradeFeedback:
-    def __init__(self, continuation, gameplay_child, table_reader):
+    def __init__(self, continuation, gameplay_child, table_reader, *, spy_event_players=()):
         self.continuation = continuation
         self.gameplay_child = gameplay_child
         self.table_reader = table_reader
         self.events = deque()
         self.last_sequence = 0
         self.spy_completions = None
+        self.secondary_spy_completions = {}
+        self.spy_event_players = spy_event_players
 
     def _enqueue(self, sequence, kind, values):
         if (type(sequence) is not int or sequence <= self.last_sequence
@@ -264,17 +266,31 @@ return table.concat(values, ',')
 
     def _deliver_spy(self, sequence, player, event_player, mission):
         from .xp2_bbg_spy import capacity_source, parse_capacity, parse_request
-        from .xp2_script_operation import deliver_script_operation
+        from .xp2_script_operation import deliver_listener_script_operation, deliver_script_operation
 
-        source = f'return Civ6HostBBGSpy({event_player},{mission})'.encode('ascii')
+        event_seat = bool(self.spy_event_players)
+        listener, submit = 'Civ6HostBBGSpy', deliver_script_operation
+        if event_seat:
+            if event_player not in self.spy_event_players:
+                return
+            player = event_player
+            listener, submit = 'Civ6HostBBGSpyForSeat', deliver_listener_script_operation
+        source = f'return {listener}({event_player},{mission})'.encode('ascii')
         parameters = parse_request(self._evaluate(source, b'@bbg751_spy_ui_event', capacity=16),
                                    local_player=player, event_player=event_player, mission=mission)
         if parameters is None:
             return
-        readback = capacity_source(player)
+        readback = capacity_source(player, event_seat=event_seat)
         before = parse_capacity(self._evaluate(readback, b'@bbg751_spy_capacity', capacity=16))
-        receipt = deliver_script_operation(self.continuation, player, parameters)
+        receipt = submit(self.continuation, player, parameters)
         after = parse_capacity(self._evaluate(readback, b'@bbg751_spy_capacity', capacity=16))
+        if event_seat and receipt.get('native_request_filtered') is True:
+            if receipt['native_archive_delivered'] is not False or after != before:
+                raise RuntimeError('Filtered BBG spy request changed native capacity')
+            self.continuation.owner.emit('xp2_bbg_spy_request_filtered', event_sequence=sequence,
+                player_id=player, mission_id=mission, native_archive_delivered=False,
+                capacity_effect_observed=False)
+            return
         if receipt['native_archive_delivered'] is not True:
             raise RuntimeError('BBG spy gameplay callback has no native delivery')
         self.continuation.owner.emit('xp2_bbg_spy_gameplay_delivered', event_sequence=sequence,
@@ -302,8 +318,9 @@ return table.concat(values, ',')
                 continue
             if kind == 'spy':
                 self._deliver_spy(sequence, player, *values)
-                if self.spy_completions is not None:
-                    self.spy_completions.receive(sequence, *values)
+                completion = self.secondary_spy_completions.get(values[0], self.spy_completions)
+                if completion is not None:
+                    completion.receive(sequence, *values)
                 continue
             args = ','.join(str(value) for value in values)
             source = f'return Civ6HostBBGTradeFeedback.{kind}({args})'.encode('ascii')
@@ -325,6 +342,8 @@ return table.concat(values, ',')
     def check_checkpoint(self):
         if self.spy_completions is not None:
             self.spy_completions.check_checkpoint()
+        for completion in self.secondary_spy_completions.values():
+            completion.check_checkpoint()
         if self.events or self._evaluate(b'return Civ6HostBBGTradeFeedback.buffered()',
                 b'@bbg751_trade_buffer_count', capacity=16) != b'0':
             raise ValueError('Cannot checkpoint pending BBG UI trade feedback')
@@ -336,7 +355,8 @@ def bind(saved):
     from .xp2_trade_table_variant import TradeTableVariantReader
     from .xp2_bbg_amani import listener_source
     from .xp2_bbg_promotion import listener_source as promotion_listener_source
-    from .xp2_bbg_spy import listener_source as spy_listener_source
+    from .xp2_bbg_spy import listener_source as spy_listener_source, verify_event_player_lookup
+    from .xp1_session_view import _reference
 
     continuation = saved.continuation
     continuation.check(active=False)
@@ -351,10 +371,18 @@ def bind(saved):
         raise ValueError('BBG trade has no live loaded gameplay script')
     gameplay_child = contexts.lifetime._contexts[scripts[0]]
     continuation.runtime.registry.validate(gameplay_child)
-    feedback = TradeFeedback(continuation, gameplay_child, TradeTableVariantReader(continuation))
+    reference, _ = _reference(saved, continuation.observation['player_id'])
+    humans = reference['human_player_ids']
+    if len(humans) > 1:
+        verify_event_player_lookup(image, backend.core._handle, backend.runtime.read)
+    feedback = TradeFeedback(continuation, gameplay_child, TradeTableVariantReader(continuation),
+                             spy_event_players=humans if len(humans) > 1 else ())
     if getattr(saved, 'espionage_diagnostic', False):
         from .xp2_spy_completion import CompletionQueue
-        feedback.spy_completions = CompletionQueue(continuation)
+        primary = continuation.observation['player_id']
+        feedback.spy_completions = CompletionQueue(continuation, player_id=primary if len(humans) > 1 else None)
+        feedback.secondary_spy_completions = {
+            pid: CompletionQueue(continuation, player_id=pid) for pid in humans if pid != primary}
     _, raw = _ui_source()
     continuation.runtime.execute(continuation.ui_child, lua_bridge(raw), b'@bbg751_trade_ui_listener')
     continuation.runtime.execute(continuation.ui_child, listener_source(raw), b'@bbg751_amani_ui_listener')

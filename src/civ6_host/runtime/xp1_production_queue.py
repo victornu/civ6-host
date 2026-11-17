@@ -51,23 +51,30 @@ class _BoundQueueOwner:
         self.saved.emit(stage, **payload)
 
 
-def read(saved, observation):
+def read_queues(saved, observation, production_snapshot):
     from .xp1_production_queue_profile import bind_owner, gate_admitted
+    from .native import native_saved_production_queue as queues
+    b, c, p = saved.backend, saved.continuation, saved.prefix
+    bind_owner(b, b.core, b.runtime.read)
+    enabled = gate_admitted(c)
+    if type(enabled) is not bool:
+        raise TypeError('Production queue UI admission must be exact')
+    state = [queues.catalog(p, city['id'], observation['turn'], player_id=observation['player_id'],
+                            enabled=enabled, core_sha256=b.load_abi.core_sha256)
+             for city in observation['cities']]
+    queues.validate_all(state, observation['player_id'], observation['turn'])
+    queues.check_heads(state, production_snapshot)
+    return state
+
+
+def read(saved, observation):
     from .native import native_saved_production_queue as queues
     b, c, p, identity = _owner(saved, active=False)
     if type(observation) is not dict or observation != c.observation:
         raise ValueError('Production queues require the current observation')
-    bind_owner(b, b.core, b.runtime.read)
     c._xp1_production_queue_catalogue = c.explicit_production_queues = None
     before, sequence = deepcopy(observation), c.sequence
-    enabled = gate_admitted(c)
-    if type(enabled) is not bool:
-        raise TypeError('Production queue UI admission must be exact')
-    state = [queues.catalog(p, city['id'], before['turn'], player_id=before['player_id'],
-                            enabled=enabled, core_sha256=b.load_abi.core_sha256)
-             for city in before['cities']]
-    queues.validate_all(state, before['player_id'], before['turn'])
-    queues.check_heads(state, c.explicit_production_snapshot)
+    state = read_queues(saved, before, c.explicit_production_snapshot)
     actions = [action for row in state for action in queues.actions(row)]
     actual = _owner(saved, active=False)
     if (any(a is not e for a, e in zip(actual, (b, c, p, identity)))

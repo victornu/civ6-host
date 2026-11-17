@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from civ6_host import HotseatClient, ProtocolError
+from civ6_host import HotseatClient, InformationUnavailable, ProtocolError
 from civ6_host.client import SCHEMA, _digest
 from civ6_host.contracts import policies
 
@@ -105,6 +105,120 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):
             self.client.act(self.client.view()["decisions"]["decision_id"], "absent")
         self.assertEqual(len(self.backend.calls), 1)
+
+    def test_hotseat_occupation_hides_unoffered_owners_and_forwards_exact_native_choice(self):
+        action = dict(kind="resolve_captured_city", city_id=9, directive="LIBERATE_PREVIOUS_OWNER")
+
+        class OccupationBackend(Backend):
+            def reply(self, operation, applied=None):
+                result = super().reply(operation, applied)
+                observation = result["observation"]
+                city = dict(city_id=9, x=2, y=3, original_owner=5, previous_owner=4, conquered_from=6)
+                occupation = dict(player_id=self.player, turn=self.turn, city=None, directives=[])
+                if operation == "reset":
+                    occupation.update(city=city, directives=["LIBERATE_PREVIOUS_OWNER"])
+                    observation["cities"] = [dict(id=9, x=2, y=3, owner=self.player)]
+                decisions = result["decisions"]
+                decisions["captured_city"] = occupation
+                decisions["candidates"] = ([dict(candidate_id=_digest(action), action=action)]
+                                           if operation == "reset" else [])
+                del decisions["decision_id"]
+                decisions["decision_id"] = _digest(decisions)
+                return result
+
+            def request(self, request):
+                self.calls.append(copy.deepcopy(request))
+                self.seq += 1
+                self.current = self.reply(request["operation"], action)
+                return copy.deepcopy(self.current)
+
+        backend = OccupationBackend()
+        client = HotseatClient(backend)
+        view = client.reset()
+        decisions = view["decisions"]
+        wire_id = backend.current["decisions"]["decision_id"]
+        public_city = dict(city_id=9, x=2, y=3, liberation_recipients={"LIBERATE_PREVIOUS_OWNER": 4})
+        self.assertEqual(decisions["captured_city"]["city"], public_city)
+        self.assertNotEqual(decisions["decision_id"], wire_id)
+        self.assertEqual(decisions["decision_id"], _digest({
+            key: value for key, value in decisions.items() if key != "decision_id"}))
+        information = client.information("captured_city")
+        self.assertEqual(information["native_decision_id"], decisions["decision_id"])
+        self.assertEqual(information["data"], decisions["captured_city"])
+        information["data"]["city"].clear()
+        self.assertEqual(client.information("captured_city")["data"]["city"], public_city)
+        with self.assertRaises(InformationUnavailable):
+            client.information("captured_city", player_id=4)
+        with self.assertRaises(ProtocolError):
+            client.act(wire_id, _digest(action))
+        self.assertEqual(backend.calls, [])
+        result = client.act(decisions["decision_id"], _digest(action))
+        self.assertEqual(result["applied_action"], action)
+        self.assertEqual(backend.calls[0]["selection"],
+                         dict(decision_id=wire_id, candidate_id=_digest(action)))
+        self.assertIsNone(client.information("captured_city")["data"]["city"])
+
+    def test_hotseat_combat_uses_display_precision_and_preserves_the_native_choice(self):
+        attack = dict(kind="unit_attack", unit_id=7, operation="RANGE_ATTACK",
+                      input_route="dedicated_ranged", plot_id=3, x=3, y=0)
+
+        class CombatBackend(Backend):
+            visible = True
+
+            def reply(self, operation, applied=None):
+                result = super().reply(operation, applied)
+                obs, dec = result["observation"], result["decisions"]
+                unit = dict(id=7, type=9, owner=self.player, x=2, y=0, damage=0, moves=1)
+                obs.update(width=6, height=1, units=[unit], visible_enemy_units=[],
+                           plots=[dict(index=3, visible=self.visible)])
+                dec.update(
+                    schema="civ6rl.saved_decisions999.v1",
+                    combat_units=[dict(unit_id=7, unit_type=9, x=2, y=0, damage=0,
+                                       moves=1, attacks_remaining=int(operation=="reset"))],
+                    combat_relationships=[dict(owner=1, at_war=True)],
+                    combat_cities=[dict(owner=1, city_id=13, district_id=15, plot_id=3, x=3, y=0,
+                                        garrison_damage=0 if operation=="reset" else 20,
+                                        garrison_max=200, outer_damage=0, outer_max=0,
+                                        defense_strength=20.03125)],
+                    queued_orders=dict(player_id=self.player, turn=self.turn, width=6,
+                                       height=1, units=[dict(unit_id=7, plot_id=None)]),
+                    candidates=([dict(candidate_id=_digest(attack), action=attack)]
+                                if operation=="reset" else []))
+                del dec["decision_id"]
+                dec["decision_id"] = _digest(dec)
+                return result
+
+            def request(self, request):
+                self.calls.append(copy.deepcopy(request))
+                self.seq += 1
+                self.current = self.reply(request["operation"], attack)
+                return copy.deepcopy(self.current)
+
+        backend = CombatBackend()
+        client = HotseatClient(backend)
+        view = client.reset()
+        wire_id = backend.current["decisions"]["decision_id"]
+        public_id = view["decisions"]["decision_id"]
+        self.assertNotEqual(wire_id, public_id)
+        combat = client.information("combat")
+        city, = combat["data"]["unit_attacks"]["cities"]
+        self.assertEqual(city["defense_strength"], 20)
+        self.assertIs(type(city["defense_strength"]), int)
+        self.assertEqual(view["decisions"]["combat_cities"], [city])
+        self.assertEqual(combat["data"]["unit_attacks"]["offers"], [attack])
+        self.assertEqual(combat["native_decision_id"], public_id)
+        combat["data"]["unit_attacks"]["offers"].clear()
+        self.assertEqual(client.information("combat")["data"]["unit_attacks"]["offers"], [attack])
+        with self.assertRaises(InformationUnavailable):
+            client.information("combat", player_id=1)
+        self.assertEqual(backend.calls, [])
+        after = client.act(public_id, _digest(attack))
+        self.assertEqual(backend.calls[0]["selection"]["decision_id"], wire_id)
+        self.assertEqual(after["applied_action"], attack)
+        self.assertEqual(client.information("combat")["data"]["unit_attacks"]["cities"][0]["garrison_damage"], 20)
+        backend.visible = False
+        with self.assertRaisesRegex(ProtocolError, "visible player observation"):
+            client.reset()
 
     def test_policy_parameters_forward_exactly_without_choosing_assignments(self):
         dec = self.initial["decisions"]

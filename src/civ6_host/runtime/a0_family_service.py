@@ -32,6 +32,8 @@ class A0FamilyService(SharedHostEventDispatch):
         self.arguments, self.deferred = (arguments, arguments.deferred)
         from .xp2_diplomacy_events import event_profile as diplomacy_event_profile
         self.diplomacy_event_profile = diplomacy_event_profile(getattr(self.deferred, 'core', None))
+        from .xp2_culture_changed import event_profile as culture_event_profile
+        self._culture_event_profile = culture_event_profile(getattr(self.deferred, 'core', None))
         self.read, self.emit = (arguments.reader.read, arguments.emit)
         self.empty_receiver_state = dict(receiver_state)
         self.entity_listener_count = entity_listener_count
@@ -267,6 +269,9 @@ class A0FamilyService(SharedHostEventDispatch):
         diplomacy = getattr(self, 'diplomacy_event_profile', None)
         if diplomacy is not None and kind in diplomacy.record_types_by_kind:
             return True
+        culture = getattr(self, '_culture_event_profile', None)
+        if culture is not None and kind in culture.record_types_by_kind:
+            return True
         if getattr(self,'statement_event_profile',None) is not None and kind in self.statement_event_profile.record_types_by_kind:
             return True
         if self.bbg_trade_event_profile is not None and kind in self.bbg_trade_event_profile.record_types_by_kind:
@@ -304,6 +309,9 @@ class A0FamilyService(SharedHostEventDispatch):
     def handles_record(self, kind):
         diplomacy = getattr(self, 'diplomacy_event_profile', None)
         if diplomacy is not None and kind in diplomacy.record_sizes:
+            return True
+        culture = getattr(self, '_culture_event_profile', None)
+        if culture is not None and kind in culture.record_sizes:
             return True
         if self.policy_unlock_event_profile is not None and kind in self.policy_unlock_event_profile.record_sizes:
             return True
@@ -381,21 +389,33 @@ class A0FamilyService(SharedHostEventDispatch):
         control._a0_event_owner = self
         return self
 
-    def enable_notification_scopes(self):
+    def enable_notification_scopes(self, *, capture_reference=None, script_hashes=None):
         """Opt into source-qualified counter-independent paths on one idle owner."""
         self._check()
         self._require_no_f391_reentry()
         if self.notification_scope_profile is not None or self.arguments.depth or self.active_kind is not None or self.pending or self.deferred._draining_empty_receivers or (type(self.host_notification_counter) is not int) or (self.host_notification_counter != 0) or (type(self.host_metadata_counter) is not int) or (self.host_metadata_counter != 0):
             raise ValueError('A0 notification scopes require one idle owner and closed counters')
-        from .a0_notification_scope_source import RESEARCH_CHANGED, notification_scope_profile, verify_research_changed_live
+        from .a0_notification_scope_source import (
+            QUEST_CHANGED, RESEARCH_CHANGED, notification_scope_profile,
+            verify_research_changed_live, verify_city_state_live,
+        )
+        from .xp1_diplomacy_meet_source import verify_live as verify_meet_live
+        from . import xp2_local_player_changed
         image = getattr(self.deferred.core, '_civ6_host_execution_image', None)
-        profile = notification_scope_profile(execution_image=image)
+        profile = notification_scope_profile(execution_image=image, capture_reference=capture_reference,
+                                             script_hashes=script_hashes)
+        if image is not None:
+            verify_meet_live(image, self.deferred.core._handle, self.read)
         if RESEARCH_CHANGED in profile.records:
             verify_research_changed_live(image, self.deferred.core._handle, self.read)
+        if QUEST_CHANGED in profile.records:
+            verify_city_state_live(image, self.deferred.core._handle, self.read)
+        if xp2_local_player_changed.KIND in profile.records:
+            xp2_local_player_changed.verify_live(image, self.deferred.core._handle, self.read)
         for record_type, size, _ in profile.records.values():
             record = bytearray(size)
             struct.pack_into('<II', record, 0, size, record_type)
-            validate_empty_profile_record(record, **self.empty_receiver_state)
+            validate_empty_profile_record(record, execution_image=image, **self.empty_receiver_state)
         self.notification_scope_profile = self._notification_scope_profile = profile
         return self
 
@@ -422,6 +442,8 @@ class A0FamilyService(SharedHostEventDispatch):
         private = self.private_notification_profile is not None and kind in self.private_notification_profile.record_types_by_kind
         presentation = kind in self.presentation_sources
         xp2_victory = self.deferred.cache_core_sha256 == XP2_CORE_SHA256 and kind in EVENT_SPECS
+        culture_profile = getattr(self, '_culture_event_profile', None)
+        culture = culture_profile is not None and kind in culture_profile.record_types_by_kind
         policy_unlock = self.policy_unlock_event_profile is not None and kind in self.policy_unlock_event_profile.record_types_by_kind
         statement = getattr(self,'statement_event_profile',None) is not None and kind in self.statement_event_profile.record_types_by_kind
         bbg_trade = self.bbg_trade_event_profile is not None and kind in self.bbg_trade_event_profile.record_types_by_kind
@@ -430,6 +452,9 @@ class A0FamilyService(SharedHostEventDispatch):
         if (n or m) and not foundation and not history and not climate and not turn_unit and not placement and not combat and not city_scalar and not private and not presentation and not district_sibling and not natural_wonder and not policy_unlock and not bbg_trade:
             if xp2_victory:
                 expected = (EVENT_SPECS[kind].record_type, VICTORY_RECORD_SIZE, 6)
+            elif culture:
+                from .xp2_culture_changed import METADATA_FLAG, RECORD_SIZE, RECORD_TYPE
+                expected = (RECORD_TYPE, RECORD_SIZE, METADATA_FLAG)
             else:
                 profile = self.notification_scope_profile
                 if profile is None or kind not in profile.records:
@@ -465,9 +490,12 @@ class A0FamilyService(SharedHostEventDispatch):
                     and 0xd6fcf3e4 in fields):
                 from .a0_xp2_bbg_trade import dispatch_city_property
                 result = dispatch_city_property(self, fields, borrowed_argument)
-            elif scope is not None and kind == 0x48062f97:
-                from .a0_notification_scope_source import dispatch_scoped_research
-                result = dispatch_scoped_research(self, fields)
+            elif scope is not None and kind in (0x48062f97, 0xd7111ffd, 0x65c1d0a2):
+                from .a0_notification_scope_source import dispatch_scoped_two_value
+                result = dispatch_scoped_two_value(self, kind, fields)
+            elif scope is not None and kind == 0xC0372152:
+                from .xp2_local_player_changed import dispatch_scoped
+                result = dispatch_scoped(self, fields)
             elif statement:
                 from .a0_diplomacy_statement import dispatch
                 result=dispatch(self,kind,fields,borrowed_argument)
@@ -475,6 +503,9 @@ class A0FamilyService(SharedHostEventDispatch):
                   and kind in self.diplomacy_event_profile.record_types_by_kind):
                 from .xp2_diplomacy_events import dispatch
                 result = dispatch(self, kind, fields, core=self.deferred.core)
+            elif culture:
+                from .xp2_culture_changed import dispatch
+                result = dispatch(self, fields, core=self.deferred.core)
             elif policy_unlock:
                 from .a0_policy_unlock import dispatch
                 result = dispatch(self,kind,fields)
@@ -545,7 +576,7 @@ class A0FamilyService(SharedHostEventDispatch):
         if self.active_kind is None:
             raise RuntimeError('A0 record produced outside an explicit dispatch')
         kind = int.from_bytes(record[4:8], 'little')
-        profile = next((p for p in (getattr(self, 'diplomacy_event_profile', None), self.bbg_trade_event_profile,self.policy_unlock_event_profile,self.climate_event_profile, self.history_event_profile, self.profile, self.controller_profile, self.player_query_profile, self.publication_event_profile, self.district_event_profile, self.found_unit_event_profile, self.foundation_event_profile, self.city_scalar_event_profile, self.private_notification_profile, self.turn_unit_event_profile, self.placement_event_profile,self.combat_event_profile,self.improvement_change_profile,self.district_damage_profile,self.natural_wonder_event_profile) if p is not None and self.active_kind in p.record_types_by_kind), None)
+        profile = next((p for p in (getattr(self, 'diplomacy_event_profile', None), getattr(self, '_culture_event_profile', None), self.bbg_trade_event_profile,self.policy_unlock_event_profile,self.climate_event_profile, self.history_event_profile, self.profile, self.controller_profile, self.player_query_profile, self.publication_event_profile, self.district_event_profile, self.found_unit_event_profile, self.foundation_event_profile, self.city_scalar_event_profile, self.private_notification_profile, self.turn_unit_event_profile, self.placement_event_profile,self.combat_event_profile,self.improvement_change_profile,self.district_damage_profile,self.natural_wonder_event_profile) if p is not None and self.active_kind in p.record_types_by_kind), None)
         if profile is None or kind not in profile.record_types_by_kind[self.active_kind]:
             raise ValueError('A0 codec produced a record outside its source-qualified family')
         if kind==248 and profile is self.combat_event_profile:
@@ -659,16 +690,16 @@ class A0FamilyService(SharedHostEventDispatch):
         if self.district_event_profile is not None or self.arguments.depth or self.active_kind is not None or self.pending or self.deferred._draining_empty_receivers or self.host_notification_counter or self.host_metadata_counter:
             raise ValueError('District events require one idle owner with closed notification scopes')
         from .a0_district_removed import event_profile, verify_live
+        from .configuration_profiles import XP2_CORE_SHA256
         core = self.deferred.core
+        core_sha256 = self.deferred.cache_core_sha256
         execution_image = getattr(core, '_civ6_host_execution_image', None)
-        profile = event_profile(core_sha256=self.deferred.cache_core_sha256,
-                                execution_image=execution_image)
-        if execution_image is None:
-            verify_live(core._handle, self.deferred.context, self.read,
-                        core_sha256=self.deferred.cache_core_sha256)
-        else:
+        profile = event_profile(core_sha256=core_sha256, execution_image=execution_image)
+        if core_sha256 == XP2_CORE_SHA256 and execution_image is not None:
             from .xp2_district_removed_current import verify_live as verify_current
             verify_current(core, self.read)
+        else:
+            verify_live(core._handle, self.deferred.context, self.read, core_sha256=core_sha256)
         for kind, size in profile.record_sizes.items():
             record = bytearray(size)
             struct.pack_into('<II', record, 0, size, kind)
@@ -684,11 +715,13 @@ class A0FamilyService(SharedHostEventDispatch):
         return dispatch(self, kind, fields)
 
     def _enqueue_project_completion(self, fields):
-        from .configuration_profiles import XP2_CORE_SHA256
-        if self.deferred.cache_core_sha256 == XP2_CORE_SHA256:
+        from .foundation_event_profile import PROJECT_KIND, PROJECT_RECORDS
+        profile = self.foundation_event_profile
+        if (profile is not None and profile is self._foundation_event_profile
+                and profile.record_types_by_kind.get(PROJECT_KIND) == frozenset(PROJECT_RECORDS)):
             from .a0_foundation_events import dispatch_project_completion
             return dispatch_project_completion(self, fields)
-        raise ValueError('XP1 project-completion extra effects require their own native profile')
+        raise ValueError('Project-completion extra effects require a qualified native profile')
 
     def _enqueue_e660_building_pillaged(self, fields):
         from .configuration_profiles import XP2_CORE_SHA256

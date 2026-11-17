@@ -149,20 +149,36 @@ def _validate_plot_purchase_delivery(spec):
         _need(all((tutorial.get(key) == {'status': 'observed', 'value': False} for key in ('active', 'manager_active', 'overlay_enabled'))) and tutorial.get('any_multiplayer') == {'status': 'observed', 'value': True} and all((turn_state.get(key) == {'status': 'observed', 'value': True} for key in ('alive', 'active', 'active_complete'))), 'UI receipt tutorial or player readiness differs')
     return (proof, refs)
 
-def _source_contract(spec=None):
+def _source_contract(spec=None, *, execution_image=None):
     spec = spec or _profile_spec()
     raw = _read_pinned(spec.source_path, spec.source_sha256)
     proof = json.loads(raw)
     _need(type(proof) is dict and proof.get('schema') == 'civ6rl.ui_standard_profile_source.v1' and (proof.get('profile_id') == spec.profile_id), 'standard profile source contract differs')
     _need(proof.get('capture_evidence', {}).get('path') == spec.evidence_path and proof['capture_evidence'].get('sha256') == spec.evidence_sha256 and (proof['capture_evidence'].get('load_log') == {'path': spec.load_log_path, 'sha256': spec.load_log_sha256}), 'profile source refers to another world witness')
     from civ6_host.runtime.native.native_ui_availability import verify_source as verify_availability_source
-    from civ6_host.runtime.native.native_ui_local_state import verify_source as verify_local_state_source
+    from civ6_host.runtime.native import native_ui_local_state as local
     verify_availability_source()
-    verify_local_state_source()
+    if execution_image is None:
+        local_state = local.verify_source()
+    else:
+        from civ6_host.runtime.execution_images import _BASE_PROFILE
+        from civ6_host.runtime.native.native_shared_dependency_profiles import profile_for_shared_dependencies
+        _need(execution_image is _BASE_PROFILE and spec.profile_id == PROFILE_ID,
+              'installed Base UI admission requires its registered Capture09')
+        local_state = local.verify_capture_contract()
+        reference = local_state['havok']
+        selected = next(row for row in execution_image.shared_dependencies
+                        if row.name == 'HavokScript_FinalRelease.dll')
+        _need(reference['sha256'] == selected.reference_sha256
+              and Path(reference['path']).resolve() == Path(selected.path).resolve(),
+              'historical UI witness Havok identity differs')
+        shared = profile_for_shared_dependencies(Path(selected.path).parent,
+            actual_image_sha256=execution_image.image_sha256,
+            interface_reference_sha256=execution_image.reference_core_sha256)
+        shared.verify_library_path(selected.name, selected.path)
     from civ6_host.runtime.native.official_application_configuration import verify_source as verify_configuration_source
     verify_configuration_source()
     availability = json.loads(_resolve_resource_path(ROOT / 'work/ui-availability/source-v2.json').read_bytes())
-    local_state = json.loads(_resolve_resource_path(ROOT / 'work/ui-availability/local-state-source.json').read_bytes())
     official = {row['relative']: row for row in availability['sources'] + availability['additions']}
     official.update({row['relative']: row for row in local_state['official_ui']})
     _need(type(proof.get('required_official_sources')) is dict, 'official source inventory missing')
@@ -316,14 +332,14 @@ def _validate_capture_evidence(proof, expected_save_sha, spec=None):
         receipt_refs.append({'path': path, 'sha256': ref['sha256']})
     return (raw, receipt_refs)
 
-def admit(profile_id, *, official_bundle, input_profile) -> dict:
+def admit(profile_id, *, official_bundle, input_profile, execution_image=None) -> dict:
     """Admit the exact standard four-human Hotseat source/configuration profile."""
     _need(known_profile(profile_id), 'unsupported UI profile')
     spec = _profile_spec(profile_id)
     _need(input_profile == 'hotseat-four', 'UI profile requires the hotseat-four input profile')
     normalized = native_official_bundle.normalize_reference({'path': official_bundle[0], 'sha256': official_bundle[1]} if type(official_bundle) is tuple and len(official_bundle) == 2 else official_bundle)
     _need(normalized == (spec.bundle_path, spec.bundle_sha256), 'official bundle is outside the admitted registered world profile')
-    source = _source_contract(spec)
+    source = _source_contract(spec, execution_image=execution_image)
     reference, manifest = native_official_bundle._manifest(normalized)
     _need(reference == (spec.bundle_path, spec.bundle_sha256), 'registered world manifest identity differs')
     save = manifest.get('save', {}).get('source', {})
@@ -347,6 +363,9 @@ def admit(profile_id, *, official_bundle, input_profile) -> dict:
     if plot_delivery_ref is not None:
         refs['plot_purchase_ui_delivery'] = plot_delivery_ref
     receipt = {'schema': 'civ6rl.ui_profile_admission.v2' if plot_delivery_ref is not None else 'civ6rl.ui_profile_admission.v1', 'profile_id': spec.profile_id, 'input_profile': input_profile, 'bundle': {'path': reference[0], 'sha256': reference[1]}, 'evidence': refs, 'gates': {**source['gates'], 'force_end_turn': force_turn_ref is not None, **({'plot_purchase': True} if plot_delivery_ref is not None else {})}, 'scope': PLOT_PURCHASE_SCOPE if plot_delivery_ref is not None else SCOPE, 'runtime_context_sources_verified': False, 'strategic_training_ready': False}
+    if execution_image is not None:
+        from civ6_host.runtime.execution_images import identity
+        receipt.update(schema='civ6rl.ui_profile_admission.v3', execution_image=identity(execution_image))
     _need(_valid_receipt(receipt), 'admitted profile receipt differs from registered contract')
     return receipt
 
@@ -357,15 +376,21 @@ def _valid_receipt(receipt):
         return False
     spec = _profile_spec(receipt['profile_id'])
     schema = receipt.get('schema')
-    version2 = schema == 'civ6rl.ui_profile_admission.v2'
-    if schema not in ('civ6rl.ui_profile_admission.v1', 'civ6rl.ui_profile_admission.v2'):
+    current_base = schema == 'civ6rl.ui_profile_admission.v3'
+    has_plot_proof = schema in ('civ6rl.ui_profile_admission.v2', 'civ6rl.ui_profile_admission.v3')
+    if schema != 'civ6rl.ui_profile_admission.v1' and not has_plot_proof:
         return False
     expected_keys = {'schema', 'profile_id', 'input_profile', 'bundle', 'evidence', 'gates', 'scope', 'runtime_context_sources_verified', 'strategic_training_ready'}
+    if current_base:
+        from civ6_host.runtime.execution_images import _BASE_PROFILE, identity
+        if spec.profile_id != PROFILE_ID or receipt.get('execution_image') != identity(_BASE_PROFILE):
+            return False
+        expected_keys.add('execution_image')
     if set(receipt) != expected_keys:
         return False
-    if receipt.get('profile_id') != spec.profile_id or receipt.get('input_profile') != 'hotseat-four' or receipt.get('bundle') != {'path': spec.bundle_path, 'sha256': spec.bundle_sha256} or (receipt.get('runtime_context_sources_verified') is not False) or (receipt.get('strategic_training_ready') is not False) or (receipt.get('scope') != (PLOT_PURCHASE_SCOPE if version2 else SCOPE)):
+    if receipt.get('profile_id') != spec.profile_id or receipt.get('input_profile') != 'hotseat-four' or receipt.get('bundle') != {'path': spec.bundle_path, 'sha256': spec.bundle_sha256} or (receipt.get('runtime_context_sources_verified') is not False) or (receipt.get('strategic_training_ready') is not False) or (receipt.get('scope') != (PLOT_PURCHASE_SCOPE if has_plot_proof else SCOPE)):
         return False
-    if version2 and spec.profile_id not in PLOT_PURCHASE_PROFILE_IDS:
+    if has_plot_proof and spec.profile_id not in PLOT_PURCHASE_PROFILE_IDS:
         return False
     gates = receipt.get('gates')
     force_ref = None
@@ -373,19 +398,19 @@ def _valid_receipt(receipt):
         force_ref = {'path': FORCE_TURN_CAPTURE09_PATH, 'sha256': FORCE_TURN_CAPTURE09_SHA256}
     elif spec.profile_id == FORCE_TURN_PROFILE_ID:
         force_ref = {'path': FORCE_TURN_DELIVERY_PATH, 'sha256': FORCE_TURN_DELIVERY_SHA256}
-    expected_gates = GATE_NAMES if version2 else LEGACY_GATE_NAMES
+    expected_gates = GATE_NAMES if has_plot_proof else LEGACY_GATE_NAMES
     if type(gates) is not dict or set(gates) != set(expected_gates) or (not all((gates.get(k) is True for k in LEGACY_GATE_NAMES[:3]))) or (gates.get('force_end_turn') is not (force_ref is not None)):
         return False
-    if version2 and gates.get('plot_purchase') is not True:
+    if has_plot_proof and gates.get('plot_purchase') is not True:
         return False
     evidence = receipt.get('evidence')
     evidence_keys = {'bundle', 'source', 'capture_evidence', 'load_log', 'ui_availability_source', 'ui_local_state_source', 'ui_receipts', 'bridge_sources', 'forced_turn_delivery'}
-    if version2:
+    if has_plot_proof:
         evidence_keys.add('plot_purchase_ui_delivery')
     if type(evidence) is not dict or set(evidence) != evidence_keys:
         return False
     fixed = {'bundle': {'path': spec.bundle_path, 'sha256': spec.bundle_sha256}, 'source': {'path': spec.source_path, 'sha256': spec.source_sha256}, 'capture_evidence': {'path': spec.evidence_path, 'sha256': spec.evidence_sha256}, 'load_log': {'path': spec.load_log_path, 'sha256': spec.load_log_sha256}, 'ui_availability_source': {'path': 'work/ui-availability/source-v2.json', 'sha256': '2a8c39b4e2e8ec2d80f607a721041ae29d444e6b4d9abdcb13ae5f0f2890589a'}, 'ui_local_state_source': {'path': 'work/ui-availability/local-state-source.json', 'sha256': 'd615e31517dd3d754095a99464cdd0a521908e782a5789e1d291b0255b3bf0fa'}, 'forced_turn_delivery': force_ref}
-    if version2:
+    if has_plot_proof:
         fixed['plot_purchase_ui_delivery'] = {'path': PLOT_PURCHASE_DELIVERY_PATH, 'sha256': PLOT_PURCHASE_DELIVERY_SHA256}
     if any((evidence.get(key) != value for key, value in fixed.items())):
         return False
@@ -409,6 +434,11 @@ def gate_admitted(owner, name) -> bool:
         return False
     receipt = state['ui_profile_admission']
     _need(_valid_receipt(receipt), 'explicit UI profile receipt is malformed')
+    image = getattr(getattr(owner, 'profile', None), 'execution_image', None)
+    from civ6_host.runtime.execution_images import _BASE_PROFILE, identity
+    if 'execution_image' in receipt or image is _BASE_PROFILE:
+        _need(image is _BASE_PROFILE and receipt.get('execution_image') == identity(image),
+              'UI admission belongs to another execution image')
     if name == PLOT_PURCHASE_GATE and receipt['schema'] == 'civ6rl.ui_profile_admission.v1':
         return False
     return receipt['gates'][name] is True

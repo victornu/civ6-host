@@ -55,9 +55,29 @@ def memory():
     pe = pefile.PE(str(image().path), fast_load=True)
     try:
         capture = source.city_capture_listener_source(image())
-        for row in (*raf35['spans'].values(), *capture['spans'].values()):
+        hattusa = source.hattusa_achievement_source(image())
+        for row in (*raf35['spans'].values(), *capture['spans'].values(), *hattusa['spans'].values()):
             rva = int(row['rva'], 16)
             result.update((legacy.BASE+rva+i,b) for i,b in enumerate(pe.get_data(rva,row['bytes'])))
+        for name in ('civilization', 'literal'):
+            row = hattusa[name]
+            rva = int(row['rva'], 16)
+            data = row['text'].encode('ascii') + b'\0'
+            result.update((legacy.BASE+rva+i,b) for i,b in enumerate(data))
+        slot = hattusa['delegate_slot']
+        rva = int(slot['rva'], 16)
+        pointer = (legacy.BASE+int(slot['target_rva'], 16)).to_bytes(8, 'little')
+        result.update((legacy.BASE+rva+i,b) for i,b in enumerate(pointer))
+        achievement = source.achievement_4_17_source(image())
+        for row in achievement['spans']:
+            rva = row['rva']
+            result.update((legacy.BASE+rva+i,b) for i,b in enumerate(pe.get_data(rva,row['size'])))
+        literal = achievement['listener_literal']
+        result.update((legacy.BASE+literal['rva']+i,b)
+                      for i,b in enumerate(literal['text'].encode('ascii') + b'\0'))
+        slot = achievement['delegate_table']
+        pointer = (legacy.BASE+slot['target_rva']).to_bytes(8, 'little')
+        result.update((legacy.BASE+slot['rva']+i,b) for i,b in enumerate(pointer))
         rva = int(raf35['literal']['rva'], 16)
         literal = raf35['literal']['text'].encode('ascii') + b'\0'
         result.update((legacy.BASE+rva+i,b) for i,b in enumerate(literal))
@@ -106,9 +126,10 @@ class CongressAchievementServiceTests(unittest.TestCase):
         data=memory();read=legacy.reader_for(data)
         receipt=source.verify_live(legacy.BASE,read,host_pointer=legacy.HOST,execution_image=image())
         self.assertEqual(receipt['congress_source_sha256'],source.CONGRESS_SOURCE[1])
+        self.assertEqual(receipt['achievement_4_17_source_sha256'],source.ACHIEVEMENT_4_17_SOURCE[1])
         self.assertEqual(receipt['execution_image_sha256'],image().image_sha256)
         for rva in (0x17cdc1,0x3bc6b6,0x3bf934,0x3bfb30,0x17fac7,0x16bd00,
-                    0x17ec73,0x9d0678,0x9d12f0):
+                    0x17ec73,0x9d0678,0x9d12f0,0x174455,0x9cfd70,0x9d0870):
             with self.subTest(rva=hex(rva)):
                 data[legacy.BASE+rva]^=1
                 with self.assertRaises(ValueError):
@@ -116,6 +137,14 @@ class CongressAchievementServiceTests(unittest.TestCase):
                 data[legacy.BASE+rva]^=1
         with self.assertRaises(ValueError):
             source.verify_live(legacy.BASE,read,host_pointer=legacy.HOST+8,execution_image=image())
+
+    def test_optional_achievement_4_17_requires_the_exact_caller_chain(self):
+        stack = [dict(module=source.CORE_MODULE, rva=rva) for rva in source.ACHIEVEMENT_4_17_PREFIX]
+        self.assertEqual(source.select_contract(stack, execution_image=image()),
+                         source.ACHIEVEMENT_4_17_SOURCE[1])
+        for bad in (stack[:-1], stack[:-1] + [dict(stack[-1], rva='0x2653ae')]):
+            with self.assertRaisesRegex(ValueError, 'Unproved'):
+                source.select_contract(bad, execution_image=image())
 
     def test_raf35_admits_only_exact_current_chain_and_rejects_changed_live_listener(self):
         stack = [dict(module=source.CORE_MODULE, rva=rva) for rva in source.RAF35_PREFIX]
@@ -148,6 +177,27 @@ class CongressAchievementServiceTests(unittest.TestCase):
         data[legacy.BASE + 0x144325] ^= 1
         with self.assertRaisesRegex(ValueError, 'city capture achievement live source'):
             source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=image())
+
+    def test_hattusa_listener_requires_exact_chain_code_and_delegate(self):
+        current = image()
+        stack = [dict(module=source.CORE_MODULE, rva=rva)
+                 for rva in source.HATTUSA_ACHIEVEMENT_PREFIX]
+        proof = source.HATTUSA_ACHIEVEMENT_SOURCE[1]
+        self.assertEqual(source.select_contract(stack, execution_image=current), proof)
+        self.assertIn(proof, source.source_dependencies(execution_image=current).values())
+        for rejected, profile in ((stack[:-1], current), (stack, None), (stack, replace(current))):
+            with self.assertRaises(ValueError):
+                source.select_contract(rejected, execution_image=profile)
+        data = memory()
+        read = legacy.reader_for(data)
+        receipt = source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=current)
+        self.assertEqual(receipt['hattusa_achievement_source_sha256'], proof)
+        for rva in (0x1784f9, 0x17ff7a, 0x31e62e, 0x9cf238, 0x9d0c90):
+            with self.subTest(rva=hex(rva)):
+                data[legacy.BASE + rva] ^= 1
+                with self.assertRaisesRegex(ValueError, 'Hattusa achievement live'):
+                    source.verify_live(legacy.BASE, read, host_pointer=legacy.HOST, execution_image=current)
+                data[legacy.BASE + rva] ^= 1
 
     def test_existing_owner_fifo_calls_only_null_sink_and_preserves_queue_delivery(self):
         f=self.fixture();b=f.backend

@@ -79,8 +79,8 @@ class EventArgumentService:
                 result=self.consumer.dispatch(kind,fields,argument)
                 self.count+=1
                 return result
-            from .xp1_absent_event_families import has_shape,dispatch as dispatch_absent_descriptor
-            if has_shape(fields):
+            from .xp1_absent_event_families import UNIT_TRANSFER_KIND, has_shape, dispatch as dispatch_absent_descriptor
+            if kind == UNIT_TRANSFER_KIND or has_shape(fields):
                 result=dispatch_absent_descriptor(self,kind,fields)
                 self.count+=1
                 return result

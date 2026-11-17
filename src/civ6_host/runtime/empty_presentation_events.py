@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType, ModuleType
 import re
 
-from .configuration_profiles import XP2_CORE_SHA256
+from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 POLICY = 'source-qualified-empty-presentation-zero-records'
 
@@ -41,20 +41,26 @@ def enable(owner, backend, source):
     if type(owner) is not A0FamilyService:
         raise ValueError('Empty presentation requires the real shared A0 owner')
     owner._check(); backend.check_thread()
+    engine = backend.load_abi.core_sha256
     if (owner._foundation_backend is not backend or owner._foundation_borrow is not None
             or owner.arguments.depth or owner.active_kind is not None or owner.pending
             or owner.deferred._draining_empty_receivers
             or owner.host_notification_counter or owner.host_metadata_counter
             or backend.stage != 'prepared' or backend.prefix is not None
             or getattr(backend, '_xp1_commands_requested', False) is not True
-            or backend.load_abi.core_sha256 != XP2_CORE_SHA256
+            or engine not in (XP1_CORE_SHA256, XP2_CORE_SHA256)
             or backend.host is not owner.arguments.host or backend.core is not owner.deferred.core
             or backend.context != owner.deferred.context
-            or owner.arguments.reader.core_sha256 != XP2_CORE_SHA256
-            or owner.deferred.cache_core_sha256 != XP2_CORE_SHA256):
-        raise ValueError('Empty presentation requires its idle prepared XP2 owner')
+            or owner.arguments.reader.core_sha256 != engine
+            or owner.deferred.cache_core_sha256 != engine):
+        label = 'XP1' if engine == XP1_CORE_SHA256 else 'XP2'
+        raise ValueError(f'Empty presentation requires its idle prepared {label} owner')
+    if engine == XP1_CORE_SHA256:
+        from . import xp1_wmd_fallout_source
+        if source is not xp1_wmd_fallout_source:
+            raise ValueError('Empty presentation source is unqualified for Rise and Fall')
     if (not isinstance(source, ModuleType)
-            or not source.__name__.startswith('civ6_host.runtime.xp2_')
+            or (engine == XP2_CORE_SHA256 and not source.__name__.startswith('civ6_host.runtime.xp2_'))
             or source.POLICY != POLICY or type(source.KINDS) is not frozenset
             or not source.KINDS or set(source.CALLBACKS) != set(source.KINDS)
             or any(type(k) is not int or not 0 <= k <= 0xffffffff for k in source.KINDS)
@@ -75,7 +81,7 @@ def enable(owner, backend, source):
     updated.update((kind, binding) for kind in source.KINDS)
     owner.presentation_sources = owner._presentation_sources = MappingProxyType(updated)
     owner._check()
-    owner.emit('native_empty_presentation_family_installed', core_sha256=XP2_CORE_SHA256,
+    owner.emit('native_empty_presentation_family_installed', core_sha256=engine,
         source_module=source.__name__, source_proof_sha256=source.SOURCE[1],
         dispatch_kinds=[hex(k) for k in sorted(source.KINDS)], policy=POLICY,
         synthetic_records=False, unknown_service_fallback=False)
@@ -111,6 +117,9 @@ def dispatch(owner, kind, fields):
         from . import xp2_congress_presentation as congress
         if source is congress:
             congress.record_callback(owner, decoded)
+        from . import xp2_rock_concert_source as concert
+        if source is concert:
+            concert.record_callback(owner, decoded)
         sequence, pending, notifications, metadata = before
         if (owner._sequence != sequence or len(owner.pending) != len(pending)
                 or any(a is not b for a, b in zip(owner.pending, pending))

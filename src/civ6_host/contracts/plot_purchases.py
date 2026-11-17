@@ -1,5 +1,6 @@
 """Player-facing offers from the city tile and gold purchase panels."""
 
+from copy import deepcopy
 import re
 
 FIELDS = frozenset(('kind', 'city_id', 'plot_id', 'x', 'y', 'currency', 'price_token'))
@@ -12,6 +13,7 @@ CITY_GAPS = ('district_purchase', 'faith_purchase', 'corps_purchase', 'army_purc
 CITY_FAITH_GAPS = ('district_purchase', 'corps_purchase', 'army_purchase',
                    'placement_filtered_plot_purchase', 'faith_purchase_native_effect')
 LIMIT = 4096
+INFORMATION_SCHEMA = 'civ6-host.purchase-quotes.v1'
 
 
 def _validate_price(token):
@@ -103,3 +105,27 @@ def validate_catalogue(value, player_id, turn, *, width=None, height=None, own_c
 def actions(catalogue):
     return [row['action'] for city in catalogue for row in city['offers']
             if row['command_legal'] and row['can_afford']]
+
+
+def project_quotes(observation, decisions, player_id, turn):
+    """Expose the exact quotes of an accepted player decision boundary."""
+    width, height = observation.get('width'), observation.get('height')
+    cities = observation.get('cities')
+    if (type(width) is not int or width <= 0 or type(height) is not int or height <= 0
+            or type(cities) is not list or len(cities) > LIMIT
+            or any(type(city) is not dict or type(city.get('owner')) is not int or city['owner'] != player_id
+                   or type(city.get('id')) is not int for city in cities)):
+        raise ValueError('Purchase quotes require the local city roster and native map dimensions')
+    own_cities = [city['id'] for city in cities]
+    tiles = decisions['plot_purchases']
+    validate_catalogue(tiles, player_id, turn, width=width, height=height, own_cities=own_cities)
+    result = dict(schema=INFORMATION_SCHEMA, player_id=player_id, turn=turn, plot_purchases=tiles)
+    if 'city_purchases' in decisions:
+        items = decisions['city_purchases']
+        gaps = decisions['families']['purchase']['unqualified']
+        if gaps not in (list(CITY_GAPS), list(CITY_FAITH_GAPS)):
+            raise ValueError('Unexpected city purchase currency scope')
+        validate_catalogue(items, player_id, turn, own_cities=own_cities, city_items=True,
+                           allow_faith=gaps == list(CITY_FAITH_GAPS))
+        result['city_purchases'] = items
+    return deepcopy(result)

@@ -247,7 +247,7 @@
       "source_sha256": "5e843f56f09f17a9368eb7b3ccc4a3ce48b2f9d01e1db06c006e568abdbba060",
       "module": "civ6_host.runtime.native.native_action_session",
       "destination": "src/civ6_host/runtime/native/native_action_session.py",
-      "destination_sha256": "5bc7d7054fa140dfd53eae3a49024697cbca74cc96168350a139937d0f4746f0",
+      "destination_sha256": "c5033d3879b7823d582019679ea047d304fb97de9ebfa4884c539d63e4d8746b",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -291,7 +291,7 @@
       "source_sha256": "b94b88ce668bfe146323d1a6012b2e61c59394cd149548cfe1f29476cb284c89",
       "module": "civ6_host.runtime.native.native_app_ownership",
       "destination": "src/civ6_host/runtime/native/native_app_ownership.py",
-      "destination_sha256": "789351286966690944772da4a0988a59f94dddf30910c3c877bcc71091165201",
+      "destination_sha256": "38691fbc70952b5f385f2b7328cdccfef302a9cb6dcde65aac0da93576f7f3f2",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -532,7 +532,7 @@
       "source_sha256": "829dcd9a632651fbf6216e71787a697b797b2566b0b0e08adb112af0b39583f3",
       "module": "civ6_host.runtime.native.native_checkpoint_job_observer",
       "destination": "src/civ6_host/runtime/native/native_checkpoint_job_observer.py",
-      "destination_sha256": "18831808f162555cb605721289c937479faa0015904a62f671aa1e617b77187e",
+      "destination_sha256": "748df6939ed552e63e1148013b68580d4cdce68f406821532c1341972818f5f2",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -545,7 +545,7 @@
       "source_sha256": "27b3ba2ac812d1a0d9ac58581c969dc26f5b41eaf73357513f127405e960a5a3",
       "module": "civ6_host.runtime.native.native_checkpoint_jobs",
       "destination": "src/civ6_host/runtime/native/native_checkpoint_jobs.py",
-      "destination_sha256": "531ca49fd0843713f1d9e57f1a283eef33295c41da7c29a914a74971373371ca",
+      "destination_sha256": "f840a9d46d3b502cf47650b0730fbdea4e1c6f6df6e19aa93cb083678c886204",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -559,7 +559,7 @@
       "source_sha256": "cd64e4ca85377665708224848e790080f04a604a043d67b9e08ae81e68015800",
       "module": "civ6_host.runtime.native.native_checkpoint_load",
       "destination": "src/civ6_host/runtime/native/native_checkpoint_load.py",
-      "destination_sha256": "90fa1e2d8917fe94a47e1fef0ba7e59bc052c90c387964f57a70f820fb88d9b0",
+      "destination_sha256": "4d704daaedaf994cc6eb996e200f2a1ad3d54e549f9354d0f2b93d87e547358d",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -606,7 +606,7 @@
       "source_sha256": "0b49718560930c3e15fd53f13c27bb76f5fbabad2e722bd64e5deb9e5f73c776",
       "module": "civ6_host.runtime.native.native_checkpoint_postload_jobs",
       "destination": "src/civ6_host/runtime/native/native_checkpoint_postload_jobs.py",
-      "destination_sha256": "e2f1e39270d94dce0a18ba9b799358d7550597282e7c24b5c7d0fcbe8bf88c55",
+      "destination_sha256": "d83f5a07b34971ab070e8332bd83c61fb7b3dbf2284f7100fdf91cee10622811",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -701,7 +701,7 @@
       "source_sha256": "6e9c8376329b2797e490f20e6b88020ad550a074632c8d294c7b438a05fba8e4",
       "module": "civ6_host.runtime.native.native_checkpoint_retained_save",
       "destination": "src/civ6_host/runtime/native/native_checkpoint_retained_save.py",
-      "destination_sha256": "598c8da8ef4180e6c514e199743b1fb0f208d2f21fa2e7fc1cba11d955487908",
+      "destination_sha256": "e8102c273e9d027230129c270bafce4d2227682020628dca7571b97d547e6df1",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -960,7 +960,7 @@
       "source_sha256": "46948f70b02ec77e0402b4832c12aef10d8b6ce37d23e27659cfed65cb50e9bf",
       "module": "civ6_host.runtime.native.native_controller_code",
       "destination": "src/civ6_host/runtime/native/native_controller_code.py",
-      "destination_sha256": "16ab5b716aa4fc90b9df5d8eeeb1348cf48eb2b2ff39b9757f7989759812e08f",
+      "destination_sha256": "5b60f59b290d6540d39fd8f0d75095021c1087db039c918439779d3d511aa454",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -986,7 +986,7 @@
       "source_sha256": "8f5aed71ecf614d6fa25d52b94b7fec4a0bb4bcec190f8f144b04c4cf541d676",
       "module": "civ6_host.runtime.native.native_core_context_profiles",
       "destination": "src/civ6_host/runtime/native/native_core_context_profiles.py",
-      "destination_sha256": "44b13c9b2c630fcd937843d55c2d1ce669339ae2b48aba2c184f9abd0e14c5e4",
+      "destination_sha256": "82c3a8ce28a07fbdd543f6cec5136dc4e470a89ae0a2f10dc7ba27629a2d3b7b",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -1040,7 +1040,7 @@
       "source_sha256": "fa8c6d88c23c96b7105d134992f16ffb8a54c25888b7820cfa6c86b2cba83379",
       "module": "civ6_host.runtime.native.native_deferred_empty_profile",
       "destination": "src/civ6_host/runtime/native/native_deferred_empty_profile.py",
-      "destination_sha256": "b13b4da3eb555cd6d61ef441a74e45e51a4136ea5bca7d42a8a00a78ac86aec1",
+      "destination_sha256": "fbc4e574203fd4b369f947676ea38a5d0d990ef625930a7186fbb8cc087dfda1",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -1048,7 +1048,12 @@
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
         "GoodyHutReward row 0x103 extends the same empty receiver validator through a separately pinned EXE initializer/handler proof",
         "host-maintained current XP2 FeatureAddedToMap empty receiver row through the shared FIFO",
-        "current XP2 CityOccupationChanged empty receiver row backed by the current executable"
+        "current XP2 CityOccupationChanged empty receiver row backed by the current executable",
+        "current Rise and Fall shares the source-verified capture notification receiver rows",
+        "current XP2 DiplomacyMeet family uses the already shared installed executable receiver rows",
+        "current XP2 QuestChanged and InfluenceGiven use the same scoped presentation FIFO as XP1",
+        "current XP2 CultureChanged uses the verified empty receiver for record 0x10d",
+        "registered Rise and Fall and Gathering Storm share the verified GreatWorkMoved receiver at record 0xdd"
       ]
     },
     {
@@ -1096,14 +1101,15 @@
       "source_sha256": "982fe85c5f68e9889337ce1d0c44619054dfe220154c3484fa74d5c8ecbed4e9",
       "module": "civ6_host.runtime.native.native_diplomacy_choices",
       "destination": "src/civ6_host/runtime/native/native_diplomacy_choices.py",
-      "destination_sha256": "4d47b1ed1ada0b6d9e2590215ca4529d790e016ae3d9c6648f32bb368e9a08e4",
+      "destination_sha256": "c75e7dfede1c6fbcc93ddc9a8377d5a194b98540117f2a1a082efed279e09c39",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
         "explicit SavedLoad context callbacks; XP2 partial v1 menu without Base-only display",
-        "explicit XP2 saved query scheduler boundary and source-selected public dialogue rendering; legacy Base route preserved"
+        "explicit XP2 saved query scheduler boundary and source-selected public dialogue rendering; legacy Base route preserved",
+        "host-maintained XP2 surprise-war close verification and secondary saved-seat context"
       ]
     },
     {
@@ -1138,7 +1144,7 @@
       "source_sha256": "bd4dbfedbdc14724e2578c99f5335efbf0c46954fe48ecb70d47d5e7b52b78c6",
       "module": "civ6_host.runtime.native.native_diplomacy_display986",
       "destination": "src/civ6_host/runtime/native/native_diplomacy_display986.py",
-      "destination_sha256": "1edbd640d7e85f09783ef2c439dbf09049fcd27b2a2f1ff7aaabcc6f2af11d64",
+      "destination_sha256": "325b10234795b71c312bad00496b52c18a1e4c9886d9da3e314d53250f6289c3",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -1231,7 +1237,7 @@
       "source_sha256": "410a52e472891d4dacd07e0672a8fd53fc4f261b3d3fbcdb9dc078f28e59d0c6",
       "module": "civ6_host.runtime.native.native_envoy_actions",
       "destination": "src/civ6_host/runtime/native/native_envoy_actions.py",
-      "destination_sha256": "322cc9ea5fcba6f0b5a132981eca9e7e053e293ea1bf047b5426c9c5e5931f37",
+      "destination_sha256": "0fb25d1f44ea541dd3da765935e665d6685cc0c1bfcbc7b543885e8c978e33a1",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -1257,13 +1263,14 @@
       "source_sha256": "239e732ab889d2c2ee08d838a5e3444895a14cfe13fd6e212b6d575beb966145",
       "module": "civ6_host.runtime.native.native_episode_facts",
       "destination": "src/civ6_host/runtime/native/native_episode_facts.py",
-      "destination_sha256": "a1ad4606cb3471fc4383ac928afe90f01cd814904f1598e9a3988cf8ee53bfae",
+      "destination_sha256": "89fc602a5dd1fb6b3322c7ddaed5b12489045db20353e5f1b66f249885473249",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
-        "explicit XP1 status-source selection for existing winning-team/facts readers and episode policy; observation-only provenance does not qualify winner transition"
+        "explicit XP1 status-source selection for existing winning-team/facts readers and episode policy; observation-only provenance does not qualify winner transition",
+        "allow only explicitly selected expansion LAN outcome reads under the native neutral observer for an exact still-local formerly alive actor"
       ]
     },
     {
@@ -3149,7 +3156,7 @@
       "source_sha256": "2aa9885d1b07bc60ffb7c77d8532c9cf76de4e2c7952e78bb6665c8320b18d2e",
       "module": "civ6_host.runtime.native.native_host_events",
       "destination": "src/civ6_host/runtime/native/native_host_events.py",
-      "destination_sha256": "512e11c1463a8f5152c7b87541d83b408d9f57fc7d92f791231648a3f576057f",
+      "destination_sha256": "258173e1ef2e3addf38878064bbd5b2e383989661696e0b0fe2d83fdfee9036c",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3274,7 +3281,7 @@
       "source_sha256": "9d3e978b7e67d96a3276273ec26fc7ee0a0da0b81993547f4cf3c303e5ab5962",
       "module": "civ6_host.runtime.native.native_hotseat_session",
       "destination": "src/civ6_host/runtime/native/native_hotseat_session.py",
-      "destination_sha256": "1fa63dc3f8c0f0598510e0f3eb2f5c137ff3c4dff488b2c6f19614aa6ab4d7a1",
+      "destination_sha256": "f2343aba436359ebf164484825e918d2c6aa27a3958175710ee15ab46f195708",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3314,7 +3321,7 @@
       "source_sha256": "d474fe223c971e9c1161843221f47358feec5777de373d02a40681b949ea00eb",
       "module": "civ6_host.runtime.native.native_locale_arguments",
       "destination": "src/civ6_host/runtime/native/native_locale_arguments.py",
-      "destination_sha256": "cfcc2291d88473237bf0871dc92bfb0d27197b01f945561a758412ef44fbb5bd",
+      "destination_sha256": "55fbdd5e96134e2fb9972b432ab114490bb2587fa2a01a4645c0ea52a7b41ed5",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3340,7 +3347,7 @@
       "source_sha256": "bd1bf2a5c6bd31be88b12bf41a940a5df78eafd0576c30ffc65a9b094fb10acd",
       "module": "civ6_host.runtime.native.native_locale_diagnostic",
       "destination": "src/civ6_host/runtime/native/native_locale_diagnostic.py",
-      "destination_sha256": "692a8054657af218d28a8112b84a720ca06f1ce66b7765760696a7a27185c027",
+      "destination_sha256": "4232f84735af36765d7843d98e5ebd3fd2c95a03d462a374e4afb2da0b2a232d",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3368,7 +3375,7 @@
       "source_sha256": "7ddac11af2a3ec117db11de262eec450665c2a8606851dfedb0a8df84d771721",
       "module": "civ6_host.runtime.native.native_localization",
       "destination": "src/civ6_host/runtime/native/native_localization.py",
-      "destination_sha256": "acd22e7d25068c8c728bd27d4ee70f661d18ae7e64da6db9ee01090c27a43d6a",
+      "destination_sha256": "3263cfefcd4af26e534206fed931d6fcda7b101eb377bf4149675cbe149e12f6",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3468,7 +3475,7 @@
       "source_sha256": "4ef4dd6e3b91af39ab90c55a9af943fd09b611f3bb0d5cd6fa6964443b0959e7",
       "module": "civ6_host.runtime.native.native_map_script",
       "destination": "src/civ6_host/runtime/native/native_map_script.py",
-      "destination_sha256": "55c2561170e121f0a137262c0f2415c925041b34a67a75e7fedd9f55c7bbf403",
+      "destination_sha256": "82f7411dbde7d87cb590a032eec7f5d44ab88b5dd33def71d5b90b640dd1a377",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3549,7 +3556,7 @@
       "source_sha256": "51784c3c597ddc338f34beed6fe8cdfed2faebbaaa4638fa9a32a3797dd296cb",
       "module": "civ6_host.runtime.native.native_official_bundle",
       "destination": "src/civ6_host/runtime/native/native_official_bundle.py",
-      "destination_sha256": "d4ec5e226a75957a23f37e23f3aa88e92fc79471f8f177ebdb4dd43fb72a822c",
+      "destination_sha256": "77a47f1d2cb26d39caee118bd3f6787fbf147ad624315140c298344ba23838a3",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3566,8 +3573,7 @@
         "exact private XP2 raw input family reuses complete database/save validation, joins nonempty WorldCongress disk sources and active-list witnesses, without native Load or public admission",
         "explicit immutable producer-source snapshot consumption preserves historical profile identities after restoring the installed capture mod; live source checks remain strict",
         "explicit current execution-image/shared-SDK profile and source ABI identity kept separate; historical default preserved",
-        "explicit current captured-content v2 admission retains actual Core092 provenance separately from source ABI324; historical input route remains strict"
-,
+        "explicit current captured-content v2 admission retains actual Core092 provenance separately from source ABI324; historical input route remains strict",
         "host-maintained exact stock XP2 response writer source archive validation"
       ]
     },
@@ -3576,7 +3582,7 @@
       "source_sha256": "0ddf2357132ca22989c31e0b430a17d2a5a28b5fa14bd4de3880ffd3c365f46e",
       "module": "civ6_host.runtime.native.native_official_hotseat",
       "destination": "src/civ6_host/runtime/native/native_official_hotseat.py",
-      "destination_sha256": "0b009d1ecc5ac6d8f81e49f7cc63e923ea37c606d0a47acc0bb4ac8c0f974f16",
+      "destination_sha256": "87f0ab259b0c8c4ab70b4704690f459ae07d7c7e52a6e06e7a722673cff11009",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3589,7 +3595,7 @@
       "source_sha256": "9f05f639a4a4869a33f330f3ba212d074baa641d5abb64b057ac949133aee3ce",
       "module": "civ6_host.runtime.native.native_official_load",
       "destination": "src/civ6_host/runtime/native/native_official_load.py",
-      "destination_sha256": "2be20a36871ab4a2968fd8709902c40cc5435d296d573947d2724715275ec5bc",
+      "destination_sha256": "452966ad4d046f06ae6dcc03233e74c0f41b112cd00af81b78b43980cabf90e3",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3663,12 +3669,14 @@
       "source_sha256": "593ee3d4255d609be07cd1be14a7eaf98b46a2c8a0199250f3c825ac1ca05d2a",
       "module": "civ6_host.runtime.native.native_pantheon_actions",
       "destination": "src/civ6_host/runtime/native/native_pantheon_actions.py",
-      "destination_sha256": "aefbd48cc10896f79a57bd81bd4014ecd8dbdac831e6b8dc59c061c7f782f806",
+      "destination_sha256": "c1373fb15c9e088348c513bc405ab701ac35a98d0af41b1e242d256ad1b74fa6",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "XP2 source-qualified direct religious request integration; historical source pin preserved",
+        "Sealed stock XP2 Great Work requests use the installed direct UI operation; archives and slot effects are checked separately"
       ]
     },
     {
@@ -3756,7 +3764,7 @@
       "source_sha256": "c2df4e4764ee708f6161267c3711ddef6b7f9ee39683384f08bdeb7b7e0dabcc",
       "module": "civ6_host.runtime.native.native_player_operation_request",
       "destination": "src/civ6_host/runtime/native/native_player_operation_request.py",
-      "destination_sha256": "9183423d0da7e95c409591fc9eb7c66ba5d3553909f52950e88f00dd336ba84c",
+      "destination_sha256": "768fcd2b393c166b1b6c198f140c66e8ed1c7ba9df781a8a0afe1e6824966368",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -3764,7 +3772,9 @@
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
         "explicit XP1 research/civic source and player-operation ABI selection; shared catalogue, serializer, request and effect retained; Base default unchanged",
         "source-pinned reproduction of existing XP2 UNLOCK_POLICIES empty-map and execution-image forwarding; sealed Congress permits retain exact UI direct-request semantics",
-        "sealed stock XP2 dedication confirmation preserves the official direct request and keeps native readback separate"
+        "sealed stock XP2 dedication confirmation preserves the official direct request and keeps native readback separate",
+        "XP2 source-qualified direct religious request integration; historical source pin preserved",
+        "host-maintained sealed XP2 direct requests including archaeology"
       ]
     },
     {
@@ -3812,13 +3822,14 @@
       "source_sha256": "8d897412c49004283307a85fd058dd4ddaa7a58402cccb66240f7861bc7d0a9d",
       "module": "civ6_host.runtime.native.native_plot_purchases",
       "destination": "src/civ6_host/runtime/native/native_plot_purchases.py",
-      "destination_sha256": "0a1538221e1260f043a94742e058510cf1b51c39a7a106812769cf54199e15d5",
+      "destination_sha256": "39c58b8742687439d6b29971137234ebe7cdbf29162c290069642290225f6984",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
-        "plot effect receipt reports the actual separately admitted UI gate instead of a fixed diagnostic false value; native price/ownership/command logic unchanged"
+        "plot effect receipt reports the actual separately admitted UI gate instead of a fixed diagnostic false value; native price/ownership/command logic unchanged",
+        "host-maintained expansion plot purchase requests verify the actor-bound archive, debit and ownership"
       ]
     },
     {
@@ -3839,12 +3850,13 @@
       "source_sha256": "f072b1f38ca9370bdf9fc07c7757b904b699988dbc037270b77c3917ffb648f5",
       "module": "civ6_host.runtime.native.native_policy_actions",
       "destination": "src/civ6_host/runtime/native/native_policy_actions.py",
-      "destination_sha256": "fc448a16e716b6f2cf5e60e9578ac4fa1f1b090bd88c7e18723f52fa8c19ec55",
+      "destination_sha256": "2bc181f4a5c9fb9f13be8ea350999b850cde049afd56e3d1e5d07db4df6614e5",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "host-maintained expansion policy source selection and exact native slot-assignment archive validation"
       ]
     },
     {
@@ -3974,12 +3986,15 @@
       "source_sha256": "77523a64925db7f9810b93b5b9446cd4bcf6f20dfebd30c4e6d91cd5cc84185a",
       "module": "civ6_host.runtime.native.native_prophet_activation",
       "destination": "src/civ6_host/runtime/native/native_prophet_activation.py",
-      "destination_sha256": "6383cce47f2819c0a7cfbd461dbecd00d6d70ec97bcb453bd87e626c4f0102bf",
+      "destination_sha256": "967ae81ec8e6be82fa46ea85e77f522a9a43d0f9708e2a4a07c7859b7637dc63",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "Exact current XP2 religious choice source dispatch; historical Base/XP1 source identity retained.",
+        "Read-only, source-qualified XP2 Prophet availability diagnostic; public contract unchanged",
+        "Preserve source-qualified typed optional Prophet reasons without localization-key assumptions; no public legality change"
       ]
     },
     {
@@ -4013,7 +4028,7 @@
       "source_sha256": "13a469c45530910460faf9feacfd7999e0144a5d832346fa39227b2442b0b2f9",
       "module": "civ6_host.runtime.native.native_public_objective_witness",
       "destination": "src/civ6_host/runtime/native/native_public_objective_witness.py",
-      "destination_sha256": "6ab0a1e8f782a358625100871084e60e0e2346753cd371ce7a7bb0b0e6bbf8ea",
+      "destination_sha256": "f1dcfea3b61815e2642b654afbd11d3b279cddc0fb4556557654ff00ffb17a40",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4039,12 +4054,13 @@
       "source_sha256": "2a079e7b4c63b1b383b71dc331208869267181b29e19d00851fcb3eaafe438a9",
       "module": "civ6_host.runtime.native.native_religion_beliefs",
       "destination": "src/civ6_host/runtime/native/native_religion_beliefs.py",
-      "destination_sha256": "ac71bb6b9f0245db9133c24f82abb04ef9b34d61e6d05e9309f4a19b860bed15",
+      "destination_sha256": "08d114bee15344b15edcba5d70746b8af8881169b303c953f7125d39631bfcfe",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "Exact current XP2 religious choice source dispatch; historical Base/XP1 source identity retained."
       ]
     },
     {
@@ -4052,12 +4068,15 @@
       "source_sha256": "214984bd41c4813c74dbecf4fe4bf4da9a8b092f7c8ff4674284284684d1fdf5",
       "module": "civ6_host.runtime.native.native_religion_diagnostic",
       "destination": "src/civ6_host/runtime/native/native_religion_diagnostic.py",
-      "destination_sha256": "9badb800a250da993ff601c59b16b232654cf19c6e89894fa37b531fb3e58c6c",
+      "destination_sha256": "498bab1a4d50964b5fd2b33aedb860a50e9cabea92f842f2b37ef3f14c167f61",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "Exact current XP2 religious choice source dispatch; historical Base/XP1 source identity retained.",
+        "XP2 source-qualified direct religious request integration; historical source pin preserved",
+        "Source-qualified XP2 borrowed religion requests; original extraction source pin retained"
       ]
     },
     {
@@ -4078,12 +4097,13 @@
       "source_sha256": "595ffa4ec04ddc368824b09229a0eb98d4b758288c8888000d3029d07e732006",
       "module": "civ6_host.runtime.native.native_religion_founding",
       "destination": "src/civ6_host/runtime/native/native_religion_founding.py",
-      "destination_sha256": "9739e57f3a8a8514fc3eba11aa0ba62d24eacb26da92823975ec5a5f6dd5677d",
+      "destination_sha256": "c402dbc7600fe4f96bb2b6b973e259271d022131fe9101c354c9b501bca5e17b",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "Exact current XP2 religious choice source dispatch; historical Base/XP1 source identity retained."
       ]
     },
     {
@@ -4091,12 +4111,15 @@
       "source_sha256": "8f4bf5cb57ee535aa49e49347aa7c95254d58a4382b2ea923404e10dcacd6cba",
       "module": "civ6_host.runtime.native.native_religion_observation",
       "destination": "src/civ6_host/runtime/native/native_religion_observation.py",
-      "destination_sha256": "d7ce3ea3416f30cba1994040e6db933399ee0f5665b017bdbe5470c37d6ae3e4",
+      "destination_sha256": "3e0026641ab982666cb747057a5886a7ddc4be05a7526bebe42f40495f7da8d6",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "Exact current XP2 religious choice source dispatch; historical Base/XP1 source identity retained.",
+        "XP2 own founded religion resolves stale holy-city descriptors and projects the exact official localized title for a resolved city outside the own roster",
+        "isolate the embedded religious observation checks from the live city and localization globals and check both XP2 fallback shapes"
       ]
     },
     {
@@ -4213,13 +4236,14 @@
       "source_sha256": "f64d76690169ab35396bc6dcf13286868a871fc3955b3d9b26957ad976f47067",
       "module": "civ6_host.runtime.native.native_saved_captured_city",
       "destination": "src/civ6_host/runtime/native/native_saved_captured_city.py",
-      "destination_sha256": "e3f2d5197c0cad9935f74bdab24eac39bd008ac3fcb9d00c9252f419f0920518",
+      "destination_sha256": "67fd8aff3fc39a269d54a1510863e4a90d77dc6eadbad5042ff91c37a981ca11",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
-        "host-maintained captured-city profile admission and native occupation effect verification"
+        "host-maintained captured-city profile admission and native occupation effect verification",
+        "shared exact expansion occupation archive validation before delivery"
       ]
     },
     {
@@ -4255,12 +4279,13 @@
       "source_sha256": "62a02a2acc6b9030dff06c94ab3c9e9020bc1160b5ccc1c5cf135ec18b6f5248",
       "module": "civ6_host.runtime.native.native_saved_city_shot",
       "destination": "src/civ6_host/runtime/native/native_saved_city_shot.py",
-      "destination_sha256": "cdf89bf18b06e159be597c11d5c40557eafcfabb9388ffd18b93ed078d9e92ed",
+      "destination_sha256": "7ee14afd2ed3f98ac6d6f745f8042968e869520c7e7ef578e26193ca121436b6",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "shared city-shot route accepts an explicitly bound Rise and Fall image and the matching defense reader"
       ]
     },
     {
@@ -4298,7 +4323,7 @@
       "source_sha256": "2b271f8c8754b4241a177c44c3bced7e94db511e8801da96ea4bcc5a29c7fb57",
       "module": "civ6_host.runtime.native.native_saved_district_shot",
       "destination": "src/civ6_host/runtime/native/native_saved_district_shot.py",
-      "destination_sha256": "3c3663f2f02017d4e20bca61579b60545a6aa7dcde5306c6772c9b13a51a6048",
+      "destination_sha256": "109bf34dd9763a6cdca342d23428a04ab88b4e56bb189d3b5aee377b72a092bb",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4389,12 +4414,14 @@
       "source_sha256": "b4c9956e9a3b3b9368aaf972f1bc71253e38bda6d9b134a4d76ccc0c17039104",
       "module": "civ6_host.runtime.native.native_saved_pantheon",
       "destination": "src/civ6_host/runtime/native/native_saved_pantheon.py",
-      "destination_sha256": "a0f3354bf83f6362212af60840f2b5f890b23ed8596b139fe5791409e5b9d116",
+      "destination_sha256": "b0ce30d4bcdcdad0d45b09031725c96e12bc0430f9cf803181ad32d60f1894b4",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "XP2 source-qualified direct religious request integration; historical source pin preserved",
+        "XP2 authenticated borrowed-seat pantheon requests; original extraction source pin retained"
       ]
     },
     {
@@ -4456,7 +4483,7 @@
       "source_sha256": "d8d5efc4dc4d002996b3a6d477bbae9b277d65685bdd5bb9e11ed0f91b5e9c4e",
       "module": "civ6_host.runtime.native.native_saved_promotions",
       "destination": "src/civ6_host/runtime/native/native_saved_promotions.py",
-      "destination_sha256": "62432b38b6186dbe670e0a1859ad07abaefc33f715b5009fe149f4b90ed12e54",
+      "destination_sha256": "518d2834d28f4525e9c624abbe1f4a16e5f02e89de9c3e89e577583faf5f6227",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4469,12 +4496,13 @@
       "source_sha256": "18e4dd5bf9c031bc7dec705a576ff3214c83be267081c4d03dde47188c07eb7d",
       "module": "civ6_host.runtime.native.native_saved_purchases",
       "destination": "src/civ6_host/runtime/native/native_saved_purchases.py",
-      "destination_sha256": "03f844218ad43173535a030758754eab65452ea19af94f80e9e91eda21854bb9",
+      "destination_sha256": "df6ee2ec8dc660845d749764c260fd668a7146e9d26ea24afbaac897b9be3263",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "host-maintained expansion city purchases validate the archive and the debit on admitted routes"
       ]
     },
     {
@@ -4482,12 +4510,14 @@
       "source_sha256": "afc347912ff8f9b734d1d3cd0c14de0f193aee3a57b74c8dac35bb1e81633ea3",
       "module": "civ6_host.runtime.native.native_saved_religion",
       "destination": "src/civ6_host/runtime/native/native_saved_religion.py",
-      "destination_sha256": "f1a8cbb6d4c97572ff8536107be345df64aac40fab5023a172bf5ab8715f2968",
+      "destination_sha256": "3faaae780096fe5231393b8579832d55b8c6bbab88b268f3846ead97f331bd41",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
-        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged"
+        "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
+        "strict round trip of the conditional XP2 holy-city display-label wire",
+        "Source-qualified XP2 borrowed religion requests; original extraction source pin retained"
       ]
     },
     {
@@ -4521,7 +4551,7 @@
       "source_sha256": "92591eb3015090834a90f41704736f97702fdf6a2b2b367f02886dc722e7db89",
       "module": "civ6_host.runtime.native.native_saved_session",
       "destination": "src/civ6_host/runtime/native/native_saved_session.py",
-      "destination_sha256": "89236debf29cc5229c6241a585f6817b59d669f3be223d92fd66a7d35725f098",
+      "destination_sha256": "e74c004c6751c4454bd09d351d2700dab2b8d9a0ea73cc2ed83fb611d3cb9011",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4536,7 +4566,8 @@
         "explicit prepared-capture identity replaces only legacy localization handoff when configured",
         "LAN subclass reuses the bounded supervisor with explicit capture-only profile; no fallback fixture or hotseat scheduler",
         "bounded process launch extracted unchanged into shared session_launch; engine-specific preparation remains separate, readers/watch/reaping and validation retained",
-        "record dead-child pipe flush failures without masking the primary error or losing original job assignment"
+        "record dead-child pipe flush failures without masking the primary error or losing original job assignment",
+        "bounded system headroom and parent-memory watchdog for the explicit reduced XP2 LAN reserve, with streamed source hashes in cleanup"
       ]
     },
     {
@@ -4597,7 +4628,7 @@
       "source_sha256": "0a0b6e57b0502f2f8057d9f2526753bda3b37ffd4a53b62b8db03702e2304c34",
       "module": "civ6_host.runtime.native.native_saved_unit_orders",
       "destination": "src/civ6_host/runtime/native/native_saved_unit_orders.py",
-      "destination_sha256": "697390f40306dd48f758969be524d2b97e431942efed90f9e5d2c1819e9fa293",
+      "destination_sha256": "0c90790cd20ee090ad914ace59a55cf0f073724bb410d1099e967daa9cb878c3",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4605,7 +4636,8 @@
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
         "world-input and ordinary-unit CANCEL reuse separately admitted LAN features; legacy explicit diagnostic switches preserved",
         "XP1 native parameterless unit orders and ordinary-unit cancellation use shared catalogues and command delivery with selected source profiles; Base defaults preserved",
-        "host-maintained XP2 native skip-turn order through the shared operation catalogue"
+        "host-maintained XP2 native skip-turn order through the shared operation catalogue",
+        "explicit opt-in current-XP2 alert/auto-explore supplement on the shared source-bound operation catalogue; default operation list and Base/XP1 Lua unchanged"
       ]
     },
     {
@@ -4613,7 +4645,7 @@
       "source_sha256": "aa29f6ef0413120770967cbc0f9f8b6d8a98dfb3fc7ca2a7314270c2b1d4d515",
       "module": "civ6_host.runtime.native.native_saved_unit_upgrade",
       "destination": "src/civ6_host/runtime/native/native_saved_unit_upgrade.py",
-      "destination_sha256": "0a022a1d76f4798b59b71c9656b1b78c26bb0c6f55851150786c8c927e025363",
+      "destination_sha256": "ec89c490a6dc34c98625265e6ba29cb4c5df3f48995287ccd161912da7b7e01d",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4626,13 +4658,14 @@
       "source_sha256": "b22ff996c74122a91a840f1634252c0fb816697c6a0bcebc8d72d5d42e57d555",
       "module": "civ6_host.runtime.native.native_saved_unit_work",
       "destination": "src/civ6_host/runtime/native/native_saved_unit_work.py",
-      "destination_sha256": "cb465b8fe16dbffdbb828a41cc6cf3722275730cab2d9b5478892d8f46f84b80",
+      "destination_sha256": "5a4c9b80b2b22b8def2cbd0e5e1a628f086a9c19479345569945383b4db3aa07",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
         "lab sys.path injection removed",
         "filesystem Path references resolved through explicit private resource mapping; JSON evidence bytes unchanged",
-        "host-maintained opt-in XP2 adjacent target adapter; not admitted by the saved-session API"
+        "host-maintained opt-in XP2 adjacent target adapter; not admitted by the saved-session API",
+        "host-maintained pinned current XP2 saved-session adapter uses a stable order for native adjacent targets"
       ]
     },
     {
@@ -4640,7 +4673,7 @@
       "source_sha256": "ded65b265fba815ef3a6870926cf76428f2682508133225a51d546a48e64708f",
       "module": "civ6_host.runtime.native.native_saved_yield_display982",
       "destination": "src/civ6_host/runtime/native/native_saved_yield_display982.py",
-      "destination_sha256": "3d13e5542089ba0ed7f0d3fb192775c5f6fcc8658edb5e1ee639181384d3f9bd",
+      "destination_sha256": "411d8761a95c4f66fd7285a1d6a7ebcda8cca3afcff6030c7bd505d4224cdd26",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -4818,7 +4851,7 @@
       "source_sha256": "c9ffc29f2b38de311565fbdd5880a7160ae40668199327d3bfe2865f2592d4fd",
       "module": "civ6_host.runtime.native.native_session_checkpoint",
       "destination": "src/civ6_host/runtime/native/native_session_checkpoint.py",
-      "destination_sha256": "5c64b7650a485bb7a3c44da2e6e8e24bbefd5a8edf35fc7e447c0b8fb68fdc18",
+      "destination_sha256": "ed2f4192b7801982069f819dde35c4fc17da615d2c3f70f21731306d5290f499",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -5048,7 +5081,7 @@
       "source_sha256": "921ffb18e2318cf1ae526b56d32c7c9b7f7c393a1b575c88ba30840715f19abc",
       "module": "civ6_host.runtime.native.native_ui_local_state",
       "destination": "src/civ6_host/runtime/native/native_ui_local_state.py",
-      "destination_sha256": "839b4b429f75e391e94b1f40501144cc6998914a195a7ed1ced9f4b5c3fd93d1",
+      "destination_sha256": "7c2bb9d8cc8d92294dfab07efb550a36e826739dea4f5502bac0eac2e1f9d469",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -5061,7 +5094,7 @@
       "source_sha256": "5a24e4a9a7f4c78014f2ae4843277c14893c152433146da5e5474c59e9fa2a79",
       "module": "civ6_host.runtime.native.native_ui_profile",
       "destination": "src/civ6_host/runtime/native/native_ui_profile.py",
-      "destination_sha256": "c357930eb555e68232bb592ac3ca70f2528a1dfd07177e10c97bc5213ea80069",
+      "destination_sha256": "ed4777ce12d8581b551b068e27ff4d290c829355a3b434f3e5b530d66e32765d",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -5663,7 +5696,7 @@
       "source_sha256": "28323d115500a7a1a84f9eca79ac0a6097bfd228f6690eec0d6871ac432c4320",
       "module": "civ6_host.runtime.workers.official_hotseat_worker923",
       "destination": "src/civ6_host/runtime/workers/official_hotseat_worker923.py",
-      "destination_sha256": "6696eecdefa0640110920a2d9c80795649bad21a06d91b2e7b053d42649ee075",
+      "destination_sha256": "6ae2870c59d7a1c37a7f0e5c6f885f56c58224e5a889bf39e70978ad99a0cd5e",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",
@@ -5692,7 +5725,7 @@
       "source_sha256": "6e99b2bced37aa9463e31fd07cf4ed50308ca53cce304269e53f935541fc7ede",
       "module": "civ6_host.runtime.workers.run_official_postload909",
       "destination": "src/civ6_host/runtime/workers/run_official_postload909.py",
-      "destination_sha256": "b6b6be61970069ac4fd95d391b697b0b62538f55d8bd1a732f1c4d0a55fa9d13",
+      "destination_sha256": "25fcda23d4623f496c247a029fdb81ba82cf0457cfcffa27013c5c55c8cfaf37",
       "transformations": [
         "imports mapped to installed host modules",
         "historical source paths retained for old proofs; executed files separately pinned",

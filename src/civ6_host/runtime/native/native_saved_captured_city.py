@@ -3,6 +3,7 @@ from civ6_host.runtime.provenance import historical_source_file as _historical_s
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
 from pathlib import Path
 import hashlib
+from struct import pack
 from civ6_host.runtime.native.native_source_cache import load_pinned_json
 from civ6_host.runtime.native.native_player_observation import observe_player
 from civ6_host.contracts.captured_city import (
@@ -10,6 +11,21 @@ from civ6_host.contracts.captured_city import (
 )
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_saved_captured_city.py')))).resolve().parents[1]
 SOURCE_SHA = 'bd89ab8904d85676d547422f4e8b5027cdb93f0171b50915129c177565d9dbda'
+_EXPANSION_DIRECTIVE_FLAGS = dict(
+    LIBERATE_FOUNDER=0, LIBERATE_PREVIOUS_OWNER=1, KEEP=2, RAZE=3)
+
+
+def verify_expansion_archive(payload, player_id, action):
+    """Authenticate a captured archive against the selected expansion city command."""
+    uint(player_id, 'player', 63)
+    validate_action(action)
+    directive = _EXPANSION_DIRECTIVE_FLAGS[action['directive']]
+    expected = pack('<IHH6I', 0x346b0a13, player_id, 2, action['city_id'], 4,
+                    directive, 1, 0, directive)
+    if type(payload) is not bytes or payload != expected:
+        raise ValueError('Expansion captured-city archive differs from actor, city or directive')
+
+
 def verify_source():
     p = load_pinned_json(ROOT / 'work/city-continuation937/capture-choice-source.json', SOURCE_SHA)
     if p['schema'] != 'civ6rl.captured_city_choice937.source.v1' or p['core_sha256'] != 'd7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3' or p['contract'] != dict(city_selector='Players[localPlayer]:GetCities():GetNextCapturedCity()', command='CityCommandTypes.DESTROY', parameter_key='UnitOperationTypes.PARAM_FLAGS', directives=DIRECTIVES, selection_explicit=True, rules_reimplemented=False) or (hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(p['official_ui']['path']))).read_bytes()).hexdigest() != p['official_ui']['sha256']):
@@ -21,8 +37,8 @@ def preamble(pid, turn, *, execution_image=None):
     if execution_image is None:
         verify_source()
     else:
-        from civ6_host.runtime.xp2_captured_city import source
-        source(execution_image)
+        from civ6_host.runtime.captured_city_session import verify_source as verify_expansion_source
+        verify_expansion_source(execution_image)
     uint(pid, 'player', 63)
     uint(turn, 'turn', 2147483647)
     return f'local pid,turn={pid},{turn}\n'.encode() + COMMON.encode()
@@ -119,6 +135,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0, execution_image=N
         b'@explicit_captured_city_request')
     if result != b'submitted' or len(prefix.actions.pending) != 1 or prefix.deferred_events.pending:
         raise RuntimeError('Expected one native captured-city command')
+    if execution_image is not None:
+        verify_expansion_archive(prefix.actions.pending[0], player_id, action)
     prefix.actions.deliver_one()
     prefix.deferred_events.drain_empty_receivers()
     prefix.view_publisher.publish()
@@ -137,8 +155,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0, execution_image=N
         _verify_liberation_recipient(prefix, turn=turn, x=city['x'], y=city['y'], recipient=recipient)
     proof_sha256 = SOURCE_SHA
     if execution_image is not None:
-        from civ6_host.runtime.xp2_captured_city import SOURCE
-        proof_sha256 = SOURCE[1]
+        from civ6_host.runtime.captured_city_session import verify_source as verify_expansion_source
+        proof_sha256 = verify_expansion_source(execution_image)
     owner.emit('official_explicit_captured_city_effect', action=action, catalog_before=fresh, catalog_after=next_city, observation_before=before, observation_after=after, choice_no_longer_pending=True, disappearance_interpreted_as_razed=False,
         verified_liberation_recipient=recipient,
         verified_razed_city_plot=dict(x=city['x'], y=city['y']) if is_raze else None,

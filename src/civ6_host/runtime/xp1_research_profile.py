@@ -86,8 +86,11 @@ def verify_live(core_base,read,core_sha256=XP1_CORE_SHA256,*,execution_image=Non
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_initial_choice_source import verify_live as selected
         return selected(core_base,read,'research',execution_image=execution_image)
-    if execution_image is not None:raise ValueError('Selected research image requires the XP2 source ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError("Unknown research live source engine")
+    if execution_image is not None:
+        from .execution_images import _XP1_PROFILE
+        if execution_image is not _XP1_PROFILE or execution_image.reference_core_sha256 != core_sha256:
+            raise ValueError('Selected research image requires the exact installed XP1 source ABI')
     if type(core_base) is not int or core_base<=0 or not callable(read):
         raise ValueError('Live research source requires exact module/read binding')
     p=verify_source()
@@ -187,7 +190,7 @@ def bind_owner(owner,core,read):
                 or existing.source_sha256!=selected_source[1] or existing.core_sha256!=core_sha):
             raise ValueError('XP1 research source receipt belongs to another lifetime')
         return existing
-    image = getattr(core, '_civ6_host_execution_image', None) if core_sha == XP2_CORE_SHA256 else None
+    image = getattr(core, '_civ6_host_execution_image', None)
     verify_live(core._handle,read,core_sha256=core_sha,
                 **({'execution_image':image} if image is not None else {}))
     result=VerifiedResearchSource(owner,core,core._handle,selected_source[1],core_sha)

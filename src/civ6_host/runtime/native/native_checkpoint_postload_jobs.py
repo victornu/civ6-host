@@ -53,13 +53,14 @@ def _exact_int(value, name, *, low=0, high=(1 << 64) - 1):
         raise ValueError(f'{name} is outside its exact integer domain')
     return value
 
-def _identity(snapshot, label):
-    proof = verify_source_contract()
+def _identity(snapshot, label, *, execution_image=None):
+    verify_source_contract()
+    expected_exe, host_sha256 = jobs.host_reference(execution_image)
     if type(snapshot) is not dict:
         raise ValueError(f'{label} snapshot must be an object')
     if set(snapshot) != SNAPSHOT_KEYS:
         raise ValueError(f'{label} snapshot has missing or unknown fields')
-    if snapshot.get('host_sha256') != proof['host']['sha256']:
+    if snapshot.get('host_sha256') != host_sha256:
         raise ValueError(f'{label} Host41 image pin differs from source proof')
     if snapshot.get('source_proof_sha256') != jobs.PROOF_SHA256:
         raise ValueError(f'{label} job snapshot source pin differs')
@@ -77,9 +78,7 @@ def _identity(snapshot, label):
     _exact_int(exe['host_base'], f'{label} executable base', low=1)
     if type(exe['executable_path']) is not str or not exe['executable_path']:
         raise ValueError(f'{label} executable path is malformed')
-    root = _resolve_resource_path(_resolve_resource_path(Path(_historical_module_file(jobs)))).resolve().parents[1]
-    expected_exe = _resolve_resource_path(root / 'work/native-script-services-host41/civ6rl-native-python.exe').resolve()
-    if _resolve_resource_path(_resolve_resource_path(Path(exe['executable_path']))).resolve() != expected_exe:
+    if _resolve_resource_path(_resolve_resource_path(Path(exe['executable_path']))).resolve() != _resolve_resource_path(expected_exe).resolve():
         raise ValueError(f'{label} executable path is not the pinned Host41')
     _exact_int(exe['os_thread_id'], f'{label} OS thread', low=1, high=4294967295)
     if exe['os_thread_id'] != snapshot['owner_thread_id']:
@@ -108,7 +107,7 @@ def _identity(snapshot, label):
             raise ValueError(f'{label} slot occupancy is malformed')
         if type(slot['count']) is not int or slot['count'] != 0 or type(slot['items']) is not list or slot['items']:
             raise ValueError(f'{label} slot is not structurally empty')
-    jobs.require_quiescent(snapshot)
+    jobs.require_quiescent(snapshot, execution_image=execution_image)
     return exe
 
 def _ledger_event(event):
@@ -135,15 +134,15 @@ def _ledger_event(event):
         return ('create', handle)
     raise ValueError('Load interval contains a job transition outside the narrow empty-list profile')
 
-def validate_quiescent_snapshot_transition(before, after):
+def validate_quiescent_snapshot_transition(before, after, *, execution_image=None):
     """Validate the live-safe structural subset, without claiming ledger proof.
 
     Host41 writes C-export diagnostics to stdout; those records may only be
     available to the supervising process after the worker exits. Therefore this
     function does not synthesize an event ledger from snapshot differences.
     """
-    before_exe = _identity(before, 'before')
-    after_exe = _identity(after, 'after')
+    before_exe = _identity(before, 'before', execution_image=execution_image)
+    after_exe = _identity(after, 'after', execution_image=execution_image)
     for name in ('schema', 'source_proof_sha256', 'host_sha256', 'profile', 'owner_thread_id'):
         if before.get(name) != after.get(name):
             raise ValueError(f'Host41 {name} changed across Load')

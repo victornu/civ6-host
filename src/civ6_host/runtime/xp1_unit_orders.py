@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from .configuration_profiles import XP1_CORE_SHA256
 from .xp1_world_input import _owner
+from . import xp2_extra_unit_orders
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,9 @@ def read(saved,observation):
     before,sequence=deepcopy(observation),t.sequence
     t.transport.require_empty_native_queue();b.control(empty=True)
     from .native import native_saved_unit_orders as orders
+    extended = xp2_extra_unit_orders.enabled(saved)
     state=orders.catalog(p,before['turn'],player_id=before['player_id'],include_cancel=True,
+                         **(dict(include_extended=True) if extended else {}),
                          core_sha256=b.load_abi.core_sha256)
     choices=orders.actions(state)
     actual=_owner(saved,active=False)
@@ -98,6 +101,7 @@ def apply(saved,action,before):
     proof_sha256=selected_proof(SOURCE[1],b.load_abi.core_sha256)
     try:
         observed=orders.apply(owner,p,action,before['turn'],before,player_id=before['player_id'],
+                              **(dict(include_extended=True) if xp2_extra_unit_orders.enabled(saved) else {}),
                               include_cancel=True,core_sha256=b.load_abi.core_sha256)
         _check_catalogue(saved,catalogue)
         receipt=owner.receipt
@@ -110,6 +114,10 @@ def apply(saved,action,before):
                 or action['item_type']=='UNITCOMMAND_CANCEL' and receipt.get('cancel_source_proof_sha256')!=proof_sha256):
             raise RuntimeError('Shared unit-order receipt or publication is inconsistent')
         t.transport.require_empty_native_queue();b.control(empty=True)
-        return dict(status='completed',refusal_code=None,observation=deepcopy(observed),receipt=deepcopy(receipt))
+        from civ6_host.contracts.capability_unit_orders import EXTENDED_OPERATIONS
+        confirmed = action['item_type'] not in EXTENDED_OPERATIONS or receipt['state_changed'] is True
+        return dict(status='completed' if confirmed else 'submitted',
+                    refusal_code=None if confirmed else 'native_unit_order_effect_unconfirmed',
+                    observation=deepcopy(observed),receipt=deepcopy(receipt))
     finally:
         t._xp1_unit_orders_catalogue=t.explicit_unit_orders=None

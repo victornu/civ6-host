@@ -11,11 +11,11 @@ _SOURCE_HASHES = {'TopPanel.lua': '045a0d9e08ba63ee9a151810eb49f31bc11603cff7f15
 _CAPACITY = 4 * 1024 * 1024
 YIELDS = ('food', 'production', 'gold', 'science', 'culture', 'faith')
 
-def verified_files():
+def verified_files(*, localization_sources=None):
     from civ6_host.runtime.native.native_locale_number982 import verified_files as number_files
     files = treasury.verified_files()
     files.update({_ASSETS / path: digest for path, digest in _SOURCE_HASHES.items()})
-    files.update(number_files())
+    files.update(number_files() if localization_sources is None else localization_sources)
     for path, digest in files.items():
         if hashlib.sha256(_resolve_resource_path(path).read_bytes()).hexdigest() != digest:
             raise RuntimeError('Pinned public yield source changed: ' + path.name)
@@ -26,7 +26,7 @@ def source(player_id):
     return b'local pid=' + pid + b'\nassert(Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid,\'yield perspective mismatch\')\nlocal player=assert(Players[pid],\'yield player unavailable\')\nlocal turn=Game.GetCurrentGameTurn()\nlocal function number(v)\n assert(type(v)==\'number\' and v==v and math.abs(v)<=1e12,\'invalid yield numeric value\')\n return string.format(\'%.17g\',v)\nend\nlocal function whole(v)\n assert(type(v)==\'number\' and v==math.floor(v),\'invalid integer yield identity\')\n return number(v)\nend\nlocal function row(fields)return \'{\'..table.concat(fields,\',\')..\'}\'end\nlocal function values(raw)\n local fields={}\n for _,key in ipairs({\'food\',\'production\',\'gold\',\'science\',\'culture\',\'faith\'})do\n  fields[#fields+1]=\'"\'..key..\'":\'..number(raw[key])\n end\n return row(fields)\nend\nlocal cities={};local seen={}\nfor _,city in player:GetCities():Members()do\n assert(city:GetOwner()==pid,\'foreign city in own yield roster\')\n local id=city:GetID();assert(not seen[id],\'duplicate yield city\');seen[id]=true\n local raw={};local shown={}\n for _,entry in ipairs({{\'food\',YieldTypes.FOOD},{\'production\',YieldTypes.PRODUCTION},\n     {\'gold\',YieldTypes.GOLD},{\'science\',YieldTypes.SCIENCE},{\'culture\',YieldTypes.CULTURE},{\'faith\',YieldTypes.FAITH}})do\n  local v=city:GetYield(entry[2]);number(v);raw[entry[1]]=v\n  -- This is the shipped CitySupport.UpdateYieldData presentation projection.\n  shown[entry[1]]=math.floor(v*10)/10\n end\n cities[#cities+1]={id=id,json=row({\'"city_id":\'..whole(id),\'"raw":\'..values(raw),\'"shown":\'..values(shown)})}\n assert(#cities<=4096,\'yield city bound\')\nend\ntable.sort(cities,function(a,b)return a.id<b.id end)\nlocal rows={};for _,city in ipairs(cities)do rows[#rows+1]=city.json end\nlocal science=player:GetTechs():GetScienceYield()\nlocal culture=player:GetCulture():GetCultureYield()\nlocal faith=player:GetReligion():GetFaithBalance()\nlocal faithYield=player:GetReligion():GetFaithYield()\nassert(Game.GetCurrentGameTurn()==turn and Game.GetLocalPlayer()==pid and Game.GetLocalObserver()==pid,\n       \'yield observation boundary changed\')\nreturn row({\'"player_id":\'..whole(pid),\'"turn":\'..whole(turn),\n \'"raw":\'..row({\'"science":\'..number(science),\'"culture":\'..number(culture),\n                \'"faith":\'..number(faith),\'"faith_yield":\'..number(faithYield)}),\n \'"cities":[\'..table.concat(rows,\',\')..\']\'})\n'
 
 def project(raw, library, *, number_formatter=None, lookup=None):
-    """Use the native formatter; injected callables are only for unit witnesses."""
+    """Project the admitted player's values with the selected native formatter."""
     from civ6_host.runtime.native.native_locale_number982 import format_number
     from civ6_host.runtime.native.native_locale_arguments import native_lookup
     number_formatter = number_formatter or format_number
@@ -55,12 +55,24 @@ def project(raw, library, *, number_formatter=None, lookup=None):
     return validate(result, raw['player_id'], raw['turn'])
 
 def observe(prefix, observation):
-    from civ6_host.runtime.native.native_locale_arguments import attach
-    verified_files()
+    from civ6_host.runtime import base_public_locale
+    from civ6_host.runtime.native.native_locale_arguments import attach, native_lookup
+    from civ6_host.runtime.native.native_locale_number982 import format_number
+    image = base_public_locale.selected_image(prefix.runtime)
+    if image is None:
+        verified_files()
+    else:
+        verified_files(localization_sources=base_public_locale.source_files(image))
     attach(prefix)
-    if not getattr(prefix, 'yield_formatter982_verified', False):
-        from civ6_host.runtime.native.native_locale_number982 import format_number
-        from civ6_host.runtime.native.native_locale_arguments import native_lookup
+    formatter_changed = False
+    if image is not None:
+        formatter = getattr(prefix, 'base_public_locale_formatter', None)
+        if formatter is None or formatter.child != prefix.ui_child:
+            formatter = base_public_locale.Formatter(prefix)
+            prefix.base_public_locale_formatter = formatter
+            formatter_changed = True
+        format_number, native_lookup = formatter.number, formatter.lookup
+    if formatter_changed or not getattr(prefix, 'yield_formatter982_verified', False):
         cases = []
         library = prefix.runtime.service_owner.localization_library
         for pattern in (None, '#,###.#', '+#,###.#;-#,###.#'):
@@ -79,5 +91,6 @@ def observe(prefix, observation):
     if type(data) is not bytes or len(data) >= _CAPACITY:
         raise ValueError('Invalid raw yield payload')
     raw = json.loads(data.decode('ascii'), object_pairs_hook=treasury._unique_object, parse_constant=lambda v: (_ for _ in ()).throw(ValueError('nonfinite yield constant')))
-    result = project(raw, prefix.runtime.service_owner.localization_library)
+    result = project(raw, prefix.runtime.service_owner.localization_library,
+                     number_formatter=format_number, lookup=native_lookup)
     return validate(result, pid, turn, observation)

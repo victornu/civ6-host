@@ -82,6 +82,36 @@ class CityQueryCheckpointTests(unittest.TestCase):
                                                                   requested=(True,True))
         self.assertNotEqual(semantic_decisions(projected),semantic_decisions(focus_only))
 
+    def test_xp1_city_queries_compose_with_saved_city_purchases(self):
+        root = resource_root()
+        proof = json.loads((root/'evidence/host-xp1-stock-building-unit-purchase-save-reload-native.json').read_bytes())
+        ref = proof['saved']['output_checkpoint']
+        raw = (root/ref['path']).read_bytes()
+        self.assertEqual(sha256(raw).hexdigest(), ref['sha256'])
+        checkpoint = json.loads(raw)
+        self.saved = checkpoint['decisions']
+        self.observation = checkpoint['observation']
+        self.assertNotIn('city_focus_catalogs', self.saved)
+        self.assertIn('city_purchases', self.saved)
+
+        current = self.queries()
+        self.assertEqual(current['schema'], self.saved['schema'])
+        self.assertTrue(any(row['action']['kind'] == 'city_focus' for row in current['candidates']))
+        for pending in (False, True):
+            with self.subTest(pending=pending):
+                live = deepcopy(current)
+                if pending:
+                    live.update(city_focus_catalogs=None, citizen_catalogs=None)
+                    self.rebuild(live)
+                projected, transition = network_turn.checkpoint_city_query_projection(
+                    live, self.saved, self.observation, requested=(True, True))
+                self.assertEqual(semantic_decisions(projected), semantic_decisions(self.saved))
+                self.assertEqual(transition['added_public_fields'], ['city_focus_catalogs', 'citizen_catalogs'])
+                self.assertEqual(transition['added_action_families'],
+                                 [] if pending else ['city_focus', 'city_citizen'])
+                self.assertEqual(live['city_purchases'], self.saved['city_purchases'])
+                self.assertIn('city_focus_catalogs', live)
+
     def test_forged_candidates_and_catalogue_versions_are_refused(self):
         current=self.queries();current['candidates'].pop()
         current.pop('decision_id');current['decision_id']=network_turn.digest(current)

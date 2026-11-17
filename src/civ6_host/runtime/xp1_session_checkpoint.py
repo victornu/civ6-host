@@ -90,6 +90,7 @@ def boundary(saved):
     """Read the actual active human boundary, with no turn/update side effect."""
     from .xp1_saved_load_owner import SavedLoadOwner
     from .xp1_session_view import _reference, _read_state
+    from civ6_host.contracts.network_turn import TURN_CONTROLS_SCHEMA
     from .network_timer import read
     if type(saved) is not SavedLoadOwner:
         raise TypeError('XP1 Save requires its retained SavedLoadOwner')
@@ -101,21 +102,26 @@ def boundary(saved):
         ref, ids = _reference(saved, 0)
         session, activity = _read_state(saved, 0, ref, ids)
         rows = {row['player_id']: row for row in activity['rows']}
-        row = rows[0]
-        control = dict(schema='civ6-host.turn-controls.v1', player_id=0,
-            turn=session['turn'], active=row['active'], active_complete=row['active_complete'],
-            can_unready=row['can_unready'], timer_elapsed=read(saved.backend, core_sha256=saved.backend.load_abi.core_sha256))
-        if (session['human_player_ids'] != [0] or session['active_human_player_ids'] != [0]
-                or session['local_player_id'] != 0 or control['active'] is not True
-                or control['active_complete'] is not True or control['can_unready'] is not False
-                or control['timer_elapsed'] is not False
-                or any(r['active'] for pid,r in rows.items() if pid != 0)
+        core_sha256 = saved.backend.load_abi.core_sha256
+        humans = session['human_player_ids']
+        timer = read(saved.backend, core_sha256=core_sha256)
+        if ((core_sha256 != XP2_CORE_SHA256 and humans != [0])
+                or session['active_human_player_ids'] != humans or session['local_player_id'] != 0
+                or timer is not False
+                or any(not rows[pid]['active'] or not rows[pid]['active_complete']
+                       or rows[pid]['can_unready'] for pid in humans)
+                or any(row['active'] for pid, row in rows.items() if pid not in humans)
                 or getattr(saved, 'turn_continuation', None) is not None
                 or any(saved.continuation.world_input_prompts.values())):
-            raise ValueError('XP1 Save requires a quiescent active untimed human boundary')
+            raise ValueError('Expansion Save requires a quiescent active untimed human boundary')
+        controls = [dict(schema=TURN_CONTROLS_SCHEMA, turn=session['turn'], timer_elapsed=timer,
+                         **rows[pid]) for pid in humans]
+        result = dict(session=session, controls=controls[0])
+        if len(controls) > 1:
+            result['secondary_controls'] = controls[1:]
         saved.continuation.transport.require_empty_native_queue()
         saved.backend.control(empty=True)
-        return dict(session=session, controls=control)
+        return result
 
 
 class SavedSessionSaveBackend(SessionSaveBackend):
@@ -142,12 +148,20 @@ class SavedSessionSaveBackend(SessionSaveBackend):
             raise ValueError('XP1 administrative Save lacks an unchanged explicit boundary')
         self.saved = saved
         self.owner, self.prefix, self.inputs = saved.backend, saved.prefix, saved.inputs
+        self.player_id = observation['player_id']
+        self.origin_save_sha256 = self.inputs.profile.save_sha
         self.host_state_owner = saved.continuation
         self.expected_state, self.decisions = deepcopy(observation), deepcopy(decisions)
         self.closure, self.closure_path = deepcopy(closure), Path(closure_path).resolve()
         self.provenance = save_provenance(self.inputs, closure,
                                           execution_image=self.execution_image)
         self.network_boundary = boundary(saved)
+        from .player_views import checkpoint_decision_players, checkpoint_view_digests, checkpoint_view_players
+        view_players = checkpoint_view_players(closure, self.network_boundary)
+        self.checkpoint_public_views = (checkpoint_view_digests(
+            saved, self.network_boundary, view_players,
+            decision_players=checkpoint_decision_players(closure, self.network_boundary, view_players))
+            if view_players else None)
         self.publisher = self.host_state_owner.publisher
         self.facade = self.publisher._facades
         self.paths = private_paths(closure_path)
@@ -187,7 +201,7 @@ class SavedSessionSaveBackend(SessionSaveBackend):
         self.saved._check_active()
         if boundary(self.saved) != self.network_boundary:
             raise ValueError('XP1 Save changed native readiness/session state')
-        value = observe_player(self.prefix.runtime, self.prefix.ui_child, 0)
+        value = observe_player(self.prefix.runtime, self.prefix.ui_child, self.player_id)
         if value != self.expected_state:
             raise ValueError('XP1 Save changed the public player observation')
         return value
@@ -261,12 +275,25 @@ def manifest_sources(backend, reference, *, execution_image=None):
         paths.extend(Path(path) for path in source_dependencies()
                      if Path(path).is_relative_to(root))
     elif engine == XP2_CORE_SHA256:
-        from .xp1_checkpoint_profile import source_dependencies
-        from .configuration_profiles import codec_source
-        codec_source(engine)
-        paths.extend(Path(path) for path in source_dependencies(core_sha256=engine,
-                                                               execution_image=execution_image)
-                     if Path(path).is_relative_to(root))
+        from .resource_resolution import resolve_path
+        from .source_verification import file_sha256
+        from .xp2_checkpoint_source import SOURCE, SUPPLEMENT, RULES
+        sources = backend.closure.get('xp2_checkpoint_sources')
+        if type(sources) is not dict or any(
+                sources.get(str(resolve_path(root / relative).resolve())) != digest
+                for relative, digest in (SOURCE, SUPPLEMENT, RULES)):
+            raise ValueError('XP2 Save lacks its reviewed checkpoint source dependencies')
+        proof_rows = {p.relative_to(root).as_posix(): reference(p) for p in paths}
+        for name, digest in sources.items():
+            path = Path(name)
+            if (not path.is_relative_to(root) or path.resolve(strict=True) != path
+                    or backend.closure['pins'].get(name) != digest
+                    or file_sha256(path) != digest):
+                raise ValueError('XP2 Save checkpoint source changed: ' + name)
+            relative = path.relative_to(root).as_posix()
+            proof_rows.setdefault(relative, dict(path=relative, bytes=path.stat().st_size,
+                                                 sha256=digest))
+        return engine, list(proof_rows.values())
     elif engine == provider.CORE_SHA256:
         paths.extend((root/'evidence/native-checkpoint-configuration-stream-v3'/
                       (provider.PROOF_SHA256+'.json'), jobs.PROOF_PATH))

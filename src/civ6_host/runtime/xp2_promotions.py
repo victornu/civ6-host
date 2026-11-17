@@ -1,6 +1,7 @@
 """Bind the shared native promotion adapter to the exact XP2 implementation."""
 from pathlib import Path
 import struct
+from types import SimpleNamespace
 
 from civ6_host.contracts.unit_promotions import validate_catalogue
 from .configuration_profiles import XP2_CORE_SHA256
@@ -67,8 +68,8 @@ def _bind(saved, *, active):
     saved._xp2_promotion_lifetime = lifetime
 
 
-def catalogue(saved, observation):
-    _bind(saved, active=False)
+def snapshot(saved, observation, *, active=False):
+    _bind(saved, active=active)
     player_id, turn = observation['player_id'], observation['turn']
     raw = promotions.catalog(saved.prefix, turn, player_id=player_id)
     # The XP2 binding emits integer XP. Movement and damage are already in the
@@ -77,11 +78,17 @@ def catalogue(saved, observation):
         dict(unit_id=unit['unit_id'], experience_points=int(unit['experience_token']),
              promotions=unit['promotions']) for unit in raw['units']])
     validate_catalogue(value, player_id, turn, observation=observation)
-    saved.explicit_promotions = raw
+    return raw, value
+
+
+def catalogue(saved, observation):
+    saved.explicit_promotions, value = snapshot(saved, observation)
     return value
 
 
-def apply(saved, action, observation):
+def apply(saved, action, observation, *, borrowed_state=None, archive_validator=None):
+    if (borrowed_state is None) != (archive_validator is None):
+        raise ValueError('Borrowed promotion requires its fresh state and archive check')
     _bind(saved, active=True)
     continuation = saved.continuation
     feedback = continuation.trade_feedback
@@ -91,5 +98,14 @@ def apply(saved, action, observation):
             delivered = continuation.flush_trade_feedback()
             if delivered:
                 saved.emit('xp2_bbg_trade_gameplay_delivered', feedback=delivered)
-    return promotions.apply(saved, saved.prefix, action, observation['turn'], observation,
-                            player_id=observation['player_id'], after_delivery=after_delivery)
+    owner, options = saved, {}
+    if borrowed_state is not None:
+        def emit(stage, **fields):
+            if stage == 'xp1_explicit_promotion_verified':
+                stage = 'xp2_borrowed_explicit_promotion_verified'
+            saved.emit(stage, **fields)
+        owner = SimpleNamespace(explicit_promotions=borrowed_state, emit=emit)
+        options['archive_validator'] = archive_validator
+    result = promotions.apply(owner, saved.prefix, action, observation['turn'], observation,
+        player_id=observation['player_id'], after_delivery=after_delivery, **options)
+    return result['observation'] if archive_validator is not None else result

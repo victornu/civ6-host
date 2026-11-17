@@ -20,8 +20,8 @@ def configuration(mode="HOTSEAT", phase=None, *, phase_tag=3, game_tag=10):
     return struct.pack("<IIHHII", 1, h("GAME_ROOT"), game_tag, 0, 0x05000000, 0) + contents
 
 
-def slot_configuration(slots):
-    providers = []
+def slot_configuration(slots, *, game=None):
+    providers = [] if game is None else [(h("GAME_ROOT"), game[4:])]
     for player_id, status, level, tag in slots:
         fields = [(h("PLAYER_ID"), 2, player_id), (h("SLOT_STATUS"), 2, status)]
         if level is not None:

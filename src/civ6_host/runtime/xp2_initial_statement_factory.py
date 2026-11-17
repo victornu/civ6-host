@@ -71,6 +71,10 @@ def verify_request(base, read, name, *, execution_image):
         raise ValueError("Unqualified initial statement request name")
     verify_image(base, read, execution_image=execution_image)
     target = proof["requests"][name]
+    return _registered_request(base, read, name, target, source_sha256=SOURCE[1])
+
+
+def _registered_request(base, read, name, target, *, source_sha256):
     key = int(target["statement_hash"], 16)
     count = struct.unpack("<I", _read(read, base+0xb635c8, 4))[0]
     if not 0 < count <= MAX_BUCKETS:
@@ -83,7 +87,7 @@ def verify_request(base, read, name, *, execution_image):
         if node in (0, sentinel):
             if target["expected_registration"]:
                 raise ValueError("Selected initial statement factory is missing")
-            return dict(source_sha256=SOURCE[1], request_name=name,
+            return dict(source_sha256=source_sha256, request_name=name,
                         statement_hash=key, expected_registration=False,
                         observed_registration=False, native_memory_modified=False,
                         native_request_invoked=False)
@@ -98,7 +102,7 @@ def verify_request(base, read, name, *, execution_image):
             expected = base+int(target["factory_rva"], 16)
             if struct.unpack("<Q", _read(read, node+8, 8))[0] != expected:
                 raise ValueError("Initial statement registered factory changed")
-            return dict(source_sha256=SOURCE[1], request_name=name,
+            return dict(source_sha256=source_sha256, request_name=name,
                         statement_hash=key, expected_registration=True,
                         observed_registration=True, factory_rva=target["factory_rva"],
                         vtable_rva=target["vtable_rva"], native_memory_modified=False,

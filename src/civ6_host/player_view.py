@@ -11,6 +11,7 @@ import math
 import copy
 
 SCHEMA = "civ6-host.player-view.v1"
+WAR_STATUS_SCHEMA = "civ6-host.player-view.v2"
 OBSERVATION_SCHEMA = "civ6rl-player-observation-v1"
 PLAYER_MAP_SCHEMA = "civ6rl.saved_player_map933.v1"
 MAX_PLAYERS = 64
@@ -194,11 +195,28 @@ def validate_player_map(value, observation):
     return value
 
 
+def validate_diplomatic_wars(rows, player_id):
+    """Validate the local player's war status with met, living major players."""
+    _require(type(rows) is list and len(rows) < MAX_PLAYERS,
+             "invalid public diplomatic war list")
+    previous = -1
+    for row in rows:
+        _require(type(row) is dict and set(row) == {"player_id", "at_war"},
+                 "public diplomatic war fields differ")
+        pid = _int(row["player_id"], "diplomatic counterpart", 0, MAX_PLAYERS - 1)
+        _require(previous < pid and pid != player_id and type(row["at_war"]) is bool,
+                 "invalid public diplomatic war counterpart or status")
+        previous = pid
+    return rows
+
+
 def validate_player_view(value, *, episode_id: str, game_generation: str,
                          sequence: int, player_id: int, turn: int) -> dict:
     """Validate and detach a player view against the current hotseat boundary."""
-    _require(type(value) is dict and set(value) == VIEW_FIELDS
-             and value["schema"] == SCHEMA, "player view schema or fields differ")
+    _require(type(value) is dict and (
+        (value.get("schema") == SCHEMA and set(value) == VIEW_FIELDS)
+        or (value.get("schema") == WAR_STATUS_SCHEMA and set(value) == VIEW_FIELDS | {"diplomatic_wars"})
+    ), "player view schema or fields differ")
     _require(value["episode_id"] == episode_id
              and type(value["episode_id"]) is str
              and value["game_generation"] == game_generation
@@ -217,6 +235,8 @@ def validate_player_view(value, *, episode_id: str, game_generation: str,
              "player turn flags must be exact Booleans")
     width, height = _validate_observation(value["observation"], player_id, turn)
     _validate_map(value["player_map"], value["observation"], player_id, turn, width, height)
+    if value["schema"] == WAR_STATUS_SCHEMA:
+        validate_diplomatic_wars(value["diplomatic_wars"], player_id)
     return copy.deepcopy(value)
 
 

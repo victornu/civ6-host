@@ -9,6 +9,24 @@ CURRENT_SOURCE=('work/actual-core-092-integration/locale-current/source-profile.
                 'cc6326899b99bfb54c92845ed368e51b88efbbce9bdf8cf4dab9a334f7a9645d')
 
 
+def _require_current_dependencies(proof, execution_image):
+    from .execution_images import _BASE_PROFILE, _PROFILE, _XP1_PROFILE
+    from .resource_resolution import resolve_path
+    if not any(execution_image is profile for profile in (_BASE_PROFILE, _XP1_PROFILE, _PROFILE)):
+        raise ValueError('Current Locale requires a registered shared-library profile')
+    if (proof['actual_core_sha256'], proof['reference_core_sha256']) != (
+            _PROFILE.image_sha256, _PROFILE.reference_core_sha256):
+        raise ValueError('Current Locale source image pair changed')
+    dependencies = {row.name: row for row in execution_image.shared_dependencies}
+    for key, name in (('hks', 'HavokScript_FinalRelease.dll'),
+                      ('localization', 'Localization_FinalRelease.dll')):
+        row = dependencies[name]
+        pinned = proof[key]
+        if (pinned['sha256'] != row.sha256
+                or resolve_path(Path(pinned['path'])).resolve() != resolve_path(Path(row.path)).resolve()):
+            raise ValueError('Current Locale proof is for another shared-library build')
+
+
 def source_files(*, execution_image=None):
     from .provenance import resource_root
     from .resource_resolution import resolve_path
@@ -27,11 +45,10 @@ def source_files(*, execution_image=None):
             raise ValueError('Current Locale export proof changed')
         current=json.loads(raw)
         if (current['schema']!='civ6-host.locale-current-exports.v1'
-                or current['actual_core_sha256']!=execution_image.image_sha256
-                or current['reference_core_sha256']!=execution_image.reference_core_sha256
                 or current['reference_source']!={'path':SOURCE[0],'sha256':SOURCE[1]}
                 or current['algorithm_bytes_unchanged_after_guard_normalization'] is not True):
             raise ValueError('Current Locale proof is for another runtime/source pair')
+        _require_current_dependencies(current, execution_image)
         pins[str(path)]=CURRENT_SOURCE[1]
         for row in current['files']:
             p=resolve_path(resource_root()/row['path'])
@@ -56,9 +73,11 @@ def attach(prefix):
     library=runtime.service_owner.localization_library
     image=legacy.verify_runtime_images(runtime,original)
     _,proof=source_files(execution_image=image)
+    from .execution_images import _BASE_PROFILE, _XP1_PROFILE
+    if image is _BASE_PROFILE or image is _XP1_PROFILE:
+        runtime.namespaces.register(child, 'Locale')
     if not hasattr(runtime,'locale_text_module'):
         module=C.WinDLL(str(resolve_path(resource_root()/proof['dll']['path'])))
-        runtime.locale_text_module=module
         install=module.LAB_LocaleArgumentsInstall
         install.argtypes,install.restype=([C.c_void_p]*3,C.c_int)
         runtime._status(runtime.root,install(runtime.library._handle,library._handle,runtime.root),'install length-aware Locale')
@@ -70,6 +89,7 @@ def attach(prefix):
             if actual!=expected.hex().encode('ascii'):raise RuntimeError('Locale adapter differs from native String bytes')
             cases.append(dict(key=key.decode(),bytes=len(expected),sha256=hashlib.sha256(expected).hexdigest(),embedded_nul=b'\0' in expected))
         legacy._diagnose(runtime,child,library)
+        runtime.locale_text_module=module
         runtime.emit('native_locale_length_verified',source_sha256=SOURCE[1],dll_sha256=proof['dll']['sha256'],
                      execution_source_sha256=CURRENT_SOURCE[1] if image is not None else SOURCE[1],
                      cases=cases,native_string_oracle=True,official_formatter_unchanged=True)

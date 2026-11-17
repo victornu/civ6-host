@@ -1,6 +1,7 @@
 """Source selection for the private XP2 raw-Load shutdown boundary."""
 import hashlib
 from .configuration_profiles import XP2_CORE_SHA256, _source
+from .source_verification import file_sha256, verify_pinned_json_bytes
 
 SOURCE=('work/host-extensions/xp2-loaded-lifecycle/raw-lifetime-source-v1.json',
         '357e08175d71d9d01b0788b6d8fee692055d0f10e48289737ca1f347f173485d')
@@ -45,10 +46,11 @@ def source():
             or c['public_loaded_lifetime_admitted'] is not False):
         raise ValueError('XP2 raw lifetime contract differs')
     list(fragments(p))
-    for ref in p['references']:_source((ref['path'],ref['sha256']))
+    for ref in p['references']:
+        verify_pinned_json_bytes(resolve_path(resource_root()/ref['path']), ref['sha256'])
     for name in ('generator','boundary_helper','extractor'):
         ref=p[name];actual=resolve_path(resource_root()/ref['path'])
-        if hashlib.sha256(actual.read_bytes()).hexdigest()!=ref['sha256']:
+        if file_sha256(actual)!=ref['sha256']:
             raise ValueError('XP2 lifetime capture dependency differs')
     return p
 

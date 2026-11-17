@@ -152,9 +152,10 @@ def provider_proof(core_sha256):
     return configuration_abi(core_sha256).codec_proof_sha256
 
 
-def require_quiescent(snapshot, *, core_sha256):
+def require_quiescent(snapshot, *, core_sha256, execution_image=None):
     if core_sha256 == BASE_CORE_SHA256:
         from .native.native_checkpoint_jobs import require_quiescent as validate
+        return validate(snapshot, execution_image=execution_image)
     elif core_sha256 in (XP1_CORE_SHA256, XP2_CORE_SHA256):
         from .saved_load_job_observer import require_quiescent as validate
     else:

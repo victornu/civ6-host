@@ -63,7 +63,7 @@ class BaseTurnBoundary:
 
 BASE_BOUNDARY = BaseTurnBoundary()
 
-def read_activity(owner, *, core_sha256=BASE_CORE_SHA256):
+def read_activity(owner, *, core_sha256=BASE_CORE_SHA256, inactive_player_id=None):
     from .lan_load import _validated_ids
     from .configuration_profiles import BASE_CORE_SHA256, XP1_CORE_SHA256, XP2_CORE_SHA256
     if core_sha256 == BASE_CORE_SHA256:
@@ -78,50 +78,88 @@ def read_activity(owner, *, core_sha256=BASE_CORE_SHA256):
     else:
         raise ValueError('Unknown engine for native LAN activity')
     ids = _validated_ids(owner.network_reference['major_player_ids'])
+    if inactive_player_id is not None and (
+            core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256)
+            or type(inactive_player_id) is not int or inactive_player_id not in ids):
+        raise ValueError('Inactive LAN session metadata requires an expansion roster member')
     values = ','.join(map(str, ids)).encode('ascii')
-    source = b'local ids={' + values + b'''}
+    actor = b'nil' if inactive_player_id is None else str(inactive_player_id).encode('ascii')
+    source = b'local ids={' + values + b'}\nlocal inactivePlayer=' + actor + b'''
 local function bit(v) assert(type(v)=='boolean','turn predicate type'); return v and 1 or 0 end
 local function integer(v,limit)
  assert(type(v)=='number' and v%1==0 and v>=0 and v<=limit,'turn activity identity')
  return v
 end
+local turn=integer(Game.GetCurrentGameTurn(),100000)
+local localID=integer(Game.GetLocalPlayer(),63)
+local observer=Game.GetLocalObserver()
+if inactivePlayer~=nil then
+ local neutral=PlayerTypes and type(PlayerTypes.OBSERVER)=='number' and
+               observer==PlayerTypes.OBSERVER
+ assert(localID==inactivePlayer and (observer==localID or neutral),'inactive LAN actor changed')
+ local actor=Players[localID]
+ assert(actor and actor:WasEverAlive()==true and actor:IsAlive()==false,'LAN actor is not inactive')
+else
+ observer=integer(observer,63)
+end
 local rows={}
 for _,id in ipairs(ids) do
  local p=Players[id]; assert(p,'missing captured player')
- rows[#rows+1]=string.format('%d,%d,%d,%d',id,bit(p:IsTurnActive()),
-   bit(p:IsTurnActiveComplete()),bit(p:CanUnreadyTurn()))
+ if inactivePlayer~=nil then
+  rows[#rows+1]=string.format('%d,%d',id,bit(p:IsTurnActive()))
+ else
+  rows[#rows+1]=string.format('%d,%d,%d,%d',id,bit(p:IsTurnActive()),
+    bit(p:IsTurnActiveComplete()),bit(p:CanUnreadyTurn()))
+ end
 end
-return string.format('%d|%d|%d|%s',integer(Game.GetCurrentGameTurn(),100000),
- integer(Game.GetLocalPlayer(),63),integer(Game.GetLocalObserver(),63),table.concat(rows,';'))
+assert(Game.GetCurrentGameTurn()==turn and Game.GetLocalPlayer()==localID and
+       Game.GetLocalObserver()==observer,'LAN activity changed during collection')
+if inactivePlayer~=nil then
+ assert(Players[localID]:WasEverAlive()==true and Players[localID]:IsAlive()==false,
+        'LAN inactive actor changed during collection')
+end
+return string.format('%d|%d|%s|%s',turn,localID,
+ inactivePlayer~=nil and 'inactive' or string.format('%d',observer),table.concat(rows,';'))
 '''
     p = owner.prefix
     raw = p.runtime.evaluate_text(p.ui_child, source, b'@lan_turn_activity', capacity=4096)
-    return parse_activity(raw, ids)
+    return parse_activity(raw, ids, inactive_player_id=inactive_player_id)
 
 
-def parse_activity(raw, ids):
+def parse_activity(raw, ids, *, inactive_player_id=None):
     from .lan_load import _validated_ids
     ids = _validated_ids(ids)
     if type(raw) is not bytes or not 0 < len(raw) < 4096:
         raise ValueError('Invalid native turn activity payload')
     turn, local, observer, payload = raw.decode('ascii').split('|')
-    if any(not x.isdigit() or str(int(x)) != x for x in (turn, local, observer)):
+    inactive = inactive_player_id is not None
+    if inactive and (type(inactive_player_id) is not int or inactive_player_id not in ids):
+        raise ValueError('Invalid inactive LAN actor')
+    if inactive != (observer == 'inactive'):
+        raise ValueError('Native activity uses another observation mode')
+    numeric = (turn, local) if inactive else (turn, local, observer)
+    if any(not x.isdigit() or str(int(x)) != x for x in numeric):
         raise ValueError('Noncanonical native turn identity')
-    turn, local, observer = map(int, (turn, local, observer))
-    if turn > 100000 or local > 63 or observer > 63:
+    turn, local = int(turn), int(local)
+    observer = None if inactive else int(observer)
+    if turn > 100000 or local > 63 or (observer is not None and observer > 63):
         raise ValueError('Native turn identity is outside the captured profile bounds')
     rows = []
     for row in payload.split(';'):
         parts = row.split(',')
-        if len(parts) != 4 or any(not s.isdigit() or str(int(s)) != s for s in parts):
+        if len(parts) != (2 if inactive else 4) or any(not s.isdigit() or str(int(s)) != s for s in parts):
             raise ValueError('Malformed native activity row')
-        pid, active, complete, unready = map(int, parts)
-        if any(x not in (0, 1) for x in (active, complete, unready)):
+        pid, *flags = map(int, parts)
+        if any(x not in (0, 1) for x in flags):
             raise ValueError('Invalid native Boolean predicate')
-        rows.append(dict(player_id=pid, active=bool(active), active_complete=bool(complete),
-                         can_unready=bool(unready)))
+        item = dict(player_id=pid, active=bool(flags[0]))
+        if not inactive:
+            item.update(active_complete=bool(flags[1]), can_unready=bool(flags[2]))
+        rows.append(item)
     if tuple(r['player_id'] for r in rows) != ids:
         raise ValueError('Native activity does not match captured roster')
+    if inactive and (local != inactive_player_id or next(r['active'] for r in rows if r['player_id'] == local)):
+        raise ValueError('Inactive LAN actor is foreign or active')
     return dict(turn=turn, local_player_id=local, observer_id=observer, rows=rows)
 
 
@@ -143,7 +181,7 @@ def _publish(owner):
     return drained-started, perf_counter()-drained
 
 
-def _completion(owner, *, core_sha256=BASE_CORE_SHA256):
+def _completion(owner, *, core_sha256=BASE_CORE_SHA256, perspective_player=None):
     """Consume only a captured completion in its already-proven native phase."""
     p = owner.prefix
     if not p.actions.pending:
@@ -153,17 +191,29 @@ def _completion(owner, *, core_sha256=BASE_CORE_SHA256):
         raise RuntimeError('LAN update has an unqualified command sequence')
     decoded = (decode_archive(p.actions.pending[0]) if core_sha256 == BASE_CORE_SHA256
                else decode_archive(p.actions.pending[0], core_sha256=core_sha256))
-    local = owner.network_reference['state']['player_id']
+    local = (owner.network_reference['state']['player_id'] if perspective_player is None
+             else perspective_player)
     if decoded['player_id'] != local:
-        raise RuntimeError('Native completion does not identify the local host player')
+        raise RuntimeError('Native completion does not identify the expected local player')
     p.actions.deliver_completed_round_echo(local,
         player_ids=owner.network_reference['major_player_ids'])
     _publish(owner)
 
 
-def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
-    if type(action) is not dict or set(action)!={'kind'} or action['kind'] not in ('end_turn','force_end_turn','unready_turn'):
+TURN_REQUESTS = frozenset(('end_turn', 'force_end_turn', 'unready_turn'))
+
+
+def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY, borrowed_xp2=False):
+    if (type(action) is not dict or set(action) != {'kind'}
+            or type(action['kind']) is not str or action['kind'] not in TURN_REQUESTS):
         raise ValueError('Unsupported network turn request')
+    if type(borrowed_xp2) is not bool or (borrowed_xp2 and boundary.core_sha256 != XP2_CORE_SHA256):
+        raise ValueError('A borrowed turn request requires the XP2 turn boundary')
+    perspective_player = None
+    if borrowed_xp2:
+        from .xp2_human_perspective import verify_turn_completion_player
+        verify_turn_completion_player(owner, player_id)
+        perspective_player = player_id
     before_session = boundary.state(owner)
     before = boundary.controls(owner, before_session, player_id)
     p = owner.prefix
@@ -189,7 +239,8 @@ def submit(owner, action, player_id, *, boundary=BASE_BOUNDARY):
     # Use the official receive queue/dispatcher and preserve its exact archive.
     p.actions.deliver_one()
     _publish(owner)
-    _completion(owner, core_sha256=boundary.core_sha256)
+    options = {'perspective_player': perspective_player} if borrowed_xp2 else {}
+    _completion(owner, core_sha256=boundary.core_sha256, **options)
     after_session = boundary.state(owner)
     after = boundary.controls(owner, after_session, player_id)
     after_segment = boundary.turn_segment(owner, player_id, after['turn'])

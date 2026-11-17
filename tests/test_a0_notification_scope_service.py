@@ -87,31 +87,213 @@ class A0NotificationScopeServiceTests(unittest.TestCase):
                 with self.assertRaises(ValueError): c.enable_notification_scopes()
                 self.assertEqual(before, (d.host_notification_counter, d.host_metadata_counter, d.pending))
 
-    def test_current_xp2_research_change_preserves_the_live_notification_scope(self):
+    def test_installed_research_change_preserves_the_live_notification_scope(self):
         from civ6_host.runtime import a0_notification_scope_source as scope
-        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
-        from civ6_host.runtime.execution_images import known_path, select
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
 
-        profile_id = 'xp2-gamecore-current-092abfbb'
-        image = select(profile_id, core_path=known_path(profile_id))
-        h, d, a, c, r, _, _ = fixtures.A0FamilyServiceTests.fixture(self, XP2_CORE_SHA256)
-        d.core._civ6_host_execution_image = image
-        with patch.object(scope, 'verify_research_changed_live') as verify:
+        for image in (_PROFILE, _XP1_PROFILE):
+            with self.subTest(image=image.id):
+                h,d,a,c,r,_,_ = fixtures.A0FamilyServiceTests.fixture(self, image.reference_core_sha256)
+                d.core._civ6_host_execution_image = image
+                with (patch.object(scope, 'verify_research_changed_live') as verify,
+                      patch.object(scope, 'verify_city_state_live'),
+                      patch.object(meet, 'verify_live')):
+                    c.enable_notification_scopes()
+                verify.assert_called_once_with(image, d.core._handle, c.read)
+                self.assertNotIn(scope.RESEARCH_CHANGED, self.scope.records)
+                d.host_notification_counter = d.host_metadata_counter = 1
+                r.fields.return_value = {
+                    0xa1e5a149: bytes.fromhex('030000004c54495000000000000000000000000000000000'),
+                    0xa1fbc372: bytes.fromhex('02000000206c612004000000000000000000000000000000'),
+                    0xd6fcf3e4: scalar(2, 0),
+                }
+                self.assertEqual(a.dispatch(h.pointer, scope.RESEARCH_CHANGED, 0x9000), 0)
+                record, = d.pending
+                self.assertEqual(struct.unpack_from('<III', record), (96, 186, 1))
+                self.assertEqual(struct.unpack_from('<III', record, 80), (1, 0, 4))
+                self.assertEqual(d.drain(), 1)
+                self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (1, 1))
+
+    def test_installed_xp1_contacts_preserve_open_notification_counters(self):
+        from civ6_host.runtime import a0_notification_scope_source as scope
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
+
+        for sequence, (kind, (record_type, size, flag)) in enumerate(meet.RECORDS.items(), 1):
+            with self.subTest(kind=hex(kind)):
+                h,d,a,c,r,_,_ = self.fixture(enable=False)
+                d.core._civ6_host_execution_image = _XP1_PROFILE
+                with (patch.object(meet, 'verify_live') as verify,
+                      patch.object(scope, 'verify_research_changed_live'),
+                      patch.object(scope, 'verify_city_state_live')):
+                    c.enable_notification_scopes()
+                verify.assert_called_once_with(_XP1_PROFILE, d.core._handle, c.read)
+                self.assertNotIn(kind, self.scope.records)
+                d.host_notification_counter, d.host_metadata_counter = sequence, 2
+                r.fields.return_value = {
+                    0xa1e5a149: scalar(3, 0),
+                    0xd6fcf3e4: scalar(2, 0),
+                    0xa1fbc372: scalar(2, 3),
+                }
+                self.assertEqual(a.dispatch(h.pointer, kind, 0x9000), 0)
+                record, = d.pending
+                self.assertEqual(struct.unpack_from('<III', record), (size, record_type, 1))
+                self.assertEqual(struct.unpack_from('<I', record, 72), (flag,))
+                self.assertEqual(struct.unpack_from('<III', record, 80), (1, 0, 3))
+                receiver = validate_empty_profile_record(
+                    record, execution_image=_XP1_PROFILE, **c.empty_receiver_state)
+                self.assertEqual(receiver['record_type'], record_type)
+                self.assertEqual(receiver['handler_va'], meet.receiver_row(record_type)['handler_va'])
+                self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (sequence, 2))
+                self.assertEqual(d.drain(), 1)
+
+    def test_installed_xp1_city_state_notifications_preserve_scope_and_drain_once(self):
+        from civ6_host.runtime import a0_notification_scope_source as scope
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _PROFILE, _XP1_PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
+
+        records = ((scope.QUEST_CHANGED, 212, '0x1400da6d0', {0xa1fbc372: scalar(2, 0)}),
+                   (scope.INFLUENCE_GIVEN, 210, '0x1400da610', {}))
+        for kind, _, _, _ in records:
+            self.assertNotIn(kind, self.scope.records)
+            self.assertNotIn(kind, notification_scope_profile(execution_image=_PROFILE).records)
+        h,d,a,c,r,_,_ = self.fixture(enable=False)
+        d.core._civ6_host_execution_image = _XP1_PROFILE
+        with (patch.object(meet, 'verify_live'),
+              patch.object(scope, 'verify_research_changed_live'),
+              patch.object(scope, 'verify_city_state_live') as verify):
             c.enable_notification_scopes()
-        verify.assert_called_once_with(image, d.core._handle, c.read)
-        self.assertNotIn(scope.RESEARCH_CHANGED, self.scope.records)
-        d.host_notification_counter = d.host_metadata_counter = 1
-        r.fields.return_value = {
-            0xa1e5a149: bytes.fromhex('030000004c54495000000000000000000000000000000000'),
-            0xa1fbc372: bytes.fromhex('02000000206c612004000000000000000000000000000000'),
-            0xd6fcf3e4: scalar(2, 0),
-        }
-        self.assertEqual(a.dispatch(h.pointer, scope.RESEARCH_CHANGED, 0x9000), 0)
-        record, = d.pending
-        self.assertEqual(struct.unpack_from('<III', record), (96, 186, 1))
-        self.assertEqual(struct.unpack_from('<III', record, 80), (1, 0, 4))
-        self.assertEqual(d.drain(), 1)
+        verify.assert_called_once_with(_XP1_PROFILE, d.core._handle, c.read)
+        d.host_notification_counter, d.host_metadata_counter = 1, 1
+        args = {0xa1e5a149: scalar(3, 0), 0xd6fcf3e4: scalar(2, 11)}
+        for sequence, (kind, record_type, handler, extra) in enumerate(records, 1):
+            r.fields.return_value = args | extra
+            self.assertEqual(a.dispatch(h.pointer, kind, 0x9000), 0)
+            record = d.pending[-1]
+            self.assertEqual(struct.unpack_from('<III', record), (96, record_type, sequence))
+            self.assertEqual(struct.unpack_from('<I', record, 72), (0,))
+            self.assertEqual(struct.unpack_from('<III', record, 80), (sequence, 11, 0))
+            receiver = validate_empty_profile_record(
+                record, execution_image=_XP1_PROFILE, **c.empty_receiver_state)
+            self.assertEqual(receiver['handler_va'], handler)
+        self.assertEqual(d.drain(), 2)
+        self.assertEqual(d.drain(), 0)
+        r.fields.return_value = args
+        with self.assertRaisesRegex(ValueError, 'all three scalar fields'):
+            a.dispatch(h.pointer, scope.QUEST_CHANGED, 0x9000)
+        self.assertEqual(d.pending, [])
         self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (1, 1))
+
+    def test_current_xp2_contact_scope_matches_official_image_and_captures(self):
+        import pefile
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _PROFILE, identity
+        from civ6_host.runtime.paths import resource_root
+        from civ6_host.runtime.xp2_bbg_inputs import REFERENCE as bbg_capture
+        from civ6_host.runtime.xp2_bundle_inputs import REFERENCE as stock_capture
+
+        proof = meet.source(_PROFILE)
+        path = identity(_PROFILE)['path']
+        pe = pefile.PE(path, fast_load=True)
+        base = pe.OPTIONAL_HEADER.ImageBase
+        try:
+            meet.verify_live(_PROFILE, base, lambda addr, size: pe.get_data(addr - base, size))
+            with self.assertRaisesRegex(ValueError, 'producer differs'):
+                meet.verify_live(_PROFILE, base, lambda addr, size: bytes(size))
+        finally:
+            pe.close()
+        for capture in (stock_capture, bbg_capture):
+            admitted = notification_scope_profile(execution_image=_PROFILE, capture_reference=capture)
+            self.assertEqual({kind: admitted.records[kind] for kind in meet.RECORDS}, meet.RECORDS)
+            self.assertIn(meet.XP2_SOURCE[1], admitted.proof_sha256s)
+        for capture in (None, (stock_capture[0], '0' * 64)):
+            unadmitted = notification_scope_profile(execution_image=_PROFILE, capture_reference=capture)
+            self.assertTrue(set(unadmitted.records).isdisjoint(meet.RECORDS))
+        pins = meet.source_dependencies(_PROFILE)
+        self.assertEqual(pins[str((resource_root() / meet.XP2_SOURCE[0]).resolve())], meet.XP2_SOURCE[1])
+        self.assertIn(proof['executable']['sha256'], pins.values())
+
+    def test_current_xp2_city_state_notifications_keep_exact_scope_and_fifo(self):
+        import pefile
+        from civ6_host.runtime import a0_notification_scope_source as scope
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _PROFILE, identity
+        from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
+        from civ6_host.runtime.xp2_bbg_inputs import REFERENCE as bbg_capture
+        from civ6_host.runtime.xp2_bundle_inputs import REFERENCE as stock_capture
+
+        pe = pefile.PE(identity(_PROFILE)['path'], fast_load=True)
+        try:
+            base = pe.OPTIONAL_HEADER.ImageBase
+            scope.verify_city_state_live(_PROFILE, base, lambda addr, size: pe.get_data(addr - base, size))
+        finally:
+            pe.close()
+        records = ((scope.QUEST_CHANGED, 212, '0x1400da6d0', {0xa1fbc372: scalar(2, 1)}, 1),
+                   (scope.INFLUENCE_GIVEN, 210, '0x1400da610', {}, 0))
+        for capture in (stock_capture, bbg_capture):
+            admitted = notification_scope_profile(execution_image=_PROFILE, capture_reference=capture)
+            self.assertEqual({kind: admitted.records[kind] for kind, *_ in records},
+                             {kind: (record, 96, 0) for kind, record, *_ in records})
+        h, d, a, c, r, _, _ = fixtures.A0FamilyServiceTests.fixture(self, _PROFILE.reference_core_sha256)
+        d.core._civ6_host_execution_image = _PROFILE
+        with (patch.object(meet, 'verify_live'),
+              patch.object(scope, 'verify_research_changed_live'),
+              patch.object(scope, 'verify_city_state_live') as verify):
+            c.enable_notification_scopes(capture_reference=stock_capture)
+        verify.assert_called_once_with(_PROFILE, d.core._handle, c.read)
+        d.host_notification_counter, d.host_metadata_counter = 2, 3
+        for sequence, (kind, record_type, handler, extra, second) in enumerate(records, 1):
+            r.fields.return_value = {0xa1e5a149: scalar(3, 0), 0xd6fcf3e4: scalar(2, 2)} | extra
+            self.assertEqual(a.dispatch(h.pointer, kind, 0x9000), 0)
+            record = d.pending[-1]
+            self.assertEqual(struct.unpack_from('<III', record), (96, record_type, sequence))
+            self.assertEqual(struct.unpack_from('<I', record, 72), (0,))
+            self.assertEqual(struct.unpack_from('<III', record, 80), (sequence, 2, second))
+            row = validate_empty_profile_record(record, execution_image=_PROFILE, **c.empty_receiver_state)
+            self.assertEqual(row['handler_va'], handler)
+            self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (2, 3))
+        self.assertEqual(d.drain(), 2)
+        self.assertEqual(d.drain(), 0)
+
+    def test_current_xp2_contact_dispatch_preserves_open_scope_and_fifo(self):
+        from civ6_host.runtime import a0_notification_scope_source as scope
+        from civ6_host.runtime import xp1_diplomacy_meet_source as meet
+        from civ6_host.runtime.execution_images import _PROFILE
+        from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
+        from civ6_host.runtime.xp2_bundle_inputs import REFERENCE
+
+        h, d, a, c, r, _, _ = fixtures.A0FamilyServiceTests.fixture(self, _PROFILE.reference_core_sha256)
+        d.core._civ6_host_execution_image = _PROFILE
+        with (patch.object(meet, 'verify_live') as verify,
+              patch.object(scope, 'verify_research_changed_live'),
+              patch.object(scope, 'verify_city_state_live')):
+            c.enable_notification_scopes(capture_reference=REFERENCE)
+        verify.assert_called_once_with(_PROFILE, d.core._handle, c.read)
+        d.host_notification_counter, d.host_metadata_counter = 2, 3
+        for sequence, (kind, (record_type, size, flag)) in enumerate(meet.RECORDS.items(), 1):
+            r.fields.return_value = {
+                0xa1e5a149: scalar(3, 0),
+                0xd6fcf3e4: scalar(2, 1),
+                0xa1fbc372: scalar(2, 2),
+            }
+            self.assertEqual(a.dispatch(h.pointer, kind, 0x9000), 0)
+            record = d.pending[-1]
+            self.assertEqual(struct.unpack_from('<III', record), (size, record_type, sequence))
+            self.assertEqual(struct.unpack_from('<I', record, 72), (flag,))
+            self.assertEqual(struct.unpack_from('<III', record, 80), (sequence, 1, 2))
+            receiver = validate_empty_profile_record(record, execution_image=_PROFILE, **c.empty_receiver_state)
+            self.assertEqual(receiver['handler_va'], meet.receiver_row(record_type)['handler_va'])
+            self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (2, 3))
+        self.assertEqual(d.drain(), 3)
+        self.assertEqual(d.drain(), 0)
+        c.empty_receiver_state['subscriber_count'] = 1
+        with self.assertRaisesRegex(RuntimeError, 'receiver or registration profile changed'):
+            a.dispatch(h.pointer, kind, 0x9000)
+        self.assertEqual(d.pending, [])
+        self.assertEqual((d.host_notification_counter, d.host_metadata_counter), (2, 3))
 
     def test_scoped_records_match_zero_scope_bytes_and_preserve_all_counter_cases(self):
         for kind, (record_type, size, flag) in self.scope.records.items():

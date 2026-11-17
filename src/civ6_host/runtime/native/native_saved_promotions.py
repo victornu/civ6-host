@@ -126,8 +126,10 @@ def request_source(action, pid, turn):
     w = wire(action)
     return preamble(pid, turn) + f"\nlocal _,offers=snapshot();local chosen=nil\nfor _,a in ipairs(offers) do if a.wire=='{w}' then assert(not chosen,'duplicate promotion choice');chosen=a end end\nassert(chosen,'promotion choice changed or unavailable');ready()\nUnitManager.RequestCommand(chosen.unit,command,{{[UnitCommandTypes.PARAM_PROMOTION_TYPE]=chosen.index}})\nreturn 'submitted'\n".encode()
 
-def apply(owner, prefix, action, turn, before, *, player_id=0, after_delivery=None):
+def apply(owner, prefix, action, turn, before, *, player_id=0, after_delivery=None, archive_validator=None):
     validate_action(action)
+    if archive_validator is not None and prefix.actions.pending:
+        raise RuntimeError('Promotion cannot overtake pending native commands')
     start = catalog(prefix, turn, player_id=player_id)
     if action not in start['offers']:
         raise RuntimeError('Promotion no longer offered')
@@ -136,6 +138,9 @@ def apply(owner, prefix, action, turn, before, *, player_id=0, after_delivery=No
     submitted = prefix.runtime.evaluate_text(prefix.ui_child, request_source(action, player_id, turn), b'@explicit_promotion_request')
     if submitted != b'submitted' or len(prefix.actions.pending) != 1:
         raise RuntimeError('Promotion did not enqueue one native command')
+    archive_sha = None
+    if archive_validator is not None:
+        archive_sha = archive_validator(prefix.actions.pending[0],player_id,action)
     prefix.actions.deliver_one()
     prefix.deferred_events.drain_empty_receivers()
     if after_delivery is not None:
@@ -150,4 +155,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0, after_delivery=No
     if after['turn'] != turn or after['player_id'] != player_id:
         raise RuntimeError('Promotion crossed actor/turn')
     owner.emit('official_explicit_promotion_effect', action=action, unit_before=old, unit_after=matches[0], observation_before=before, observation_after=after, source_proof_sha256=PROOF_SHA, automatic_choices_applied=False, strategic_training_ready=False)
-    return after
+    if archive_validator is None:
+        return after
+    receipt = dict(action=action,native_archive_sha256=archive_sha,native_promotion_acquired=True)
+    owner.emit('xp1_explicit_promotion_verified',receipt=receipt,unit_before=old,unit_after=matches[0])
+    return dict(observation=after,receipt=receipt)

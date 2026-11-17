@@ -1,4 +1,4 @@
-"""Private, non-restorable Congress chronology and ballot result observations.
+"""Private Congress chronology and ballot result observations.
 
 No event is synthesized and no gameplay getter runs inside a callback. Exact
 observed ballots may retire at a quiescent boundary, without a transport ACK.
@@ -74,6 +74,12 @@ def source_dependencies():
     return pins
 
 
+@dataclass(frozen=True)
+class _CheckpointEntry:
+    checkpoint: tuple
+    scope: tuple
+
+
 @dataclass
 class _Cycle:
     occurrence: int
@@ -81,6 +87,7 @@ class _Cycle:
     phase_events: dict = field(default_factory=dict)
     finished: int | None = None
     ambiguous: bool = False
+    checkpoint_entry: _CheckpointEntry | None = None
 
 
 @dataclass
@@ -255,6 +262,40 @@ def observe_catalogue(saved, public):
     state.last_event_count = len(state.events)
     state.readback_permit = None
     state.observed_review = None
+
+
+def bind_restored_regular_ballot(saved, public):
+    """Bind the initial native form after the authenticated checkpoint comparison."""
+    from .xp2_world_congress import _check, _scope
+
+    saved._check('commands', requested='unit_commands_candidate')
+    checkpoint = getattr(saved.inputs, 'checkpoint', None)
+    if type(checkpoint) is not tuple or len(checkpoint) != 2:
+        raise ValueError('Restored Congress ballot needs the exact initial unsubmitted form')
+    with saved._attempt():
+        state = _live(saved, active=False)
+        cycle = state.current
+        record = getattr(state.continuation, '_xp2_world_congress_catalogue', None)
+        _check(saved, record, active=False)
+        if (public != record.public or public != state.last_catalogue
+                or state.last_revision != state.continuation.sequence
+                or public['sequence'] != 0 or public['stage'] != 'regular'
+                or public['in_session'] is not True or public['offers']['confirm_ballot'] is not True
+                or cycle is None or len(state.cycles) != 1 or cycle.entry_known
+                or cycle.checkpoint_entry is not None or cycle.finished is not None or cycle.ambiguous
+                or state.events or state.confirmations or cycle.phase_events):
+            raise ValueError('Restored Congress ballot needs the exact initial unsubmitted form')
+        cycle.checkpoint_entry = _CheckpointEntry(checkpoint, _scope(public))
+        saved._finish('commands')
+
+
+def _matches_restored_regular_ballot(state, cycle, public, kind):
+    from .xp2_world_congress import _scope
+
+    entry = cycle.checkpoint_entry
+    return (kind == 'congress_confirm_ballot' and type(entry) is _CheckpointEntry
+            and entry.checkpoint == state.backend.inputs.checkpoint
+            and entry.scope == _scope(public) and not cycle.phase_events)
 
 
 def _target(value, player_type):
@@ -441,7 +482,8 @@ def begin_confirmation(saved, public, action, planned, legacy, *, private=None, 
         raise ValueError('Congress prepared archive order or delivery differs')
     cycle = state.current
     if cycle is not None and (cycle.finished is not None
-            or _VOTING.get(public['stage']) not in cycle.phase_events):
+            or (_VOTING.get(public['stage']) not in cycle.phase_events
+                and not _matches_restored_regular_ballot(state, cycle, public, action['kind']))):
         cycle = None
     scope = {key: public[key] for key in ('player_id', 'turn', 'sequence', 'turn_segment', 'stage')}
     entry = _Confirmation(state, legacy, deepcopy(action), scope,
@@ -594,7 +636,8 @@ def _cycle_reason(state, entry):
     if entry.partial or entry.delivered != len(entry.planned):
         return 'partial_or_incomplete_archive_delivery'
     cycle = entry.cycle
-    if cycle is None or not cycle.entry_known:
+    if cycle is None or (not cycle.entry_known and not _matches_restored_regular_ballot(
+            state, cycle, entry.catalogue, entry.action['kind'])):
         return 'cycle_entry_not_observed'
     if cycle is not state.current or cycle.ambiguous:
         return 'cycle_superseded_or_ambiguous'
@@ -800,7 +843,7 @@ def retire_observed_confirmations(saved):
         revision=c.sequence, player_id=current['player_id'], turn=current['turn'],
         turn_segment=current['turn_segment'],
         cycle_occurrence=state.current.occurrence if needs_finished else None,
-        entry_known=True if needs_finished else None,
+        entry_known=state.current.entry_known if needs_finished else None,
         finished_event=state.current.finished if needs_finished else None,
         callback_chronology=deepcopy(state.events), control=deepcopy(control),
         review_sha256=None if review is None else hashlib.sha256(observed.payload.encode()).hexdigest(),
@@ -817,6 +860,8 @@ def retire_observed_confirmations(saved):
         pending_confirmation_retired=True, transport_acknowledged=False,
         checkpoint_admission_eligible=True, native_save_reload_qualified=False,
         simulation_request_issued=False, replay_permitted=False)
+    if needs_finished and state.current.checkpoint_entry is not None:
+        receipt['entry_checkpoint'] = list(state.current.checkpoint_entry.checkpoint)
     payload = _json(receipt)
     retirement = _Retirement(state, entries, payload, hashlib.sha256(payload.encode()).hexdigest())
     # A failed administrative write must leave the entire pending state intact.

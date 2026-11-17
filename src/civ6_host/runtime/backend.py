@@ -75,6 +75,9 @@ class LocalHotseatBackend:
     @property
     def last(self):return self._session.last
 
+    @property
+    def checkpoint(self):return self._session.saved_checkpoint
+
 
 class NetworkBackend:
     """Installed-code adapter for the explicit captured LAN session."""
@@ -127,9 +130,41 @@ class NetworkBackend:
             self._display_issuer = NativeTopPanelIssuer(self._information_store)
             self._display_cache = PublicDisplayCache(self._display_issuer)
         return self._session.reset()
-    def request(self, request):return self._session.request(request)
+
+    def request(self, request):
+        actor = request.get('player_id') if type(request) is dict else None
+        operation = request.get('operation') if type(request) is dict else None
+        routed = self.controllable_player_ids
+        if routed and type(actor) is int and actor not in routed:
+            if not getattr(self._session, 'secondary_unit_commands', False):
+                raise ValueError('This native LAN profile only routes its captured local player')
+            raise ValueError('This native LAN profile cannot route the requested captured player')
+        if routed and operation in ('poll', 'close') and actor != self.session_operations_player_id:
+            raise ValueError('LAN poll and close require the session owner')
+        return self._session.request(request)
+
     def abort(self, reason='parent_abort'):return self._session.abort(reason)
     def close(self):return self._session.close()
+
+    def read_player_view(self, response, player_id):
+        if player_id not in self._session.public_view_players:
+            from civ6_host.client import InformationUnavailable
+            raise InformationUnavailable('LAN public views are not enabled for this human seat')
+        return self._session.read_player_view(response, player_id)
+
+    @property
+    def controllable_player_ids(self):
+        return self._session.controllable_player_ids
+
+    @property
+    def war_source_sha256(self):
+        """Return the independently pinned renderer for constructing a local client."""
+        return self._session.war_source_sha256
+
+    @property
+    def session_operations_player_id(self):
+        routed = self.controllable_player_ids
+        return routed[0] if routed else None
 
     def read_administrative(self, group, response):
         """Read an explicitly enabled, response-bound native event snapshot."""

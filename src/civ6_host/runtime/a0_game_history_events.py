@@ -1,15 +1,28 @@
 """Source-qualified History/Era scalar notifications using shared codecs and FIFO."""
 import struct
 from . import game_history_event_profile as source
+from . import game_era_score_event_profile as score
 from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
 
 
-def _selected(kind, core_sha256=XP1_CORE_SHA256):
+def _selected(kind, core_sha256=XP1_CORE_SHA256, execution_image=None):
     if core_sha256 == XP1_CORE_SHA256:
+        from . import xp1_governors_source as governor
+        from . import xp1_player_age_source as age
+        from . import xp1_turn_history_source as turn_history
+
+        if kind in age.EVENTS:
+            age.source(execution_image)
+            return age.EVENTS[kind], age.SOURCE[1]
+        if kind == turn_history.KIND:
+            turn_history.source()
+            return (turn_history.RECORD, turn_history.FLAG), turn_history.SOURCE[1]
+        if kind in governor.EVENTS:
+            row, proof = governor.event_source(kind)
+            return (row['record'], row['selector']), proof
         if type(kind) is int and kind in source.EVENTS:
             source.verify_source()
             return source.EVENTS[kind],(source.SOURCE if kind==source.HISTORY_KIND else source.ERA_SOURCE)[1]
-        from . import game_era_score_event_profile as score
         if type(kind) is int and kind==score.EVENT_KIND:
             score.verify_source()
             return score.SPEC,score.SOURCE[1]
@@ -22,7 +35,6 @@ def _selected(kind, core_sha256=XP1_CORE_SHA256):
         if kind in xp2.AGE_EVENTS:
             xp2.age_source()
             return xp2.AGE_EVENTS[kind], xp2.AGE_SOURCE[1]
-        from . import game_era_score_event_profile as score
         if kind == xp2.TURN21_KIND:
             xp2.turn21_source()
             return xp2.TURN21_SPEC, xp2.TURN21_SOURCE[1]
@@ -47,8 +59,8 @@ def _selected(kind, core_sha256=XP1_CORE_SHA256):
 
 def encode(kind, fields, sequence, *, normalizer_transform_present,
            optional_callback_present, queue_metadata_service,
-           core_sha256=XP1_CORE_SHA256, read=None):
-    spec,_=_selected(kind,core_sha256)
+           core_sha256=XP1_CORE_SHA256, read=None, execution_image=None):
+    spec,_=_selected(kind,core_sha256,execution_image)
     if (normalizer_transform_present is not False or optional_callback_present is not False
             or queue_metadata_service is not None):
         raise ValueError('Unqualified history/era scalar producer or optional service')
@@ -56,15 +68,15 @@ def encode(kind, fields, sequence, *, normalizer_transform_present,
     row={'callback_shape_group':'two_value_three_key','payload_value_count':2,'writer_record_type':hex(record)}
     from .native.native_scalar_event_encoder import (
         _decode_profile_fields, _encode_profile_record, _read_u32_variant)
-    if core_sha256 == XP2_CORE_SHA256 and record in (0xdf, 0xe3, 0xe4):
+    if record in (0xdf, 0xe3, 0xe4):
         from .native.native_event_99e85ec6 import DESCRIPTOR_KEY, SELECTOR_KEY, decode_fields
         scalar_keys = (0xD6FCF3E4, 0xA1FBC372)
         if type(fields) is not dict or set(fields) != {DESCRIPTOR_KEY, SELECTOR_KEY, *scalar_keys}:
-            raise ValueError('XP2 descriptor record requires its exact descriptor and scalar fields')
+            raise ValueError('Expansion descriptor record requires its exact descriptor and scalar fields')
         values = tuple(_read_u32_variant(fields[key], 2, 'value') for key in scalar_keys)
         descriptor = decode_fields({key: fields[key] for key in (DESCRIPTOR_KEY, SELECTOR_KEY)}, read)
         if descriptor.selector != 0:
-            raise ValueError('XP2 descriptor record requires the selector-zero route')
+            raise ValueError('Expansion descriptor record requires the selector-zero route')
         # The borrowed pointer never enters the queue. Bytes not defined by the
         # writer are zeroed only under the verified headless empty receiver.
         row['payload_value_count'] = 0
@@ -82,17 +94,20 @@ def encode(kind, fields, sequence, *, normalizer_transform_present,
         # The callback does not read the property hash from the descriptor.
         # The writer's undefined DWORD at 84 stays zero in the owned empty row.
         values = ()
-    elif core_sha256 == XP2_CORE_SHA256 and record in (0x107, 0x108):
+    elif record in (0x107, 0x108):
         row.update(callback_shape_group='one_value_two_key', payload_value_count=1)
         selector, *values = _decode_profile_fields(row, fields)
-    elif core_sha256==XP2_CORE_SHA256 and kind==0x788b7534:
+    elif core_sha256==XP2_CORE_SHA256 and kind==score.EVENT_KIND:
         from .xp2_history_event_profile import decode_score_fields
         selector,*values=decode_score_fields(fields)
-    elif core_sha256 == XP2_CORE_SHA256 and record == 0xe2:
+    elif core_sha256 == XP1_CORE_SHA256 and score.uses_installed_short_shape(kind, fields, execution_image):
+        score._installed_short_source()
+        selector, *values = score.decode_missing_second(fields)
+    elif record == 0xe2:
         keys = (0xD6FCF3E4, 0xA1FBC372, 0x38F292C8)
         selector_key = 0xA1E5A149
         if type(fields) is not dict or set(fields) != {selector_key, *keys}:
-            raise ValueError('XP2 record 0xe2 requires its four scalar fields')
+            raise ValueError('Record 0xe2 requires its four scalar fields')
         selector = _read_u32_variant(fields[selector_key], 3, 'selector')
         values = [_read_u32_variant(fields[key], 2, 'value') for key in keys]
         row['payload_value_count'] = len(keys)
@@ -110,13 +125,18 @@ def dispatch(owner,kind,fields):
     from .native.native_deferred_empty_profile import validate_empty_profile_record
     token=require_borrow(owner)
     core_sha256=token.owner.load_abi.core_sha256
-    spec,proof=_selected(kind,core_sha256)
+    image = getattr(token.owner.core, '_civ6_host_execution_image', None)
+    spec,proof=_selected(kind,core_sha256,image)
     if owner.active_kind!=kind:
         raise ValueError('History/era needs its exact active saved owner')
     if core_sha256==XP1_CORE_SHA256:
-        if (owner.placement_event_profile is None
-                or kind not in owner.placement_event_profile.record_types_by_kind):
-            raise ValueError('XP1 history/era requires its existing placement-family owner')
+        from .xp1_governors_source import EVENTS
+        from .xp1_player_age_source import EVENTS as AGE_EVENTS
+        from .xp1_turn_history_source import KIND
+        profile = (owner.history_event_profile if kind in EVENTS or kind in AGE_EVENTS or kind == KIND
+                   else owner.placement_event_profile)
+        if profile is None or kind not in profile.record_types_by_kind:
+            raise ValueError('XP1 history/era requires its selected native family owner')
     elif core_sha256==XP2_CORE_SHA256:
         if (getattr(owner,'history_event_profile',None) is None
                 or owner.history_event_profile is not getattr(owner,'_history_event_profile',None)
@@ -130,8 +150,10 @@ def dispatch(owner,kind,fields):
     owner.deferred._check()
     record=encode(kind,fields,owner._sequence+1,normalizer_transform_present=owner.normalizer_transform_present,
                   optional_callback_present=False,queue_metadata_service=None,
-                  core_sha256=core_sha256, read=owner.read)
-    validate_empty_profile_record(record,**owner.empty_receiver_state)
+                  core_sha256=core_sha256, read=owner.read, execution_image=image)
+    if core_sha256 == XP1_CORE_SHA256 and score.uses_installed_short_shape(kind, fields, image):
+        proof = score.INSTALLED_SHORT_SOURCE[1]
+    validate_empty_profile_record(record, **owner.empty_receiver_state, execution_image=image)
     owner._enqueue(record)
     if before!=(owner.host_notification_counter,owner.host_metadata_counter):
         raise RuntimeError('History/era notification changed its enclosing counters')

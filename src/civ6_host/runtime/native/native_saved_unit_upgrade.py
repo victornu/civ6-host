@@ -96,7 +96,7 @@ def request_source(a, pid, turn):
     w = wire(a)
     return preamble(pid, turn) + f"\nlocal chosen=nil\nfor _,a in ipairs(snapshot()) do if a.wire=='{w}' then assert(not chosen,'duplicate upgrade selection');chosen=a end end\nassert(chosen and chosen.legal,'upgrade unavailable or stale');ready()\nUnitManager.RequestCommand(chosen.unit,chosen.hash)\nreturn 'submitted'\n".encode()
 
-def apply(owner, prefix, action, turn, before, *, player_id=0):
+def apply(owner, prefix, action, turn, before, *, player_id=0, archive_validator=None):
     validate_action(action)
     fresh = catalog(prefix, turn, player_id=player_id)
     if fresh != getattr(owner, 'explicit_unit_upgrades', None) or action not in actions(fresh):
@@ -109,6 +109,8 @@ def apply(owner, prefix, action, turn, before, *, player_id=0):
     response = prefix.runtime.evaluate_text(prefix.ui_child, request_source(action, player_id, turn), b'@explicit_unit_upgrade_request')
     if response != b'submitted' or len(prefix.actions.pending) != 1:
         raise RuntimeError('Upgrade did not enqueue one native command')
+    if archive_validator is not None:
+        archive_validator(prefix.actions.pending[0],player_id,action)
     prefix.actions.deliver_one()
     prefix.deferred_events.drain_empty_receivers()
     prefix.view_publisher.publish()

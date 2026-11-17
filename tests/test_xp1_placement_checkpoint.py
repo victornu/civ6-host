@@ -177,7 +177,11 @@ class PlacementCheckpointTests(unittest.TestCase):
                     old['candidates'][0]['action']['fixture_hidden_change'] = True
                     with self.assertRaisesRegex(ValueError, 'catalogue differs'):
                         checkpoint.compare_decisions(owner, observation, current)
-                    self.assertEqual(len(records),1)
+                    self.assertEqual(len(records),2)
+                    event, diagnostic = records[-1]
+                    self.assertEqual(event, 'official_lan_checkpoint_comparison_mismatch')
+                    self.assertTrue(diagnostic['strict_comparison_retained'])
+                    self.assertTrue(diagnostic['observation_equal'])
 
 
 if __name__ == '__main__': unittest.main()

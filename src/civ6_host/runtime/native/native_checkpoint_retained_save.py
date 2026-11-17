@@ -320,8 +320,10 @@ class NativeRetainedSaveBackend:
         from civ6_host.runtime import xp1_checkpoint_profile as selected_checkpoint
         self.owner.snapshot_phase = 'postflight'
         self.stream._check(self.stream.pointer)
-        selected_checkpoint.require_quiescent(before_jobs, core_sha256=getattr(self, 'core_sha256', provider.CORE_SHA256))
-        selected_checkpoint.require_quiescent(after_jobs, core_sha256=getattr(self, 'core_sha256', provider.CORE_SHA256))
+        core_sha256 = getattr(self, 'core_sha256', provider.CORE_SHA256)
+        execution_image = getattr(self.owner, '_base_execution_image', None)
+        selected_checkpoint.require_quiescent(before_jobs, core_sha256=core_sha256, execution_image=execution_image)
+        selected_checkpoint.require_quiescent(after_jobs, core_sha256=core_sha256, execution_image=execution_image)
         data = self.stream.output_bytes()
         if type(status) is not int or status != 0 or type(data) is not bytes or (not 4 <= len(data) <= MAX_BYTES) or (data[:4] != b'\x05\x00\x00\x00') or (before_jobs != after_jobs):
             raise RuntimeError('Native Save status/version/jobs did not match the bounded contract')

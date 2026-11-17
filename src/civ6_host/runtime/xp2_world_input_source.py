@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_verification import verify_pinned_json_bytes
 
 SOURCE = ('work/host-extensions/xp2-world-input-static/source-profile-v1.json',
           '4f52cd6551bcb61b7af2d4e23571eb300c7c8b55ad34b6b94e0387c94a9e72f3')
@@ -174,7 +175,7 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
         if row['rva'] in ('0xd0d00', '0xd0dbe') and tuple(row['rip_targets']) != ('0x180b8aa80',):
             raise ValueError('XP2 queued destination has a different HOST owner')
     for reference in proof['references']:
-        _source((reference['path'], reference['sha256']))
+        verify_pinned_json_bytes(resolve_path(resource_root()/reference['path']), reference['sha256'])
     _official_route(proof)
     return proof
 

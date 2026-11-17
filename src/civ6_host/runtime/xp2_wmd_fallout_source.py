@@ -224,6 +224,10 @@ class FalloutFields:
 
 def decode_fields(kind, fields, read):
     source()
+    return _decode_fields(kind, fields, read)
+
+
+def _decode_fields(kind, fields, read):
     if (type(kind) is not int or kind != KIND or type(fields) is not dict
             or any(type(k) is not int for k in fields)
             or set(fields) != {SELECTOR_KEY,POSITION_KEY,VALUE_KEY,STATE_KEY}):

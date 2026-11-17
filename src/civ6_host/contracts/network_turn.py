@@ -5,6 +5,9 @@ import hashlib
 import json
 import copy
 import re
+from collections.abc import Mapping, Sequence
+from itertools import chain
+from . import prophet_activation, religion_beliefs, religion_founding, religious_unit_operations
 
 SCHEMA = 'civ6-host.network-decisions.v3'
 WORK_SCHEMA = 'civ6-host.network-decisions.v4'
@@ -22,6 +25,55 @@ CAPABILITY_CHOICES_SCHEMA = 'civ6-host.network-capability-decisions.v2'
 CAPABILITY_TURNS_SCHEMA = 'civ6-host.network-capability-decisions.v3'
 CAPABILITY_WORLD_SCHEMA = 'civ6-host.network-capability-decisions.v4'
 CAPABILITY_UNIT_ORDERS_SCHEMA = 'civ6-host.network-capability-decisions.v5'
+CAPABILITY_SECONDARY_UNIT_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v1'
+CAPABILITY_SECONDARY_UNIT_ORDERS_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v2'
+CAPABILITY_SECONDARY_TURN_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v3'
+CAPABILITY_SECONDARY_RESEARCH_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v4'
+CAPABILITY_SECONDARY_FOUNDERS_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v5'
+CAPABILITY_SECONDARY_PRODUCTION_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v6'
+CAPABILITY_SECONDARY_QUEUE_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v7'
+CAPABILITY_SECONDARY_CITY_CONTROLS_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v8'
+CAPABILITY_SECONDARY_WORLD_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v9'
+CAPABILITY_SECONDARY_DEVELOPMENT_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v10'
+CAPABILITY_SECONDARY_COMBAT_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v11'
+CAPABILITY_SECONDARY_OCCUPATION_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v12'
+CAPABILITY_SECONDARY_RANGED_SHOTS_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v13'
+CAPABILITY_SECONDARY_PURCHASE_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v14'
+CAPABILITY_SECONDARY_GOVERNMENT_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v15'
+CAPABILITY_SECONDARY_CITY_STATES_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v16'
+CAPABILITY_SECONDARY_UNIT_WORK_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v17'
+CAPABILITY_SECONDARY_ADJACENT_WORK_SCHEMA = 'civ6-host.network-secondary-unit-decisions.v18'
+SECONDARY_CITY_PANEL_FIELDS = ('city_buildings', 'city_growth', 'city_loyalty', 'city_religion', 'rock_bands')
+SECONDARY_UNIT_PANEL_KINDS = ('air_operation', 'build_route', 'designate_national_park', 'perform_rock_concert')
+SECONDARY_CONGRESS_FIELDS = ('world_congress', 'world_congress_review', 'world_congress_review_status',
+                            'world_congress_active_effects', 'world_congress_active_effects_status')
+SECONDARY_RELIGION_CONTRACTS = {
+    'prophet_activation': prophet_activation,
+    'religion_founding': religion_founding,
+    'religion_beliefs': religion_beliefs,
+    'religious_unit_operations': religious_unit_operations,
+}
+SECONDARY_RELIGION_KINDS = {
+    field: contract.KINDS if contract is religious_unit_operations else (contract.KIND,)
+    for field, contract in SECONDARY_RELIGION_CONTRACTS.items()
+}
+_SECONDARY_WORK_SCHEMAS = (CAPABILITY_SECONDARY_UNIT_WORK_SCHEMA, CAPABILITY_SECONDARY_ADJACENT_WORK_SCHEMA)
+_SECONDARY_CITY_STATE_SCHEMAS = (CAPABILITY_SECONDARY_CITY_STATES_SCHEMA, *_SECONDARY_WORK_SCHEMAS)
+_SECONDARY_GOVERNMENT_SCHEMAS = (CAPABILITY_SECONDARY_GOVERNMENT_SCHEMA, *_SECONDARY_CITY_STATE_SCHEMAS)
+_SECONDARY_PURCHASE_SCHEMAS = (CAPABILITY_SECONDARY_PURCHASE_SCHEMA, *_SECONDARY_GOVERNMENT_SCHEMAS)
+_SECONDARY_RANGED_SCHEMAS = (CAPABILITY_SECONDARY_RANGED_SHOTS_SCHEMA, *_SECONDARY_PURCHASE_SCHEMAS)
+_SECONDARY_OCCUPATION_SCHEMAS = (CAPABILITY_SECONDARY_OCCUPATION_SCHEMA, *_SECONDARY_RANGED_SCHEMAS)
+_SECONDARY_COMBAT_SCHEMAS = (CAPABILITY_SECONDARY_COMBAT_SCHEMA, *_SECONDARY_OCCUPATION_SCHEMAS)
+_SECONDARY_DEVELOPMENT_SCHEMAS = (CAPABILITY_SECONDARY_DEVELOPMENT_SCHEMA, *_SECONDARY_COMBAT_SCHEMAS)
+_SECONDARY_WORLD_SCHEMAS = (CAPABILITY_SECONDARY_WORLD_SCHEMA, *_SECONDARY_DEVELOPMENT_SCHEMAS)
+_SECONDARY_CITY_SCHEMAS = (CAPABILITY_SECONDARY_CITY_CONTROLS_SCHEMA, *_SECONDARY_WORLD_SCHEMAS)
+_SECONDARY_QUEUE_SCHEMAS = (CAPABILITY_SECONDARY_QUEUE_SCHEMA, *_SECONDARY_CITY_SCHEMAS)
+_SECONDARY_PRODUCTION_SCHEMAS = (CAPABILITY_SECONDARY_PRODUCTION_SCHEMA, *_SECONDARY_QUEUE_SCHEMAS)
+_SECONDARY_FOUNDERS_SCHEMAS = (CAPABILITY_SECONDARY_FOUNDERS_SCHEMA, *_SECONDARY_PRODUCTION_SCHEMAS)
+_SECONDARY_RESEARCH_SCHEMAS = (CAPABILITY_SECONDARY_RESEARCH_SCHEMA, *_SECONDARY_FOUNDERS_SCHEMAS)
+_SECONDARY_TURN_SCHEMAS = (CAPABILITY_SECONDARY_TURN_SCHEMA, *_SECONDARY_RESEARCH_SCHEMAS)
+_SECONDARY_UNIT_SCHEMAS = (CAPABILITY_SECONDARY_UNIT_SCHEMA, CAPABILITY_SECONDARY_UNIT_ORDERS_SCHEMA,
+                           *_SECONDARY_TURN_SCHEMAS)
 CAPABILITY_PRODUCTION_QUEUE_SCHEMA = 'civ6-host.network-capability-decisions.v6'
 CAPABILITY_PLACEMENT_SCHEMA = 'civ6-host.network-capability-decisions.v7'
 CAPABILITY_PLACEMENT_INVENTORY_SCHEMA = 'civ6-host.network-capability-decisions.v8'
@@ -59,6 +111,133 @@ CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA = 'civ6-host.network-capability-dec
 CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA = 'civ6-host.network-capability-decisions.v40'
 CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA = 'civ6-host.network-capability-decisions.v41'
 CAPABILITY_XP2_CAPTURED_CITY_SCHEMA = 'civ6-host.network-capability-decisions.v42'
+CAPABILITY_XP1_CAPTURED_CITY_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v1'
+CAPABILITY_XP1_CITY_SHOT_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v2'
+CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v3'
+CAPABILITY_XP1_GOVERNORS_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v4'
+CAPABILITY_XP1_CITY_STATE_ENVOYS_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v5'
+CAPABILITY_XP1_ENVOY_CHOICES_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v6'
+CAPABILITY_XP1_CITY_STATE_LEVIES_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v7'
+CAPABILITY_XP1_UNIT_LEVIES_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v8'
+CAPABILITY_XP1_DEDICATIONS_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v9'
+CAPABILITY_XP1_TRADE_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v10'
+CAPABILITY_XP1_TRADE_OVERVIEW_SCHEMA = 'civ6-host.network-capability-decisions.v11.captured-city.v11'
+class _XP1Registry:
+    def __init__(self, name):
+        self._name = name
+
+    def _values(self):
+        from . import network_turn_xp1_schemas
+
+        return getattr(network_turn_xp1_schemas, self._name)
+
+    def __iter__(self):
+        return iter(self._values())
+
+    def __len__(self):
+        return len(self._values())
+
+    def __contains__(self, schema):
+        return (isinstance(schema, str)
+                and schema.startswith(CAPABILITY_COMBAT_READINESS_SCHEMA + '.captured-city.')
+                and schema in self._values())
+
+
+class _XP1SchemaMap(_XP1Registry, Mapping):
+    def __getitem__(self, schema):
+        if schema not in self:
+            raise KeyError(schema)
+        return self._values()[schema]
+
+
+class _XP1Schemas(_XP1Registry, Sequence):
+    def __getitem__(self, index):
+        return self._values()[index]
+
+
+class _JoinedSchemas(Sequence):
+    def __init__(self, *groups):
+        self._groups = groups
+
+    def __iter__(self):
+        return chain.from_iterable(self._groups)
+
+    def __len__(self):
+        return sum(len(group) for group in self._groups)
+
+    def __contains__(self, schema):
+        return any(schema in group for group in self._groups)
+
+    def __getitem__(self, index):
+        return tuple(self)[index]
+
+
+XP1_GOVERNMENT_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_GOVERNMENT_SCHEMA_BY_BASE')
+_XP1_GOVERNMENT_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_GOVERNMENT_BASE_BY_SCHEMA')
+XP1_PLOT_PURCHASE_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_PLOT_PURCHASE_SCHEMA_BY_BASE')
+_XP1_PLOT_PURCHASE_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_PLOT_PURCHASE_BASE_BY_SCHEMA')
+XP1_CITY_PURCHASE_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_CITY_PURCHASE_SCHEMA_BY_BASE')
+_XP1_CITY_PURCHASE_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_CITY_PURCHASE_BASE_BY_SCHEMA')
+XP1_FAITH_PURCHASE_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_FAITH_PURCHASE_SCHEMA_BY_BASE')
+_XP1_FAITH_PURCHASE_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_FAITH_PURCHASE_BASE_BY_SCHEMA')
+XP1_CITY_BUILDINGS_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_CITY_BUILDINGS_SCHEMA_BY_BASE')
+_XP1_CITY_BUILDINGS_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_CITY_BUILDINGS_BASE_BY_SCHEMA')
+XP1_PROMOTION_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_PROMOTION_SCHEMA_BY_BASE')
+_XP1_PROMOTION_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_PROMOTION_BASE_BY_SCHEMA')
+XP1_UPGRADE_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_UPGRADE_SCHEMA_BY_BASE')
+_XP1_UPGRADE_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_UPGRADE_BASE_BY_SCHEMA')
+XP1_PRODUCTION_INFO_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_PRODUCTION_INFO_SCHEMA_BY_BASE')
+_XP1_PRODUCTION_INFO_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_PRODUCTION_INFO_BASE_BY_SCHEMA')
+XP1_CITY_RELIGION_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_CITY_RELIGION_SCHEMA_BY_BASE')
+_XP1_CITY_RELIGION_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_CITY_RELIGION_BASE_BY_SCHEMA')
+XP1_PANTHEON_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_PANTHEON_SCHEMA_BY_BASE')
+_XP1_PANTHEON_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_PANTHEON_BASE_BY_SCHEMA')
+XP1_RELIGION_BELIEFS_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_RELIGION_BELIEFS_SCHEMA_BY_BASE')
+_XP1_RELIGION_BELIEFS_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_RELIGION_BELIEFS_BASE_BY_SCHEMA')
+XP1_RELIGION_FOUNDING_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_RELIGION_FOUNDING_SCHEMA_BY_BASE')
+_XP1_RELIGION_FOUNDING_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_RELIGION_FOUNDING_BASE_BY_SCHEMA')
+XP1_RELIGION_FOUNDING_SCHEMAS = _XP1Schemas('XP1_RELIGION_FOUNDING_SCHEMAS')
+XP1_RELIGION_BELIEFS_SCHEMAS = _XP1Schemas('XP1_RELIGION_BELIEFS_SCHEMAS')
+XP1_PANTHEON_SCHEMAS = _XP1Schemas('XP1_PANTHEON_SCHEMAS')
+XP1_CITY_RELIGION_SCHEMAS = _XP1Schemas('XP1_CITY_RELIGION_SCHEMAS')
+XP1_GREAT_PEOPLE_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_GREAT_PEOPLE_SCHEMA_BY_BASE')
+_XP1_GREAT_PEOPLE_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_GREAT_PEOPLE_BASE_BY_SCHEMA')
+XP1_GREAT_PEOPLE_SCHEMAS = _XP1Schemas('XP1_GREAT_PEOPLE_SCHEMAS')
+XP1_PROPHET_ACTIVATION_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_PROPHET_ACTIVATION_SCHEMA_BY_BASE')
+_XP1_PROPHET_ACTIVATION_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_PROPHET_ACTIVATION_BASE_BY_SCHEMA')
+XP1_PROPHET_ACTIVATION_SCHEMAS = _XP1Schemas('XP1_PROPHET_ACTIVATION_SCHEMAS')
+XP1_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE')
+_XP1_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA')
+XP1_GREAT_PEOPLE_ACTIONS_SCHEMAS = _XP1Schemas('XP1_GREAT_PEOPLE_ACTIONS_SCHEMAS')
+XP1_GREAT_PEOPLE_REJECT_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_GREAT_PEOPLE_REJECT_SCHEMA_BY_BASE')
+_XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA')
+XP1_GREAT_PEOPLE_REJECT_SCHEMAS = _XP1Schemas('XP1_GREAT_PEOPLE_REJECT_SCHEMAS')
+XP1_RELIGION_CUSTOM_NAMES_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_RELIGION_CUSTOM_NAMES_SCHEMA_BY_BASE')
+_XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA')
+XP1_RELIGION_CUSTOM_NAMES_SCHEMAS = _XP1Schemas('XP1_RELIGION_CUSTOM_NAMES_SCHEMAS')
+XP1_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE')
+_XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA')
+XP1_GREAT_PERSON_ACTIVATION_SCHEMAS = _XP1Schemas('XP1_GREAT_PERSON_ACTIVATION_SCHEMAS')
+XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE')
+_XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA')
+XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS = _XP1Schemas('XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS')
+XP1_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE = _XP1SchemaMap('XP1_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE')
+_XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA = _XP1SchemaMap('_XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA')
+XP1_CITY_RELIGION_DETAILS_SCHEMAS = _XP1Schemas('XP1_CITY_RELIGION_DETAILS_SCHEMAS')
+XP1_PRODUCTION_INFO_SCHEMAS = _XP1Schemas('XP1_PRODUCTION_INFO_SCHEMAS')
+XP1_TRADE_SCHEMAS = _XP1Schemas('XP1_TRADE_SCHEMAS')
+_XP1_DEDICATION_SCHEMAS = _XP1Schemas('_XP1_DEDICATION_SCHEMAS')
+XP1_LEVY_SCHEMAS = _XP1Schemas('XP1_LEVY_SCHEMAS')
+XP1_ENVOY_CHOICE_SCHEMAS = _XP1Schemas('XP1_ENVOY_CHOICE_SCHEMAS')
+XP1_CITY_STATE_ENVOY_SCHEMAS = _XP1Schemas('XP1_CITY_STATE_ENVOY_SCHEMAS')
+_XP1_CAPTURE_SCHEMAS = _XP1Schemas('_XP1_CAPTURE_SCHEMAS')
+XP1_TRADE_OVERVIEW_SCHEMAS = _XP1Schemas('XP1_TRADE_OVERVIEW_SCHEMAS')
+
+
+_XP1_SHOT_TRANSITIONS = {
+    CAPABILITY_XP1_CITY_SHOT_SCHEMA: (CAPABILITY_XP1_CAPTURED_CITY_SCHEMA, 'city_shots', 'city_range_attack'),
+    CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA: (CAPABILITY_XP1_CITY_SHOT_SCHEMA, 'district_shots', 'district_range_attack'),
+}
 CAPABILITY_XP2_STANDARD_TRADE_SCHEMA = 'civ6-host.network-capability-decisions.standard-trade.v1'
 CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA = 'civ6-host.network-capability-decisions.standard-trade.v2'
 CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA = 'civ6-host.network-capability-decisions.standard-trade.v3'
@@ -72,6 +251,7 @@ _STOCK_CAPTURE_SCHEMA_BY_BASE = {
     for schema in _STOCK_TRADE_BASE_SCHEMAS
 }
 _CAPTURE_BASE_SCHEMA = {
+    CAPABILITY_XP1_CAPTURED_CITY_SCHEMA: CAPABILITY_COMBAT_READINESS_SCHEMA,
     CAPABILITY_XP2_CAPTURED_CITY_SCHEMA: CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA,
     **{extended: base for base, extended in _STOCK_CAPTURE_SCHEMA_BY_BASE.items()},
 }
@@ -92,18 +272,39 @@ CONGRESS_READ_ONLY_KINDS = frozenset((
 
 
 def congress_action_read_only(value, kind):
-    """The three official screens are read-only during native IsInSession.
+    """Government and governor edits are read-only during native IsInSession.
 
-    Great People has no admitted action kind yet; no future opcode is invented.
+    The Great People reader already applies its own official phase gate.
     Historical catalogues and the underlying observations retain their meaning.
     """
-    return (value.get('schema') in WORLD_CONGRESS_CAPABILITY_SCHEMAS
+    schema = xp2_great_person_base_schema(value.get('schema'))
+    return ((schema in WORLD_CONGRESS_CAPABILITY_SCHEMAS or schema in _SECONDARY_UNIT_SCHEMAS)
             and type(value.get('world_congress')) is dict
             and value['world_congress'].get('in_session') is True
             and kind in CONGRESS_READ_ONLY_KINDS)
+
+
+def _remove_congress_read_only_candidates(value):
+    removed = {row['candidate_id'] for row in value['candidates']
+               if congress_action_read_only(value, row['action']['kind'])}
+    if not removed:
+        return
+    value['candidates'] = [row for row in value['candidates'] if row['candidate_id'] not in removed]
+    for family in value['families'].values():
+        if 'candidate_ids' in family:
+            family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
+
+
 ESPIONAGE_GAPS = ('spy_completion_repeat_pending_identity',)
 SPY_COMPLETION_GAPS = ('spy_popup_interface_mode_lifetime', 'spy_notification_reactivation')
 INITIAL_DIPLOMACY_GAPS = ('deal_screens_and_non_direct_initial_choices',)
+STOCK_INITIAL_DIPLOMACY_GAPS = ('initial_choices_other_than_denunciation',)
+STOCK_MAJOR_PEACE_GAPS = ('initial_choices_other_than_denunciation_and_major_peace',)
+STOCK_NEGOTIATION_GAPS = ('initial_choices_other_than_denunciation_and_major_negotiation',)
+STOCK_FRIENDSHIP_GAPS = ('initial_choices_other_than_denunciation_friendship_and_major_negotiation',)
+STOCK_PROMISE_GAPS = ('initial_choices_other_than_denunciation_friendship_promises_and_major_negotiation',)
+STOCK_CITY_STATE_PEACE_GAPS = (
+    'initial_choices_other_than_denunciation_friendship_promises_major_negotiation_and_city_state_peace',)
 WORLD_WAR_DECISIONS_SCHEMA = 'civ6-host.network-world-war-decisions.v1'
 # Known capability revisions in wire order. Each revision inherits the earlier
 # groups, with field and migration exceptions handled by their own validators.
@@ -153,42 +354,255 @@ _CAPABILITY_SCHEMAS = (
 )
 
 
+# An additive family keeps the exact preceding XP2 branch (including stock,
+# Congress and captured-city fields) in its wire identity.
+_XP2_LEVY_SCHEMA_BY_BASE = {
+    base: base + '.military-levies.v1'
+    for base in (*_CAPABILITY_SCHEMAS[_CAPABILITY_SCHEMAS.index(CAPABILITY_XP2_ENVOYS_SCHEMA):],
+                 *STOCK_TRADE_CAPABILITY_SCHEMAS)
+}
+_XP2_LEVY_BASE_SCHEMA = {schema: base for base, schema in _XP2_LEVY_SCHEMA_BY_BASE.items()}
+XP2_LEVY_SCHEMAS = tuple(_XP2_LEVY_BASE_SCHEMA)
+
+
+# These are the implemented XP2 v31-v42 and stock public branches. The runtime
+# separately admits only the exact current image and captured stock/BBG inputs.
+_XP2_RELIGIOUS_UNIT_BASES = (
+    CAPABILITY_XP2_ENVOYS_SCHEMA, CAPABILITY_XP2_GOVERNORS_SCHEMA,
+    CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA, CAPABILITY_XP2_TRADE_SCHEMA,
+    CAPABILITY_XP2_ESPIONAGE_SCHEMA, CAPABILITY_XP2_SPY_COMPLETION_SCHEMA,
+    CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA, CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA,
+    CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA, CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA,
+    CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA, CAPABILITY_XP2_CAPTURED_CITY_SCHEMA,
+    *STOCK_TRADE_CAPABILITY_SCHEMAS,
+)
+XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE = {
+    base: base+'.religious-unit-operations.v1'
+    for base in (*_XP2_RELIGIOUS_UNIT_BASES,
+                 *(_XP2_LEVY_SCHEMA_BY_BASE[base] for base in _XP2_RELIGIOUS_UNIT_BASES))
+}
+_XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA = {
+    new:base for base,new in XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE.items()}
+XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS = tuple(_XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA)
+
+# Independent XP2 options follow the implemented public branches, with or
+# without religious unit operations. Runtime admission still checks the exact
+# installed image and captured stock/BBG profile; these maps only version data.
+_XP2_RELIGIOUS_CHAIN_BASES = (*XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE,
+                             *XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS)
+XP2_PROPHET_ACTIVATION_SCHEMA_BY_BASE = {
+    base: base+'.prophet-activation.v1' for base in _XP2_RELIGIOUS_CHAIN_BASES}
+_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA = {
+    new:base for base,new in XP2_PROPHET_ACTIVATION_SCHEMA_BY_BASE.items()}
+XP2_RELIGION_FOUNDING_SCHEMA_BY_BASE = {
+    base: base+'.religion-founding.v1'
+    for base in (*_XP2_RELIGIOUS_CHAIN_BASES, *_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA)}
+_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA = {
+    new:base for base,new in XP2_RELIGION_FOUNDING_SCHEMA_BY_BASE.items()}
+XP2_RELIGION_BELIEFS_SCHEMA_BY_BASE = {
+    base: base+'.religion-beliefs.v1'
+    for base in (*_XP2_RELIGIOUS_CHAIN_BASES, *_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA,
+                 *_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA)}
+_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA = {
+    new:base for base,new in XP2_RELIGION_BELIEFS_SCHEMA_BY_BASE.items()}
+
+
+# Pantheon remains an independent final XP2 option over every implemented
+# preceding combination; it does not enable any XP1 feature or choose a belief.
+XP2_PANTHEON_SCHEMA_BY_BASE = {
+    base: base+'.pantheon.v2'
+    for base in (*_XP2_RELIGIOUS_CHAIN_BASES, *_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA,
+                 *_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA, *_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA)}
+_XP2_PANTHEON_BASE_BY_SCHEMA = {new:base for base,new in XP2_PANTHEON_SCHEMA_BY_BASE.items()}
+XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE = {
+    base:base+'.city-religion-details.v1'
+    for base in (*XP2_PANTHEON_SCHEMA_BY_BASE, *_XP2_PANTHEON_BASE_BY_SCHEMA)}
+_XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA = {
+    new:base for base,new in XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE.items()}
+
+_XP2_STOCK_ROOTS = (*_STOCK_TRADE_BASE_SCHEMAS, *_STOCK_CAPTURE_SCHEMA_BY_BASE.values())
+XP2_CITY_BUILDINGS_SCHEMA_BY_BASE = {
+    base: base + '.city-buildings.v1'
+    for base in (*_XP2_STOCK_ROOTS, *_XP2_LEVY_BASE_SCHEMA, *_XP2_RELIGIOUS_CHAIN_BASES,
+                 *_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA, *_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA,
+                 *_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA, *_XP2_PANTHEON_BASE_BY_SCHEMA,
+                 *_XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA)
+}
+_XP2_CITY_BUILDINGS_BASE_BY_SCHEMA = {
+    new: base for base, new in XP2_CITY_BUILDINGS_SCHEMA_BY_BASE.items()}
+
+XP2_GREAT_PEOPLE_SCHEMA_BY_BASE = {
+    base: base + '.great-people.v1'
+    for base in (*_XP2_RELIGIOUS_CHAIN_BASES, *_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA,
+                 *_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA, *_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA,
+                 *_XP2_PANTHEON_BASE_BY_SCHEMA, *_XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA,
+                 *_XP2_CITY_BUILDINGS_BASE_BY_SCHEMA)
+}
+_XP2_GREAT_PEOPLE_BASE_BY_SCHEMA = {
+    new: base for base, new in XP2_GREAT_PEOPLE_SCHEMA_BY_BASE.items()}
+XP2_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE = {
+    base: base + '.great-people-actions.v1' for base in _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA}
+_XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA = {
+    new: base for base, new in XP2_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE.items()}
+XP2_GREAT_PEOPLE_SCHEMAS = (*_XP2_GREAT_PEOPLE_BASE_BY_SCHEMA, *_XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA)
+
+XP2_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE = {
+    base: base + '.great-person-activation.v1'
+    for base in (*XP2_CITY_BUILDINGS_SCHEMA_BY_BASE, *_XP2_CITY_BUILDINGS_BASE_BY_SCHEMA,
+                 *XP2_GREAT_PEOPLE_SCHEMAS, *_SECONDARY_UNIT_SCHEMAS)
+}
+_XP2_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA = {
+    new: base for base, new in XP2_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE.items()
+}
+
+
+def xp2_great_person_base_schema(schema):
+    return _XP2_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA.get(schema, schema) if type(schema) is str else schema
+
+
+def _with_xp2_city_buildings(bases):
+    schemas = (*bases, *(XP2_CITY_BUILDINGS_SCHEMA_BY_BASE[base] for base in bases
+                         if base in XP2_CITY_BUILDINGS_SCHEMA_BY_BASE))
+    great_people = tuple(XP2_GREAT_PEOPLE_SCHEMA_BY_BASE[base] for base in schemas
+                         if base in XP2_GREAT_PEOPLE_SCHEMA_BY_BASE)
+    return (*schemas, *great_people, *(XP2_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE[base] for base in great_people))
+
+
+XP2_CITY_RELIGION_DETAILS_SCHEMAS = _with_xp2_city_buildings(_XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA)
+CITY_RELIGION_SCHEMAS = _JoinedSchemas(
+    XP1_CITY_RELIGION_SCHEMAS, XP2_CITY_RELIGION_DETAILS_SCHEMAS, _SECONDARY_UNIT_SCHEMAS)
+CITY_RELIGION_DETAILS_SCHEMAS = _JoinedSchemas(
+    XP1_CITY_RELIGION_DETAILS_SCHEMAS, XP2_CITY_RELIGION_DETAILS_SCHEMAS, _SECONDARY_UNIT_SCHEMAS)
+
+
+def _with_xp2_city_religion_details(bases):
+    return _with_xp2_city_buildings(
+        (*bases, *(XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE[base] for base in bases
+                   if base in XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE)))
+
+
+XP2_PANTHEON_SCHEMAS = _with_xp2_city_religion_details(_XP2_PANTHEON_BASE_BY_SCHEMA)
+PANTHEON_SCHEMAS = _JoinedSchemas(XP1_PANTHEON_SCHEMAS, XP2_PANTHEON_SCHEMAS)
+
+
+def _with_xp2_pantheon(bases):
+    return _with_xp2_city_religion_details(
+        (*bases, *(XP2_PANTHEON_SCHEMA_BY_BASE[base] for base in bases
+                   if base in XP2_PANTHEON_SCHEMA_BY_BASE)))
+
+
+def _with_xp2_religious_chain(bases):
+    schemas = tuple(bases)
+    for mapping in (XP2_PROPHET_ACTIVATION_SCHEMA_BY_BASE,
+                    XP2_RELIGION_FOUNDING_SCHEMA_BY_BASE,
+                    XP2_RELIGION_BELIEFS_SCHEMA_BY_BASE):
+        schemas += tuple(mapping[base] for base in schemas if base in mapping)
+    return _with_xp2_pantheon(schemas)
+
+
+XP2_PROPHET_ACTIVATION_SCHEMAS = _with_xp2_religious_chain(_XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA)
+XP2_RELIGION_FOUNDING_SCHEMAS = _with_xp2_religious_chain(_XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA)
+XP2_RELIGION_BELIEFS_SCHEMAS = _with_xp2_pantheon(_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA)
+PROPHET_ACTIVATION_SCHEMAS = _JoinedSchemas(XP1_PROPHET_ACTIVATION_SCHEMAS, XP2_PROPHET_ACTIVATION_SCHEMAS)
+RELIGION_FOUNDING_SCHEMAS = _JoinedSchemas(XP1_RELIGION_FOUNDING_SCHEMAS, XP2_RELIGION_FOUNDING_SCHEMAS)
+RELIGION_BELIEFS_SCHEMAS = _JoinedSchemas(XP1_RELIGION_BELIEFS_SCHEMAS, XP2_RELIGION_BELIEFS_SCHEMAS)
+XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS = _with_xp2_religious_chain(XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS)
+RELIGIOUS_UNIT_OPERATIONS_SCHEMAS = _JoinedSchemas(XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS, XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS)
+
+
+def _xp2_religious_chain_base_schema(schema):
+    schema = _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(schema, schema)
+    schema = _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA.get(schema, schema)
+    schema = _XP2_CITY_BUILDINGS_BASE_BY_SCHEMA.get(schema, schema)
+    schema = _XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA.get(schema, schema)
+    schema = _XP2_PANTHEON_BASE_BY_SCHEMA.get(schema, schema)
+    for mapping in (_XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA,
+                    _XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA,
+                    _XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA):
+        schema = mapping.get(schema, schema)
+    return schema
+
+
+def _with_xp2_religious_unit_operations(bases):
+    return _with_xp2_religious_chain(
+        (*bases, *(XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE[base] for base in bases
+                   if base in XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE)))
+
+
+XP2_LEVY_SCHEMAS = _with_xp2_religious_unit_operations(XP2_LEVY_SCHEMAS)
+CITY_STATE_LEVY_SCHEMAS = _JoinedSchemas(XP1_LEVY_SCHEMAS, XP2_LEVY_SCHEMAS)
+UNIT_LEVY_SCHEMAS = _JoinedSchemas(
+    (CAPABILITY_XP1_UNIT_LEVIES_SCHEMA,), _XP1_DEDICATION_SCHEMAS, XP2_LEVY_SCHEMAS)
+
+
+def xp2_levy_base_schema(schema):
+    return _XP2_LEVY_BASE_SCHEMA.get(schema, schema) if type(schema) is str else schema
+
+
+def _with_levy_schemas(schemas):
+    return _with_xp2_religious_unit_operations(
+        (*schemas, *(_XP2_LEVY_SCHEMA_BY_BASE[base] for base in schemas
+                     if base in _XP2_LEVY_SCHEMA_BY_BASE)))
+
+
+STOCK_CONGRESS_SCHEMAS = _with_levy_schemas(STOCK_CONGRESS_SCHEMAS)
+STOCK_DEDICATION_SCHEMAS = _with_levy_schemas(STOCK_DEDICATION_SCHEMAS)
+DEDICATION_SCHEMAS = _JoinedSchemas(_XP1_DEDICATION_SCHEMAS, STOCK_DEDICATION_SCHEMAS)
+STOCK_FORMATION_SCHEMAS = _with_levy_schemas(STOCK_FORMATION_SCHEMAS)
+STOCK_TRADE_CAPABILITY_SCHEMAS = _with_levy_schemas(STOCK_TRADE_CAPABILITY_SCHEMAS)
+
+
 def _capability_schemas_from(first):
-    schemas = _CAPABILITY_SCHEMAS[_CAPABILITY_SCHEMAS.index(first):]
-    if CAPABILITY_XP2_ENVOYS_SCHEMA in schemas:
-        schemas += STOCK_TRADE_CAPABILITY_SCHEMAS
-    return schemas
+    schemas = _with_levy_schemas(_CAPABILITY_SCHEMAS[_CAPABILITY_SCHEMAS.index(first):])
+    stock = STOCK_TRADE_CAPABILITY_SCHEMAS if CAPABILITY_XP2_ENVOYS_SCHEMA in schemas else ()
+    if CAPABILITY_COMBAT_READINESS_SCHEMA in schemas:
+        return _JoinedSchemas(schemas, _XP1_CAPTURE_SCHEMAS, stock)
+    return (*schemas, *stock)
 
 
 def _capability_version(schema):
+    schema = _xp2_religious_chain_base_schema(schema)
+    schema = _XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA.get(schema,schema)
+    schema = xp2_levy_base_schema(schema)
     if schema in STOCK_TRADE_CAPABILITY_SCHEMAS:
         schema = CAPABILITY_XP2_ENVOYS_SCHEMA
+    if schema in _XP1_CAPTURE_SCHEMAS:
+        schema = CAPABILITY_COMBAT_READINESS_SCHEMA
     return _CAPABILITY_SCHEMAS.index(schema) + 1
 
 
 _TURN_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_TURNS_SCHEMA)
 ATTACK_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_UNIT_ATTACKS_SCHEMA)
-PUBLIC_COMBAT_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_COMBAT_PUBLIC_SCHEMA)
+PUBLIC_COMBAT_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _capability_schemas_from(CAPABILITY_COMBAT_PUBLIC_SCHEMA), _SECONDARY_COMBAT_SCHEMAS)
 COMBAT_READINESS_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_COMBAT_READINESS_SCHEMA)
-UNIT_WORK_STATE_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_UNIT_WORK_STATE_SCHEMA)
-CURRENT_PRODUCTION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_CURRENT_PRODUCTION_SCHEMA)
-POLICY_RELOCATION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA)
-POLICY_RECONFIRM_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA)
+UNIT_WORK_STATE_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _capability_schemas_from(CAPABILITY_UNIT_WORK_STATE_SCHEMA), _SECONDARY_WORK_SCHEMAS)
+CURRENT_PRODUCTION_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _capability_schemas_from(CAPABILITY_CURRENT_PRODUCTION_SCHEMA), XP1_PRODUCTION_INFO_SCHEMAS)
+POLICY_RELOCATION_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _capability_schemas_from(CAPABILITY_XP2_POLICY_RELOCATION_SCHEMA), _SECONDARY_GOVERNMENT_SCHEMAS)
+POLICY_RECONFIRM_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _capability_schemas_from(CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA), _SECONDARY_GOVERNMENT_SCHEMAS)
 ESPIONAGE_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_ESPIONAGE_SCHEMA)
 SPY_COMPLETION_CAPABILITY_SCHEMAS = _capability_schemas_from(CAPABILITY_XP2_SPY_COMPLETION_SCHEMA)
 WORLD_CONGRESS_CAPABILITY_SCHEMAS = (*_capability_schemas_from(CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA), *STOCK_CONGRESS_SCHEMAS)
 WORLD_CONGRESS_REVIEW_CAPABILITY_SCHEMAS = (*_capability_schemas_from(CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA), *STOCK_CONGRESS_SCHEMAS)
 NATIVE_COMMAND_PERMISSIONS_SCHEMAS = (*_capability_schemas_from(CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA), *STOCK_CONGRESS_SCHEMAS)
 CONGRESS_ACTIVE_EFFECTS_CAPABILITY_SCHEMAS = (*_capability_schemas_from(CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA), *STOCK_CONGRESS_SCHEMAS)
-TRADE_OVERVIEW_CAPABILITY_SCHEMAS = (
-    CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA, CAPABILITY_XP2_CAPTURED_CITY_SCHEMA,
-    *STOCK_TRADE_CAPABILITY_SCHEMAS)
+STOCK_TRADE_OVERVIEW_SCHEMAS = _JoinedSchemas(
+    XP1_TRADE_OVERVIEW_SCHEMAS, STOCK_TRADE_CAPABILITY_SCHEMAS)
+TRADE_OVERVIEW_CAPABILITY_SCHEMAS = _JoinedSchemas(
+    _with_levy_schemas((CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA, CAPABILITY_XP2_CAPTURED_CITY_SCHEMA)),
+    STOCK_TRADE_OVERVIEW_SCHEMAS)
 STRATEGIC_READER_FAMILIES = frozenset((
     'found_city', 'queue_append', 'queue_remove', 'queue_swap',
     'world_select_unit', 'world_deselect_unit', 'world_plot_click', 'unit_order', 'unit_attack', 'unit_formation',
     'upgrade_unit', 'policies', 'policy_unlock', 'government', 'retain_government',
     'send_envoy', 'retain_envoys', 'change_trade_origin',
     'city_range_attack', 'district_range_attack',
+    'spread_religion', 'evangelize_belief', 'launch_inquisition', 'remove_heresy',
+    'activate_prophet', 'found_religion', 'add_belief', 'pantheon',
 ))
 NATIVE_STRATEGIC_READER_UNAVAILABLE = 'native_strategic_command_permission_false_reader_unavailable'
 _STRATEGIC_READER_FIELDS = {
@@ -227,7 +641,8 @@ def family_query_unavailable(value, family, *, actions_closed=False, native_comm
         raise ValueError('Malformed native family query boundary')
     controls = validate_turn_controls(value['turn_controls'], value['player_id'], value['turn'])
     permissions = native_command_permissions
-    if value.get('schema') in NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
+    schema = xp2_great_person_base_schema(value.get('schema'))
+    if schema in NATIVE_COMMAND_PERMISSIONS_SCHEMAS:
         retained = value['native_command_permissions']
         if permissions is not None and permissions != retained:
             raise ValueError('Conflicting native command permission reads')
@@ -235,6 +650,7 @@ def family_query_unavailable(value, family, *, actions_closed=False, native_comm
     if permissions is not None:
         validate_native_command_permissions(permissions, value['player_id'], value['turn'], value['sequence'])
     return (actions_closed or is_waiting(controls)
+            or family == 'activate_great_person' and schema in _SECONDARY_UNIT_SCHEMAS and value['unit_orders'] is None
             or permissions is not None and not permissions['allow_strategic']
                and family in STRATEGIC_READER_FAMILIES)
 
@@ -251,9 +667,11 @@ def combat_checkpoint_sources(core_sha256=None):
     if core_sha256==_XP2_COMBAT_CORE:return _XP2_COMBAT_SOURCE,_XP2_COMBAT_SOURCE
     raise ValueError('Combat checkpoint transition requires its exact engine')
 
-SUPPORTED_SCHEMAS = (PRODUCTION_SCHEMA, GROWTH_SCHEMA, INFO_SCHEMA, WORK_SCHEMA,
-                     SCHEMA, PREVIOUS_SCHEMA, LEGACY_SCHEMA, *_CAPABILITY_SCHEMAS,
-                     *STOCK_TRADE_CAPABILITY_SCHEMAS)
+SUPPORTED_SCHEMAS = _JoinedSchemas(
+    (PRODUCTION_SCHEMA, GROWTH_SCHEMA, INFO_SCHEMA, WORK_SCHEMA,
+     SCHEMA, PREVIOUS_SCHEMA, LEGACY_SCHEMA, *_SECONDARY_UNIT_SCHEMAS),
+    _with_levy_schemas(_CAPABILITY_SCHEMAS), _XP1_CAPTURE_SCHEMAS,
+    STOCK_TRADE_CAPABILITY_SCHEMAS, tuple(_XP2_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA))
 MAP_SCHEMAS = (PRODUCTION_SCHEMA, GROWTH_SCHEMA, INFO_SCHEMA, WORK_SCHEMA, SCHEMA)
 TURN_CONTROLS_SCHEMA = 'civ6-host.turn-controls.v1'
 DIALOGUE_SCHEMAS = frozenset(('civ6rl.diplomacy_decisions948.v1',
@@ -274,7 +692,31 @@ _CAPABILITY_TURN_KINDS = frozenset(('end_turn', 'force_end_turn', 'unready_turn'
 
 def is_capability_catalogue(value):
     return (type(value) is dict and (value.get('schema') in _CAPABILITY_SCHEMAS
+            or value.get('schema') in _SECONDARY_UNIT_SCHEMAS
+            or value.get('schema') in _XP1_CAPTURE_SCHEMAS
+            or value.get('schema') in XP2_LEVY_SCHEMAS
+            or value.get('schema') in XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMAS
+            or value.get('schema') in XP2_PROPHET_ACTIVATION_SCHEMAS
+            or value.get('schema') in XP2_RELIGION_FOUNDING_SCHEMAS
+            or value.get('schema') in XP2_RELIGION_BELIEFS_SCHEMAS
+            or value.get('schema') in XP2_PANTHEON_SCHEMAS
+            or value.get('schema') in XP2_CITY_RELIGION_DETAILS_SCHEMAS
+            or value.get('schema') in XP2_GREAT_PEOPLE_SCHEMAS
+            or xp2_great_person_base_schema(value.get('schema')) != value.get('schema')
             or value.get('schema') in STOCK_TRADE_CAPABILITY_SCHEMAS))
+
+
+def has_xp1_unit_work(value):
+    schema = value.get('schema')
+    return ('unit_work' in value and (schema == CAPABILITY_COMBAT_READINESS_SCHEMA
+                                     or schema in _XP1_CAPTURE_SCHEMAS))
+
+
+def has_adjacent_unit_work(value):
+    from .unit_work import ADJACENT_KIND
+
+    families = value.get('families')
+    return type(families) is dict and ADJACENT_KIND in families
 
 
 def is_world_war_decisions(value):
@@ -282,8 +724,14 @@ def is_world_war_decisions(value):
 
 
 def is_diplomacy_decisions(value):
-    return (type(value) is dict
-            and value.get('schema') == 'civ6-host.network-diplomacy-decisions.v1')
+    from .diplomacy_decisions import is_catalogue
+    return is_catalogue(value)
+
+
+def borrowed_dialogue_player(value, local_player_id):
+    if is_diplomacy_decisions(value) and value['player_id'] != local_player_id:
+        return value['player_id']
+    return None
 
 
 def offered_forced_turn(value, action):
@@ -292,7 +740,9 @@ def offered_forced_turn(value, action):
     This consumes an explicit native UI offer; it does not derive availability
     from activity flags or upgrade legacy catalogues.
     """
-    return (type(value) is dict and value.get('schema') in _TURN_CAPABILITY_SCHEMAS
+    return (type(value) is dict
+            and (value.get('schema') in _SECONDARY_TURN_SCHEMAS
+                 or value.get('schema') in _TURN_CAPABILITY_SCHEMAS)
             and action=={'kind':'force_end_turn'}
             and value['turn_availability']['force_end_turn'] is True
             and any(row['action']==action for row in value['candidates']))
@@ -311,42 +761,252 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     """
     if type(actions_closed) is not bool or not is_capability_catalogue(value):
         raise ValueError('Unexpected capability catalogue fields')
+    if xp2_great_person_base_schema(value['schema']) != value['schema']:
+        previous = _xp2_great_person_projection(value, observation=observation, actions_closed=actions_closed)
+        validate_capability_catalogue(previous, identity, sequence, turn, player_id=player_id,
+                                      actions_closed=actions_closed, observation=observation)
+        return value
+    if value['schema'] in _SECONDARY_UNIT_SCHEMAS:
+        fields = _CAPABILITY_FIELDS | {'unit_orders'}
+        if value['schema'] in _SECONDARY_TURN_SCHEMAS:
+            fields = fields | {'turn_availability'}
+        if value['schema'] in _SECONDARY_RESEARCH_SCHEMAS:
+            fields = fields | {'research_choices'}
+        if value['schema'] in _SECONDARY_FOUNDERS_SCHEMAS:
+            fields = fields | {'founders'}
+        if value['schema'] in _SECONDARY_PRODUCTION_SCHEMAS:
+            fields = fields | {'production_choices'}
+        if value['schema'] in _SECONDARY_QUEUE_SCHEMAS:
+            fields = fields | {'production_queues'}
+        if value['schema'] in _SECONDARY_CITY_SCHEMAS:
+            fields = fields | {'city_focus_catalogs', 'citizen_catalogs'}
+        if value['schema'] in _SECONDARY_WORLD_SCHEMAS:
+            fields = fields | {'world_input', 'queued_orders'}
+        if value['schema'] in _SECONDARY_DEVELOPMENT_SCHEMAS:
+            fields = fields | {'unit_promotions', 'unit_upgrades'}
+        if value['schema'] in _SECONDARY_COMBAT_SCHEMAS:
+            fields = fields | {'unit_attacks'}
+        if value['schema'] in _SECONDARY_OCCUPATION_SCHEMAS:
+            fields = fields | {'captured_city'}
+        if value['schema'] in _SECONDARY_RANGED_SCHEMAS:
+            fields = fields | {'city_shots', 'district_shots'}
+        if value['schema'] in _SECONDARY_PURCHASE_SCHEMAS:
+            fields = fields | {'plot_purchases', 'city_purchases'}
+        if value['schema'] in _SECONDARY_GOVERNMENT_SCHEMAS:
+            fields = fields | {'government', 'policies', 'policy_unlock'}
+        if value['schema'] in _SECONDARY_CITY_STATE_SCHEMAS:
+            fields = fields | {'envoys', 'city_state_levies', 'unit_levies'}
+        if 'city_state_peace' in value:
+            fields.add('city_state_peace')
+        if 'world_score' in value:
+            fields.add('world_score')
+        if 'archaeology' in value:
+            fields.add('archaeology')
+        if value['schema'] in _SECONDARY_WORK_SCHEMAS:
+            fields = fields | {'unit_work', 'unit_work_state', 'unit_work_info'}
+        city_panels = {key: value[key] for key in SECONDARY_CITY_PANEL_FIELDS if key in value}
+        fields.update(city_panels)
+        great_people_mode = 'off'
+        if 'great_people' in value:
+            fields.update(('great_people', 'great_people_actions'))
+            command_scope = value.get('great_people_actions')
+            if type(command_scope) is not bool:
+                raise ValueError('Borrowed Great People command scope requires an exact Boolean')
+            great_people_mode = 'actions' if command_scope else 'read'
+        if 'pantheon' in value:
+            fields.add('pantheon')
+        if 'governors' in value:
+            fields.add('governors')
+        if 'espionage' in value:
+            fields.add('espionage')
+        if 'spy_completion' in value:
+            fields.add('spy_completion')
+        religion = {key: value[key] for key in SECONDARY_RELIGION_CONTRACTS if key in value}
+        fields.update(religion)
+        trade_states = {key: value[key] for key in ('trade_routes', 'trade_origins') if key in value}
+        fields.update(trade_states)
+        if 'unit_formations' in value:
+            fields.add('unit_formations')
+        if 'dedications' in value:
+            fields.add('dedications')
+        congress = {key: value[key] for key in SECONDARY_CONGRESS_FIELDS if key in value}
+        fields.update(congress)
+        if set(value) != fields:
+            raise ValueError('Unexpected borrowed unit-order catalogue fields')
+        from . import archaeology
+
+        excavations = [] if archaeology.EXCAVATE in value['families'] else None
+        archaeology_mode = ('commands' if excavations is not None else
+                            'read' if 'archaeology' in value else 'off')
+        if archaeology_mode == 'off' and archaeology.KIND in value['families']:
+            raise ValueError('Artifact commands require the borrowed archaeology state')
+        panel_actions = {kind: [] for kind in SECONDARY_UNIT_PANEL_KINDS
+                         if kind in value['families']}
+        if panel_actions or excavations is not None:
+            for row in value['candidates']:
+                if type(row) is not dict or type(row.get('action')) is not dict:
+                    raise ValueError('Malformed borrowed UnitPanel candidate')
+                action = row['action']
+                kind = action.get('kind')
+                if type(kind) is str and kind in panel_actions:
+                    panel_actions[kind].append(action)
+                if excavations is not None and kind == archaeology.EXCAVATE:
+                    excavations.append(action)
+        expected = secondary_unit_catalogue(identity, sequence, turn, player_id,
+            value['turn_controls'], value['unit_orders'], observation=observation,
+            actions_closed=actions_closed, schema=value['schema'],
+            turn_availability=value.get('turn_availability'),
+            research_choices=value.get('research_choices'), founders=value.get('founders'),
+            production_choices=value.get('production_choices'),
+            production_queues=value.get('production_queues'),
+            city_focus_catalogs=value.get('city_focus_catalogs'), citizen_catalogs=value.get('citizen_catalogs'),
+            world_input=value.get('world_input'), queued_orders=value.get('queued_orders'),
+            unit_promotions=value.get('unit_promotions'), unit_upgrades=value.get('unit_upgrades'),
+            unit_attacks=value.get('unit_attacks'), occupation=value.get('captured_city'),
+            city_shots=value.get('city_shots'), district_shots=value.get('district_shots'),
+            plot_purchases=value.get('plot_purchases'), city_purchases=value.get('city_purchases'),
+            government_state=value.get('government'), policy_state=value.get('policies'),
+            unlock_state=value.get('policy_unlock'), envoy_state=value.get('envoys'),
+            city_state_levies=value.get('city_state_levies'), unit_levies=value.get('unit_levies'),
+            city_state_peace=value.get('city_state_peace'), city_state_peace_enabled='city_state_peace' in value,
+            world_score_state=value.get('world_score'), world_score_enabled='world_score' in value,
+            work_catalog=value.get('unit_work'), work_state=value.get('unit_work_state'),
+            work_info=value.get('unit_work_info'), city_panels=city_panels,
+            great_people_state=value.get('great_people'), great_people_mode=great_people_mode,
+            pantheon_state=value.get('pantheon'), pantheon_enabled='pantheon' in value,
+            governor_state=value.get('governors'), governors_enabled='governors' in value,
+            espionage_state=value.get('espionage'), espionage_enabled='espionage' in value,
+            completion_state=value.get('spy_completion'), spy_completion_enabled='spy_completion' in value,
+            religion_states=religion, trade_states=trade_states,
+            formation_state=value.get('unit_formations'), formation_enabled='unit_formations' in value,
+            dedication_state=value.get('dedications'), dedication_enabled='dedications' in value,
+            congress=congress, unit_panel_actions=panel_actions, archaeology_state=value.get('archaeology'),
+            archaeology_mode=archaeology_mode, excavation_actions=excavations)
+        if value != expected or any(type(value[key]) is not int for key in ('sequence', 'turn', 'player_id')):
+            raise ValueError('Borrowed unit-order catalogue differs from its offers or identity')
+        return value
     version = _capability_version(value['schema'])
     standard_trade = value['schema'] in STOCK_TRADE_CAPABILITY_SCHEMAS
     formations = value['schema'] in STOCK_FORMATION_SCHEMAS
-    has_dedications = value['schema'] in STOCK_DEDICATION_SCHEMAS
+    has_dedications = value['schema'] in DEDICATION_SCHEMAS
     stock_congress = value['schema'] in STOCK_CONGRESS_SCHEMAS
     resources_v24 = version >= 24
-    policies_v25 = version >= 25
+    xp1_city_religion_details = value['schema'] in _XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA
+    xp2_city_religion_details = value['schema'] in XP2_CITY_RELIGION_DETAILS_SCHEMAS
+    xp1_unit_religion_schema = _XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA.get(value['schema'],value['schema'])
+    xp1_religious_unit_operations = xp1_unit_religion_schema in _XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA
+    xp2_chain_base = _xp2_religious_chain_base_schema(value['schema'])
+    xp2_religious_unit_operations = xp2_chain_base in _XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA
+    has_religious_unit_operations = xp1_religious_unit_operations or xp2_religious_unit_operations
+    xp1_gp_activation_schema = _XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA.get(xp1_unit_religion_schema,xp1_unit_religion_schema)
+    xp1_great_person_activation = xp1_gp_activation_schema in _XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA
+    xp1_custom_schema = _XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA.get(xp1_gp_activation_schema,xp1_gp_activation_schema)
+    xp1_religion_custom_names = xp1_custom_schema in _XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA
+    xp1_reject_schema = _XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA.get(xp1_custom_schema,xp1_custom_schema)
+    xp1_great_people_reject = xp1_reject_schema in _XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA
+    xp1_actions_schema = _XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA.get(xp1_reject_schema,xp1_reject_schema)
+    xp1_great_people_actions = xp1_actions_schema in _XP1_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA
+    xp1_activation_schema = _XP1_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(xp1_actions_schema,xp1_actions_schema)
+    has_prophet_activation = (xp1_activation_schema in _XP1_PROPHET_ACTIVATION_BASE_BY_SCHEMA
+        or value['schema'] in XP2_PROPHET_ACTIVATION_SCHEMAS)
+    xp1_gp_schema = _XP1_PROPHET_ACTIVATION_BASE_BY_SCHEMA.get(xp1_activation_schema,xp1_activation_schema)
+    xp1_great_people = xp1_gp_schema in _XP1_GREAT_PEOPLE_BASE_BY_SCHEMA
+    xp2_great_people_actions = value['schema'] in _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA
+    xp2_query_schema = _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(value['schema'], value['schema'])
+    xp2_parent_schema = _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA.get(xp2_query_schema)
+    has_great_people = xp1_great_people or xp2_parent_schema is not None
+    great_people_commands = xp1_great_people_actions or xp2_great_people_actions
+    great_people_reject = xp1_great_people_reject or xp2_great_people_actions
+    xp1_founding_schema = _XP1_GREAT_PEOPLE_BASE_BY_SCHEMA.get(xp1_gp_schema,xp1_gp_schema)
+    has_religion_founding = (xp1_founding_schema in _XP1_RELIGION_FOUNDING_BASE_BY_SCHEMA
+        or value['schema'] in XP2_RELIGION_FOUNDING_SCHEMAS)
+    xp1_beliefs_schema = _XP1_RELIGION_FOUNDING_BASE_BY_SCHEMA.get(xp1_founding_schema,xp1_founding_schema)
+    has_religion_beliefs = (xp1_beliefs_schema in _XP1_RELIGION_BELIEFS_BASE_BY_SCHEMA
+        or value['schema'] in XP2_RELIGION_BELIEFS_SCHEMAS)
+    xp1_pantheon_schema = _XP1_RELIGION_BELIEFS_BASE_BY_SCHEMA.get(xp1_beliefs_schema,xp1_beliefs_schema)
+    xp2_pantheon = value['schema'] in XP2_PANTHEON_SCHEMAS
+    has_pantheon = xp1_pantheon_schema in _XP1_PANTHEON_BASE_BY_SCHEMA or xp2_pantheon
+    xp1_religion_schema = _XP1_PANTHEON_BASE_BY_SCHEMA.get(xp1_pantheon_schema,xp1_pantheon_schema)
+    xp1_city_religion = xp1_religion_schema in _XP1_CITY_RELIGION_BASE_BY_SCHEMA
+    has_city_religion = xp1_city_religion or xp2_city_religion_details
+    xp1_production_schema = _XP1_CITY_RELIGION_BASE_BY_SCHEMA.get(xp1_religion_schema,xp1_religion_schema)
+    xp1_production_info = xp1_production_schema in _XP1_PRODUCTION_INFO_BASE_BY_SCHEMA
+    xp1_schema = _XP1_PRODUCTION_INFO_BASE_BY_SCHEMA.get(xp1_production_schema,xp1_production_schema)
+    xp1_upgrade = xp1_schema in _XP1_UPGRADE_BASE_BY_SCHEMA
+    xp1_promotion_schema = _XP1_UPGRADE_BASE_BY_SCHEMA.get(xp1_schema,xp1_schema)
+    xp1_promotion = xp1_promotion_schema in _XP1_PROMOTION_BASE_BY_SCHEMA
+    xp1_building_schema = _XP1_PROMOTION_BASE_BY_SCHEMA.get(xp1_promotion_schema,xp1_promotion_schema)
+    xp2_city_buildings = (xp2_parent_schema or value['schema']) in _XP2_CITY_BUILDINGS_BASE_BY_SCHEMA
+    has_city_buildings = xp1_building_schema in _XP1_CITY_BUILDINGS_BASE_BY_SCHEMA or xp2_city_buildings
+    xp1_faith_schema = _XP1_CITY_BUILDINGS_BASE_BY_SCHEMA.get(xp1_building_schema,xp1_building_schema)
+    xp1_faith_purchase = xp1_faith_schema in _XP1_FAITH_PURCHASE_BASE_BY_SCHEMA
+    xp1_purchase_schema = _XP1_FAITH_PURCHASE_BASE_BY_SCHEMA.get(xp1_faith_schema, xp1_faith_schema)
+    xp1_city_purchase = xp1_purchase_schema in _XP1_CITY_PURCHASE_BASE_BY_SCHEMA
+    xp1_plot_schema = _XP1_CITY_PURCHASE_BASE_BY_SCHEMA.get(xp1_purchase_schema,xp1_purchase_schema)
+    xp1_plot_purchase = xp1_plot_schema in _XP1_PLOT_PURCHASE_BASE_BY_SCHEMA
+    xp1_base = _XP1_PLOT_PURCHASE_BASE_BY_SCHEMA.get(xp1_plot_schema, xp1_plot_schema)
+    xp1_government = xp1_base in _XP1_GOVERNMENT_BASE_BY_SCHEMA
+    policies_v25 = version >= 25 or xp1_government
     policy_unlock_v26 = version >= 26
-    government_v27 = version >= 27
+    government_v27 = version >= 27 or xp1_government
     policy_relocation_v28 = version >= 28
     policy_reconfirm_v29 = version >= 29
-    faith_purchase_v30 = version >= 30
-    envoys_v31 = version >= 31
-    governors_v32 = version >= 32
-    initial_diplomacy_v33 = version >= 33
-    xp2_trade_v34 = version >= 34 or standard_trade
+    policy_gaps = (
+        ['paid_policy_unlock', 'active_policy_relocation', 'unchanged_policy_confirmation']
+        if xp1_government else
+        ['active_policy_relocation'] if policy_unlock_v26 else
+        ['paid_policy_unlock', 'active_policy_relocation']
+    )
+    faith_purchase_v30 = version >= 30 or xp1_faith_purchase
+    envoys_v31 = version >= 31 or value['schema'] in XP1_ENVOY_CHOICE_SCHEMAS
+    xp1_city_state_envoys = value['schema'] in XP1_CITY_STATE_ENVOY_SCHEMAS
+    xp2_levies = value['schema'] in XP2_LEVY_SCHEMAS
+    has_city_state_levies = value['schema'] in CITY_STATE_LEVY_SCHEMAS
+    has_unit_levies = value['schema'] in UNIT_LEVY_SCHEMAS
+    xp1_governors = value['schema'] == CAPABILITY_XP1_GOVERNORS_SCHEMA or xp1_city_state_envoys
+    governors_v32 = version >= 32 or xp1_governors
+    stock_diplomacy = (xp2_levy_base_schema(_xp2_religious_chain_base_schema(value['schema']))
+                       in STOCK_TRADE_CAPABILITY_SCHEMAS and 'diplomacy_overview' in value)
+    initial_diplomacy_v33 = version >= 33 or stock_diplomacy
+    xp1_trade = value['schema'] in XP1_TRADE_SCHEMAS
+    has_trade = version >= 34 or standard_trade or xp1_trade
     espionage_v35 = version >= 35
     spy_completion_v36 = version >= 36
     world_congress_v37 = version >= 37 or stock_congress
     world_congress_review_v38 = version >= 38 or stock_congress
     command_permissions_v39 = version >= 39 or stock_congress
     congress_active_effects_v40 = version >= 40 or stock_congress
-    trade_overview_v41 = version >= 41 or standard_trade
-    has_captured_city = value['schema'] in _CAPTURE_BASE_SCHEMA
-    upgrade_v23 = version >= 23
-    promotion_v22 = version >= 22
-    city_purchase_v21 = version >= 21
-    purchase_v20 = version >= 20
+    trade_overview_v41 = value['schema'] in TRADE_OVERVIEW_CAPABILITY_SCHEMAS
+    xp1_city_shot = value['schema'] in _XP1_SHOT_TRANSITIONS or xp1_governors
+    xp1_district_shot = value['schema'] == CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA or xp1_governors
+    xp2_capture_schema = _XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA.get(xp2_chain_base,xp2_chain_base)
+    has_captured_city = xp2_levy_base_schema(xp2_capture_schema) in _CAPTURE_BASE_SCHEMA or xp1_city_shot
+    upgrade_v23 = version >= 23 or xp1_upgrade
+    promotion_v22 = version >= 22 or xp1_promotion
+    city_purchase_v21 = version >= 21 or xp1_city_purchase
+    purchase_v20 = version >= 20 or xp1_plot_purchase
     skip_v19 = version >= 19
-    current_production_v18 = version >= 18
-    work_info_v17 = version >= 17
-    work_state_v16 = version >= 16
-    unit_work_v15 = version >= 15
-    district_shot_v14 = version >= 14
-    city_shot_v13 = version >= 13
-    city_controls_v12 = version == 12 or city_shot_v13 and 'city_focus_catalogs' in value
+    current_production_v18 = version >= 18 or xp1_production_info
+    xp1_unit_work = has_xp1_unit_work(value)
+    work_info_v17 = version >= 17 or xp1_unit_work
+    work_state_v16 = version >= 16 or xp1_unit_work
+    unit_work_v15 = version >= 15 or xp1_unit_work
+    district_shot_v14 = version >= 14 or xp1_district_shot
+    city_shot_v13 = version >= 13 or xp1_city_shot
+    # v12 always includes the group. Other eligible views, including the
+    # Rise and Fall branches of v11, include it only when explicitly queried.
+    city_controls_v12 = version == 12 or (version >= 11 and 'city_focus_catalogs' in value)
+    has_world_score = version >= 11 and 'world_score' in value
+    has_archaeology = version >= 11 and 'archaeology' in value
+    from . import air_operations, archaeology, national_parks, rock_bands, unit_work
+    family_fields = value.get('families')
+    has_air = version >= 11 and type(family_fields) is dict and air_operations.KIND in family_fields
+    has_route = version >= 11 and type(family_fields) is dict and unit_work.BUILD_ROUTE in family_fields
+    has_park = version >= 11 and type(family_fields) is dict and national_parks.DESIGNATE in family_fields
+    has_rock_bands = version >= 11 and 'rock_bands' in value
+    has_expansion_city_growth = version >= 11 and 'city_growth' in value
+    has_expansion_city_loyalty = version >= 11 and 'city_loyalty' in value
+    has_expansion_national_parks = version >= 11 and 'national_parks' in value
     public_combat_v10 = version >= 10
     attacks_v9 = version >= 9
     inventory_v8 = version >= 8
@@ -363,6 +1023,16 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
               | ({'production_queues'} if queues_v6 else set())
               | ({'placements','placement_offers','placement_observation_scope'} if placements_v7 else set())
               | ({'placement_inventory'} if inventory_v8 else set())
+              | ({'city_buildings'} if has_city_buildings else set())
+              | ({'city_religion'} if has_city_religion else set())
+              | ({'pantheon'} if has_pantheon else set())
+              | ({'religion_beliefs'} if has_religion_beliefs else set())
+              | ({'religion_founding'} if has_religion_founding else set())
+              | ({'religion_custom_names'} if xp1_religion_custom_names else set())
+              | ({'great_person_activation'} if xp1_great_person_activation else set())
+              | ({'religious_unit_operations'} if has_religious_unit_operations else set())
+              | ({'great_people'} if has_great_people else set())
+              | ({'prophet_activation'} if has_prophet_activation else set())
               | ({'unit_attacks'} if attacks_v9 else set())
               | ({'city_shots'} if city_shot_v13 else set())
               | ({'district_shots'} if district_shot_v14 else set())
@@ -370,6 +1040,7 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
               | ({'unit_work_state'} if work_state_v16 else set())
               | ({'unit_work_info'} if work_info_v17 else set())
               | ({'production_current'} if current_production_v18 else set())
+              | ({'production_info'} if xp1_production_info else set())
               | ({'plot_purchases'} if purchase_v20 else set())
               | ({'city_purchases'} if city_purchase_v21 else set())
               | ({'unit_promotions'} if promotion_v22 else set())
@@ -380,8 +1051,11 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
               | ({'government'} if government_v27 else set())
               | ({'envoys'} if envoys_v31 else set())
               | ({'governors'} if governors_v32 else set())
+              | ({'city_state_envoys'} if xp1_city_state_envoys else set())
+              | ({'city_state_levies'} if has_city_state_levies else set())
+              | ({'unit_levies'} if has_unit_levies else set())
               | ({'diplomacy_overview'} if initial_diplomacy_v33 else set())
-              | ({'trade_routes', 'trade_origins'} if xp2_trade_v34 else set())
+              | ({'trade_routes', 'trade_origins'} if has_trade else set())
               | ({'espionage'} if espionage_v35 else set())
               | ({'spy_completion'} if spy_completion_v36 else set())
               | ({'world_congress'} if world_congress_v37 else set())
@@ -392,9 +1066,58 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
               | ({'captured_city'} if has_captured_city else set())
               | ({'unit_formations'} if formations else set())
               | ({'dedications'} if has_dedications else set())
-              | ({'city_focus_catalogs','citizen_catalogs'} if city_controls_v12 else set()))
+              | ({'city_focus_catalogs','citizen_catalogs'} if city_controls_v12 else set())
+              | ({'world_score'} if has_world_score else set())
+              | ({'archaeology'} if has_archaeology else set())
+              | ({'city_growth'} if has_expansion_city_growth else set())
+              | ({'city_loyalty'} if has_expansion_city_loyalty else set())
+              | ({'national_parks'} if has_expansion_national_parks else set())
+              | ({'rock_bands'} if has_rock_bands else set()))
     from .capability_choices import ACTION_FIELDS, validate_action, validate_state
     action_fields = dict(_CAPABILITY_ACTION_FIELDS)
+    from . import city_buildings
+    building_panel = value.get('city_buildings')
+    great_work_commands = (has_city_buildings and type(building_panel) is dict
+                           and building_panel.get('schema') in city_buildings.GREAT_WORK_COMMAND_SCHEMAS)
+    if great_work_commands:
+        action_fields[city_buildings.GREAT_WORK_MOVE] = city_buildings.GREAT_WORK_MOVE_FIELDS
+    if has_archaeology:
+        action_fields[archaeology.KIND] = archaeology.ACTION_FIELDS
+        action_fields[archaeology.EXCAVATE] = archaeology.EXCAVATE_FIELDS
+    if has_air:
+        action_fields[air_operations.KIND] = air_operations.FIELDS
+    if has_route:
+        action_fields[unit_work.BUILD_ROUTE] = unit_work.ROUTE_FIELDS
+    if has_park:
+        action_fields[national_parks.DESIGNATE] = national_parks.DESIGNATION_FIELDS
+    if has_rock_bands:
+        action_fields[rock_bands.KIND] = rock_bands.FIELDS
+    if has_pantheon:
+        from . import pantheon
+        action_fields[pantheon.KIND] = pantheon.FIELDS
+    if has_religion_beliefs:
+        from . import religion_beliefs
+        action_fields[religion_beliefs.KIND] = religion_beliefs.FIELDS
+    if has_religion_founding:
+        from . import religion_founding
+        action_fields[religion_founding.KIND] = religion_founding.FIELDS
+    if xp1_religion_custom_names:
+        from . import religion_custom_names
+        action_fields[religion_custom_names.KIND] = religion_custom_names.FIELDS
+    if xp1_great_person_activation:
+        from . import great_person_activation
+        action_fields[great_person_activation.KIND] = great_person_activation.FIELDS
+    if has_religious_unit_operations:
+        from . import religious_unit_operations
+        action_fields.update({kind:religious_unit_operations.FIELDS for kind in religious_unit_operations.KINDS})
+    if has_prophet_activation:
+        from . import prophet_activation
+        action_fields[prophet_activation.KIND] = prophet_activation.FIELDS
+    if great_people_commands:
+        from . import great_people_actions
+        action_fields.update({kind:great_people_actions.FIELDS[kind] for kind in great_people_actions.LEGACY_KINDS})
+        if great_people_reject:
+            action_fields[great_people_actions.REJECT] = great_people_actions.FIELDS[great_people_actions.REJECT]
     if choices_v2:
         action_fields.update(ACTION_FIELDS)
     if turns_v3:
@@ -431,7 +1154,15 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         action_fields['district_range_attack'] = city_ranged.DISTRICT_FIELDS
     if unit_work_v15:
         from . import unit_work
-        action_fields.update(unit_work.NETWORK_ACTION_FIELDS)
+        adjacent_work = has_adjacent_unit_work(value)
+        if adjacent_work and version < _CAPABILITY_SCHEMAS.index(CAPABILITY_XP2_ENVOYS_SCHEMA) + 1:
+            raise ValueError('Adjacent unit work requires a Gathering Storm capability catalogue')
+        work_fields = (unit_work.ADJACENT_NETWORK_ACTION_FIELDS if adjacent_work
+                       else unit_work.NETWORK_ACTION_FIELDS)
+        work_gaps = unit_work.network_gaps(adjacent=adjacent_work)
+        action_fields.update(work_fields)
+    elif has_adjacent_unit_work(value):
+        raise ValueError('Adjacent unit work requires the UnitPanel catalogue')
     if purchase_v20:
         from . import plot_purchases
         action_fields['purchase'] = plot_purchases.FIELDS
@@ -452,13 +1183,16 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     if envoys_v31:
         from . import envoys
         action_fields.update(envoys.ACTION_FIELDS)
+    if has_city_state_levies:
+        from . import city_state_levies
+        action_fields[city_state_levies.ACTION] = city_state_levies.ACTION_FIELDS
     if governors_v32:
         from . import governors
         action_fields.update(governors.ACTION_FIELDS)
     if initial_diplomacy_v33:
         from . import diplomacy_overview as initial_diplomacy
         action_fields.update(initial_diplomacy.ACTION_FIELDS)
-    if xp2_trade_v34:
+    if has_trade:
         from . import trade
         action_fields.update({
             'make_trade_route': frozenset(trade.ROUTE_FIELDS),
@@ -534,13 +1268,61 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('Acting governor catalogue is unavailable')
         else:
             governors.validate_catalogue(governor_catalogue, player_id, turn)
+    if xp1_city_state_envoys:
+        from . import city_state_envoys
+        influence = value['city_state_envoys']
+        if (influence is None) != (actions_closed or is_waiting(value['turn_controls'])):
+            raise ValueError('City-state envoy information differs from its native acting boundary')
+        if influence is not None:
+            city_state_envoys.validate(influence, player_id, turn)
+            if envoys_v31 and envoy_catalogue is not None:
+                targets = [{'player_id': row['target_player_id'], 'own_envoys': row['tokens_received']}
+                           for row in envoy_catalogue['targets']]
+                if influence['city_states'] != targets:
+                    raise ValueError('Rise and Fall envoy targets differ from the native count readback')
+    if has_city_state_levies:
+        levies = value['city_state_levies']
+        unavailable = family_query_unavailable(value, city_state_levies.ACTION, actions_closed=actions_closed)
+        if (levies is None) != unavailable:
+            raise ValueError('Military levy catalogue differs from its native acting boundary')
+        if levies is not None:
+            city_state_levies.validate(levies, player_id, turn)
+            if xp2_levies:
+                known = ([row['target_player_id'] for row in envoy_catalogue['targets']]
+                         if envoy_catalogue is not None else None)
+            else:
+                known = [row['player_id'] for row in influence['city_states']]
+            if (known is not None and levies['military_enabled']
+                    and [row['player_id'] for row in levies['city_states']] != known):
+                raise ValueError('Military levy catalogue differs from the met city-states')
+        if has_unit_levies:
+            flags = value['unit_levies']
+            if (flags is None) != (actions_closed or is_waiting(value['turn_controls'])):
+                raise ValueError('Unit levy flags differ from their native acting boundary')
+            if flags is not None:
+                city_state_levies.validate_unit_flags(flags, player_id, turn, observation=observation)
     if initial_diplomacy_v33:
         diplomacy_catalogue = value['diplomacy_overview']
-        if (diplomacy_catalogue is None) != (actions_closed or is_waiting(controls)):
+        unavailable = actions_closed or is_waiting(controls)
+        if stock_diplomacy and command_permissions_v39:
+            permissions = validate_native_command_permissions(
+                value['native_command_permissions'], player_id, turn, sequence)
+            unavailable = unavailable or not permissions['allow_strategic']
+        if (diplomacy_catalogue is None) != unavailable:
             raise ValueError('Initial diplomacy query differs from its acting boundary')
         if diplomacy_catalogue is not None:
             initial_diplomacy.validate(diplomacy_catalogue, player_id, turn)
-    if xp2_trade_v34:
+            schema = diplomacy_catalogue['schema']
+            if stock_diplomacy:
+                if schema not in (initial_diplomacy.RELATIONSHIPS_SCHEMA, *initial_diplomacy.STOCK_SCHEMAS):
+                    raise ValueError('Stock initial diplomacy requires its own overview')
+                if schema == initial_diplomacy.RELATIONSHIPS_SCHEMA and any(
+                        choice['supported'] and choice['key'] != initial_diplomacy.DENOUNCE
+                        for target in diplomacy_catalogue['targets'] for choice in target['selections']):
+                    raise ValueError('Stock initial diplomacy offers an unqualified choice')
+            elif schema in initial_diplomacy.STOCK_SCHEMAS:
+                raise ValueError('Stock diplomacy requires its own decision catalogue')
+    if has_trade:
         from . import trade
         trade_closed = actions_closed or (standard_trade and value['trade_overview_status'] == 'ui_boundary_unavailable')
         unavailable = trade_closed or is_waiting(controls)
@@ -548,6 +1330,11 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         routes, origins = value['trade_routes'], value['trade_origins']
         if (routes is None) != unavailable or (origins is None) != origins_unavailable:
             raise ValueError('Trade queries differ from their native acting boundary')
+        if xp1_trade:
+            for kind, catalogue in (('make_trade_route', routes), ('change_trade_origin', origins)):
+                expected_status = 'unqualified' if catalogue is None else 'queried_complete'
+                if value['families'].get(kind, {}).get('status') != expected_status:
+                    raise ValueError('Rise and Fall trade family differs from its native query')
         if not unavailable:
             trade.validate_routes(routes, player_id, turn)
             if observation is not None:
@@ -566,10 +1353,14 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
                 espionage.compare_own(espionage_catalogue, observation)
     if spy_completion_v36:
         completion_catalogue = value['spy_completion']
-        if (completion_catalogue is None) != (actions_closed or is_waiting(controls)):
-            raise ValueError('Spy completion query differs from its native acting boundary')
+        waiting = is_waiting(controls)
+        if ((actions_closed and completion_catalogue is not None)
+                or (not actions_closed and not waiting and completion_catalogue is None)):
+            raise ValueError('Spy completion query differs from its session boundary')
         if completion_catalogue is not None:
             spy_completion.validate_catalogue(completion_catalogue, player_id, turn)
+            if waiting and completion_catalogue['current'] is None:
+                raise ValueError('Waiting spy completion requires a native occurrence')
             if observation is not None:
                 spy_completion.compare_own(completion_catalogue, observation)
     if world_congress_v37:
@@ -590,7 +1381,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             value['world_congress_active_effects_status'], congress_catalogue, player_id, turn, sequence)
     if trade_overview_v41:
         from . import trade_overview
-        profile = trade_overview.STOCK_PROFILE if standard_trade else trade_overview.PROFILE
+        profile = (trade_overview.STOCK_PROFILE if value['schema'] in STOCK_TRADE_OVERVIEW_SCHEMAS
+                   else trade_overview.PROFILE)
         trade_overview.validate_group(value['trade_overview'], value['trade_overview_status'], value,
                                       observation, profile=profile)
     if (type(value['decision_id']) is not str or value['decision_id'] != digest(
@@ -607,6 +1399,10 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             family = families.get(kind, {})
             if family.get('status') != ('unqualified' if envoy_catalogue is None else 'queried_complete'):
                 raise ValueError('Envoy family differs from its public query availability')
+    if has_city_state_levies:
+        family = families.get(city_state_levies.ACTION, {})
+        if family.get('status') != ('unqualified' if levies is None else 'queried_complete'):
+            raise ValueError('Military levy family differs from its public query availability')
     if governors_v32:
         for kind in governors.ACTION_FIELDS:
             family = families.get(kind, {})
@@ -616,9 +1412,20 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         family = families.get('diplomacy_initiate', {})
         if family.get('status') != ('unqualified' if diplomacy_catalogue is None else 'queried_partial'):
             raise ValueError('Initial diplomacy family differs from its public query')
-        if diplomacy_catalogue is not None and family.get('unqualified') != list(INITIAL_DIPLOMACY_GAPS):
+        gaps = INITIAL_DIPLOMACY_GAPS
+        if stock_diplomacy and diplomacy_catalogue is not None:
+            gaps = {
+                initial_diplomacy.RELATIONSHIPS_SCHEMA: STOCK_INITIAL_DIPLOMACY_GAPS,
+                initial_diplomacy.STOCK_MAJOR_PEACE_SCHEMA: STOCK_MAJOR_PEACE_GAPS,
+                initial_diplomacy.STOCK_NEGOTIATION_SCHEMA: STOCK_NEGOTIATION_GAPS,
+                initial_diplomacy.STOCK_FRIENDSHIP_SCHEMA: STOCK_FRIENDSHIP_GAPS,
+                initial_diplomacy.STOCK_PROMISE_SCHEMA: STOCK_PROMISE_GAPS,
+                initial_diplomacy.STOCK_PROMISE_STATUS_SCHEMA: STOCK_PROMISE_GAPS,
+                initial_diplomacy.STOCK_CITY_STATE_PEACE_SCHEMA: STOCK_CITY_STATE_PEACE_GAPS,
+            }[diplomacy_catalogue['schema']]
+        if diplomacy_catalogue is not None and family.get('unqualified') != list(gaps):
             raise ValueError('Initial diplomacy family has an unqualified source gap')
-    if xp2_trade_v34:
+    if has_trade:
         for kind in ('make_trade_route', 'change_trade_origin'):
             trade_available = not family_query_unavailable(value, kind, actions_closed=trade_closed)
             if families.get(kind, {}).get('status') != ('queried_complete' if trade_available else 'unqualified'):
@@ -695,6 +1502,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         shots = value['city_shots']
         shot_family = families.get('city_range_attack', {})
         if shots is not None:
+            if xp1_city_shot and (actions_closed or is_waiting(controls)):
+                raise ValueError('Rise and Fall city shots require the native acting boundary')
             city_ranged.city_validate_catalog(shots, player_id, turn)
             if observation is not None:
                 city_ranged.city_compare_own_cities(shots, observation)
@@ -703,6 +1512,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     if district_shot_v14:
         district_shots = value['district_shots']
         if district_shots is not None:
+            if xp1_district_shot and (actions_closed or is_waiting(controls)):
+                raise ValueError('Rise and Fall district shots require the native acting boundary')
             city_ranged.district_validate_catalog(district_shots, player_id, turn)
             if observation is not None:
                 city_ranged.district_compare_own_cities(district_shots, observation)
@@ -711,14 +1522,18 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('District-shot query and family status differ')
     if unit_work_v15:
         work_catalogue = value['unit_work']
-        work_status = 'unqualified' if work_catalogue is None else 'queried_partial'
-        if any(families.get(kind, {}).get('status') != work_status
-               for kind in unit_work.NETWORK_ACTION_FIELDS):
+        def work_status(gaps):
+            if work_catalogue is None:
+                return 'unqualified'
+            return 'queried_partial' if gaps else 'queried_complete'
+        if any(families.get(kind, {}).get('status') != work_status(gaps)
+               for kind, gaps in work_gaps.items()):
             raise ValueError('Unit-work query and family status differ')
         if work_catalogue is not None:
             if actions_closed or is_waiting(controls):
                 raise ValueError('Unit-work query requires the native acting boundary')
-            unit_work.validate_network_catalog(work_catalogue, player_id, turn, observation=observation)
+            unit_work.validate_network_catalog(work_catalogue, player_id, turn, observation=observation,
+                                               adjacent=adjacent_work)
         if work_state_v16:
             state = value['unit_work_state']
             if (state is None) != (work_catalogue is None):
@@ -734,7 +1549,7 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             if info is not None:
                 from .unit_work_info import validate as validate_work_info
                 validate_work_info(info, player_id, turn, observation=observation,
-                                   work_catalog=work_catalogue, work_state=state)
+                                   work_catalog=work_catalogue, work_state=state, visible_work=adjacent_work)
     by_family = {}
     for name, family in families.items():
         if (type(name) is not str or re.fullmatch(r'[a-z][a-z0-9_.]{0,63}', name) is None
@@ -777,17 +1592,17 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
                     raise ValueError('Unit-attack query must retain its exact unqualified routes')
                 if queues_v6 and name=='queue_append' and gaps!=list(queues.UNQUALIFIED_APPEND):
                     raise ValueError('Queue append must retain its exact unqualified branches')
-                if unit_work_v15 and name in unit_work.NETWORK_GAPS and gaps != list(unit_work.NETWORK_GAPS[name]):
+                if unit_work_v15 and name in work_gaps and gaps != list(work_gaps[name]):
                     raise ValueError('Unit-work query must retain its unqualified routes')
                 if placements_v7 and name in placement.GAPS and gaps!=list(placement.GAPS[name]):
                     raise ValueError('Placement query must retain its exact unqualified branches')
-                if policies_v25 and name == 'policies' and gaps != (
-                        ['active_policy_relocation'] if policy_unlock_v26 else
-                        ['paid_policy_unlock', 'active_policy_relocation']):
+                if policies_v25 and name == 'policies' and gaps != policy_gaps:
                     raise ValueError('Policy query must retain its exact unqualified branches')
                 if government_v27 and name == 'government' and gaps != ['anarchy_transition']:
                     raise ValueError('Government query must retain its exact unqualified branch')
-            if actions_closed or (is_waiting(controls) and not (turns_v3 and name in _CAPABILITY_TURN_KINDS)):
+            waiting_choice = (turns_v3 and name in _CAPABILITY_TURN_KINDS
+                              or spy_completion_v36 and name in spy_completion.ACTION_FIELDS)
+            if actions_closed or (is_waiting(controls) and not waiting_choice):
                 raise ValueError('Choice query requires the native acting boundary')
             by_family[name] = []
         elif status == 'unqualified':
@@ -869,6 +1684,13 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
                 from .production_inputs import validate_current
                 validate_current(current_production, player_id, turn, observation=observation,
                                  queues=value['production_queues'])
+        if xp1_production_info:
+            quotes = value['production_info']
+            if (quotes is None) != unavailable:
+                raise ValueError('Production quotes and queue catalogue availability differ')
+            if not unavailable:
+                from .production_inputs import validate_quotes
+                validate_quotes(quotes,player_id,turn,candidates=value['candidates'],observation=observation)
         for kind in queues.FIELDS:
             expected_status='unqualified' if unavailable else 'queried_partial' if kind=='queue_append' else 'queried_complete'
             if families[kind]['status']!=expected_status:
@@ -884,6 +1706,121 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         from .placement_inventory import validate as validate_inventory
         # This is an observation, independent of action availability/tracking.
         validate_inventory(value['placement_inventory'],player_id,turn,observation=observation)
+    if has_city_religion:
+        from . import city_religion
+        city_religion.validate(value['city_religion'],player_id,turn,observation=observation)
+        expected_religion_schema = (city_religion.DETAILS_SCHEMA
+            if xp1_city_religion_details or xp2_city_religion_details else city_religion.SCHEMA)
+        if value['city_religion']['schema'] != expected_religion_schema:
+            raise ValueError('City religion details require their explicit catalogue revision')
+    if has_pantheon:
+        unavailable = family_query_unavailable(value, pantheon.KIND, actions_closed=actions_closed)
+        if (value['pantheon'] is None) != unavailable:
+            raise ValueError('Pantheon query differs from its native acting boundary')
+        if value['pantheon'] is not None:
+            (pantheon.validate_state if xp2_pantheon else pantheon.validate)(value['pantheon'], player_id, turn)
+        if families.get(pantheon.KIND, {}).get('status') != (
+                'unqualified' if unavailable else 'queried_complete'):
+            raise ValueError('Pantheon family differs from its native query')
+    if has_religion_beliefs:
+        unavailable = family_query_unavailable(value, religion_beliefs.KIND, actions_closed=actions_closed)
+        if (value['religion_beliefs'] is None) != unavailable:
+            raise ValueError('Belief query differs from its native acting boundary')
+        if value['religion_beliefs'] is not None:
+            religion_beliefs.validate(value['religion_beliefs'], player_id, turn, observation=observation)
+        if families.get(religion_beliefs.KIND, {}).get('status') != (
+                'unqualified' if unavailable else 'queried_complete'):
+            raise ValueError('Belief family differs from its native query')
+    if has_religion_founding:
+        unavailable = family_query_unavailable(value, religion_founding.KIND, actions_closed=actions_closed)
+        if (value['religion_founding'] is None) != unavailable:
+            raise ValueError('Religion foundation query differs from its native acting boundary')
+        if value['religion_founding'] is not None:
+            religion_founding.validate(value['religion_founding'], player_id, turn, observation=observation)
+        family = families.get(religion_founding.KIND, {})
+        if (family.get('status') != ('unqualified' if unavailable else 'queried_partial')
+                or not unavailable and family.get('unqualified') != list(religion_founding.UNQUALIFIED)):
+            raise ValueError('Religion foundation family must retain its custom-name limit')
+    if has_great_people:
+        from . import great_people
+        unavailable = family_query_unavailable(value, 'great_people', actions_closed=actions_closed)
+        if (value['great_people'] is None) != unavailable:
+            raise ValueError('Great People query differs from its native acting boundary')
+        if value['great_people'] is not None:
+            great_people.validate(value['great_people'], player_id, turn, observation=observation)
+            expected_schema = great_people.SCHEMA_V2 if xp2_parent_schema is not None else great_people.SCHEMA
+            if value['great_people']['schema'] != expected_schema:
+                raise ValueError('Great People query schema differs from its engine')
+    if xp1_religion_custom_names:
+        unavailable = family_query_unavailable(value, religion_custom_names.KIND, actions_closed=actions_closed)
+        state = value['religion_custom_names']
+        if (state is None) != unavailable:
+            raise ValueError('Custom religion choices differ from the native query boundary')
+        if state is not None:
+            religion_custom_names.validate(state, player_id, turn, observation=observation)
+            if value['religion_founding'] is None or state['own'] != value['religion_founding']['own']:
+                raise ValueError('Custom and predefined religion foundation own states differ')
+        if families.get(religion_custom_names.KIND, {}).get('status') != (
+                'unqualified' if unavailable else 'queried_complete'):
+            raise ValueError('Custom religion family differs from its native query')
+    if has_religious_unit_operations:
+        unavailable = any(family_query_unavailable(value, kind, actions_closed=actions_closed)
+                          for kind in religious_unit_operations.KINDS)
+        if (value['religious_unit_operations'] is None) != unavailable:
+            raise ValueError('Religious unit state differs from its native query boundary')
+        if value['religious_unit_operations'] is not None:
+            religious_unit_operations.validate(value['religious_unit_operations'], player_id, turn, observation=observation)
+        if any(families.get(kind, {}).get('status') != ('unqualified' if unavailable else 'queried_complete')
+               for kind in religious_unit_operations.KINDS):
+            raise ValueError('Religious unit families differ from their native query')
+    if xp1_great_person_activation:
+        unavailable = family_query_unavailable(value, great_person_activation.KIND, actions_closed=actions_closed)
+        if (value['great_person_activation'] is None) != unavailable:
+            raise ValueError('Great Person activation differs from its native query boundary')
+        if value['great_person_activation'] is not None:
+            great_person_activation.validate(value['great_person_activation'], player_id, turn, observation=observation)
+        if families.get(great_person_activation.KIND, {}).get('status') != (
+                'unqualified' if unavailable else 'queried_complete'):
+            raise ValueError('Great Person activation family differs from its native query')
+    if has_prophet_activation:
+        unavailable = family_query_unavailable(value, prophet_activation.KIND, actions_closed=actions_closed)
+        if (value['prophet_activation'] is None) != unavailable:
+            raise ValueError('Prophet activation query differs from its native acting boundary')
+        if value['prophet_activation'] is not None:
+            prophet_activation.validate(value['prophet_activation'], player_id, turn, observation=observation)
+        if families.get(prophet_activation.KIND, {}).get('status') != (
+                'unqualified' if unavailable else 'queried_complete'):
+            raise ValueError('Prophet activation family differs from its native query')
+    if great_people_commands:
+        unavailable = family_query_unavailable(value, 'great_people', actions_closed=actions_closed)
+        if (value['great_people'] is None) != unavailable:
+            raise ValueError('Great Person commands differ from their native query boundary')
+        for kind in (great_people_actions.KINDS if great_people_reject else great_people_actions.LEGACY_KINDS):
+            if families.get(kind, {}).get('status') != (
+                    'unqualified' if unavailable else 'queried_complete'):
+                raise ValueError('Great Person command family differs from its native query')
+    if has_city_buildings:
+        buildings = city_buildings.validate(value['city_buildings'],player_id,turn,observation=observation)
+        building_version = buildings['schema']
+        if (not xp2_city_buildings and building_version in city_buildings.GREAT_WORK_SCHEMAS
+                and (building_version not in city_buildings.GREAT_WORK_OVERVIEW_SCHEMAS
+                     or (building_version == city_buildings.GREAT_WORK_OVERVIEW_SCHEMA
+                         and buildings['great_work_moves_available']))):
+            raise ValueError('Rise and Fall Great Work inventory has no admitted command route')
+        if xp2_city_buildings and building_version == city_buildings.GREAT_WORK_XP1_COMMANDS_SCHEMA:
+            raise ValueError('Great Work command panel belongs to Rise and Fall')
+    if great_work_commands:
+        kind = city_buildings.GREAT_WORK_MOVE
+        if (building_panel['great_work_moves_available']
+                and (actions_closed or is_waiting(controls) or congress_action_read_only(value, kind))):
+            raise ValueError('Great Work commands require an active player')
+        rows = [row['action'] for row in candidates
+                if type(row) is dict and type(row.get('action')) is dict and row['action'].get('kind') == kind]
+        if (families.get(kind) != _great_work_family(building_panel)
+                or rows != city_buildings.great_work_actions(building_panel)):
+            raise ValueError('Great Work choices differ from the exact panel')
+    elif city_buildings.GREAT_WORK_MOVE in families:
+        raise ValueError('Great Work commands require the Gathering Storm command panel')
     if attacks_v9:
         unavailable=actions_closed or is_waiting(controls) or value['unit_attacks'] is None
         attack_validator=attacks.validate_public_catalog if public_combat_v10 else attacks.validate_catalog
@@ -896,6 +1833,107 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
     if city_controls_v12:
         city_controls.validate_families(value,player_id,turn,observation=observation,
             unavailable=actions_closed or is_waiting(controls))
+    if has_world_score and value['world_score'] is not None:
+        from . import world_score
+        if actions_closed:
+            raise ValueError('Closed decisions cannot publish a new world score')
+        world_score.validate(value['world_score'], player_id, turn)
+    if has_archaeology:
+        if actions_closed:
+            if value['archaeology'] is not None:
+                raise ValueError('Closed decisions cannot publish archaeology')
+        else:
+            archaeology.validate(value['archaeology'], player_id, turn, observation=observation,
+                                 panel=value.get('city_buildings'))
+        if archaeology.KIND in families:
+            expected, family = _archaeology_candidates(value, actions_closed=actions_closed)
+            offered = [row for row in candidates if type(row) is dict and type(row.get('action')) is dict
+                       and row['action'].get('kind') == archaeology.KIND]
+            if offered != expected or families[archaeology.KIND] != family:
+                raise ValueError('Artifact origin choices differ from the official popup')
+        if archaeology.EXCAVATE in families:
+            rows = [row for row in candidates if type(row) is dict and type(row.get('action')) is dict
+                    and row['action'].get('kind') == archaeology.EXCAVATE]
+            for row in rows:
+                archaeology.validate_excavation(row['action'], observation=observation)
+            expected, family = _archaeology_action_rows(value, [row['action'] for row in rows], actions_closed)
+            units = [row['action']['unit_id'] for row in rows]
+            if units != sorted(set(units)) or rows != expected or families[archaeology.EXCAVATE] != family:
+                raise ValueError('Artifact excavation choices differ from their owned actor boundary')
+    elif archaeology.KIND in families or archaeology.EXCAVATE in families:
+        raise ValueError('Artifact commands require the public archaeology state')
+    if has_air:
+        rows = [row for row in candidates if type(row) is dict and type(row.get('action')) is dict
+                and row['action'].get('kind') == air_operations.KIND]
+        actions = [air_operations.validate(row['action'], observation) for row in rows]
+        keys = [(action['unit_id'], action['operation'], action['plot_id']) for action in actions]
+        expected, family = _unit_panel_rows(value, actions, actions_closed, air_operations.KIND,
+                                            gaps=['unhighlighted_click_destinations'])
+        if keys != sorted(set(keys)) or rows != expected or families[air_operations.KIND] != family:
+            raise ValueError('Air operation choices differ from their actor boundary')
+    elif air_operations.KIND in families:
+        raise ValueError('Air operations require a compatible catalogue')
+    if has_route:
+        rows = [row for row in candidates if type(row) is dict and type(row.get('action')) is dict
+                and row['action'].get('kind') == unit_work.BUILD_ROUTE]
+        actions = [unit_work.validate_route(row['action'], observation) for row in rows]
+        units = [action['unit_id'] for action in actions]
+        expected, family = _unit_panel_rows(value, actions, actions_closed, unit_work.BUILD_ROUTE)
+        if units != sorted(set(units)) or rows != expected or families[unit_work.BUILD_ROUTE] != family:
+            raise ValueError('Route construction choices differ from their actor boundary')
+    elif unit_work.BUILD_ROUTE in families:
+        raise ValueError('Build Route requires a compatible catalogue')
+    if has_park:
+        rows = [row for row in candidates if type(row) is dict and type(row.get('action')) is dict
+                and row['action'].get('kind') == national_parks.DESIGNATE]
+        actions = [row['action'] for row in rows]
+        national_parks.validate_designations(actions, observation)
+        expected, family = _unit_panel_rows(value, actions, actions_closed, national_parks.DESIGNATE)
+        if rows != expected or families[national_parks.DESIGNATE] != family:
+            raise ValueError('Park designation choices differ from their actor boundary')
+    elif national_parks.DESIGNATE in families:
+        raise ValueError('Park designation requires a compatible catalogue')
+    if has_rock_bands:
+        panel = value['rock_bands']
+        if panel is None:
+            if not actions_closed:
+                raise ValueError('Rock-band information is unavailable at an open boundary')
+            actions = []
+        else:
+            rock_bands.validate(panel, player_id, turn, observation=observation)
+            actions = rock_bands.actions(panel)
+        rows = [row for row in candidates if row['action']['kind'] == rock_bands.KIND]
+        expected, family = _unit_panel_rows(value, actions, actions_closed, rock_bands.KIND)
+        if rows != expected or families.get(rock_bands.KIND) != family:
+            raise ValueError('Concert choices differ from the native rock-band panel')
+    elif rock_bands.KIND in families:
+        raise ValueError('Rock concerts require their own public information')
+    if has_expansion_city_growth:
+        from . import city_growth
+        growth = value['city_growth']
+        if actions_closed:
+            if growth is not None:
+                raise ValueError('Closed decisions cannot publish city growth')
+        elif type(growth) is not dict or growth.get('schema') != city_growth.EXPANSION_SCHEMA:
+            raise ValueError('Expansion city growth requires the loyalty-aware panel')
+        else:
+            city_growth.validate(growth, player_id, turn, observation=observation)
+    if has_expansion_city_loyalty:
+        from . import city_loyalty
+        loyalty = value['city_loyalty']
+        if actions_closed:
+            if loyalty is not None:
+                raise ValueError('Closed decisions cannot publish city loyalty')
+        else:
+            city_loyalty.validate(loyalty, player_id, turn, observation=observation)
+    if has_expansion_national_parks:
+        from . import national_parks
+        parks = value['national_parks']
+        if actions_closed:
+            if parks is not None:
+                raise ValueError('Closed decisions cannot publish national parks')
+        else:
+            national_parks.validate(parks, player_id, turn, observation=observation)
     if promotion_v22:
         unavailable = actions_closed or is_waiting(controls)
         promotion_catalogue = value['unit_promotions']
@@ -913,6 +1951,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             raise ValueError('Upgrade family differs from its native query availability')
         if not unavailable:
             unit_upgrades.validate_catalogue(upgrade_catalogue, player_id, turn, observation=observation)
+            if xp1_upgrade and any(row['resource_type'] is not None for row in upgrade_catalogue['offers']):
+                raise ValueError('Rise and Fall upgrade catalogue cannot contain Gathering Storm stockpile amounts')
     if policies_v25:
         unavailable = family_query_unavailable(value, 'policies', actions_closed=actions_closed)
         if families.get('policies', {}).get('status') != (
@@ -952,13 +1992,8 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         if family_kind not in by_family or (set(action) != action_fields[kind] and not city_purchase):
             raise ValueError('Action has no completed qualified family query')
         if kind == 'found_city':
-            for key, maximum in (('unit_id', 0xffffffff), ('x', 65535), ('y', 65535)):
-                if type(action[key]) is not int or not 0 <= action[key] <= maximum:
-                    raise ValueError('Malformed foundation action')
-            if own_units is not None:
-                unit = own_units.get(action['unit_id'])
-                if unit is None or (unit['x'], unit['y']) != (action['x'], action['y']):
-                    raise ValueError('Foundation action differs from its own-unit observation')
+            from .capability_choices import validate_founder_action
+            validate_founder_action(action, own_units)
         elif world_v4 and kind in world.WORLD_KINDS:
             world.validate_action(action, width=value['world_input']['width'],
                                   height=value['world_input']['height'])
@@ -978,10 +2013,40 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             city_ranged.city_validate_action(action, shots['width'], shots['height'])
         elif district_shot_v14 and kind == 'district_range_attack':
             city_ranged.district_validate_action(action, district_shots['width'], district_shots['height'])
-        elif unit_work_v15 and kind in unit_work.NETWORK_ACTION_FIELDS:
+        elif unit_work_v15 and kind in work_fields:
             unit_work.validate_action(action)
         elif purchase_v20 and kind == 'purchase':
             plot_purchases.validate_purchase_action(action, allow_faith=faith_purchase_v30)
+        elif has_pantheon and kind == pantheon.KIND:
+            pantheon.validate_action(action)
+        elif has_religion_beliefs and kind == religion_beliefs.KIND:
+            religion_beliefs.validate_action(action)
+        elif has_religion_founding and kind == religion_founding.KIND:
+            religion_founding.validate_action(action)
+        elif xp1_religion_custom_names and kind == religion_custom_names.KIND:
+            religion_custom_names.validate_template(action)
+        elif xp1_great_person_activation and kind == great_person_activation.KIND:
+            great_person_activation.validate_action(action)
+        elif has_religious_unit_operations and kind in religious_unit_operations.KINDS:
+            religious_unit_operations.validate_action(action)
+        elif has_prophet_activation and kind == prophet_activation.KIND:
+            prophet_activation.validate_action(action)
+        elif great_people_commands and kind in great_people_actions.KINDS:
+            great_people_actions.validate_action(action)
+        elif great_work_commands and kind == city_buildings.GREAT_WORK_MOVE:
+            city_buildings.validate_great_work_action(action)
+        elif has_archaeology and kind == archaeology.KIND:
+            archaeology.validate_action(action)
+        elif has_archaeology and kind == archaeology.EXCAVATE:
+            archaeology.validate_excavation(action, observation=observation)
+        elif has_air and kind == air_operations.KIND:
+            air_operations.validate(action, observation)
+        elif has_route and kind == unit_work.BUILD_ROUTE:
+            unit_work.validate_route(action, observation)
+        elif has_park and kind == national_parks.DESIGNATE:
+            national_parks.validate_designation(action, observation)
+        elif has_rock_bands and kind == rock_bands.KIND:
+            rock_bands.validate_action(action, observation)
         elif promotion_v22 and kind == 'promote_unit':
             unit_promotions.validate_action(action)
         elif upgrade_v23 and kind == 'upgrade_unit':
@@ -998,13 +2063,15 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
             pass
         elif envoys_v31 and kind in envoys.ACTION_FIELDS:
             envoys.validate_action(action)
+        elif has_city_state_levies and kind == city_state_levies.ACTION:
+            city_state_levies.validate_action(action)
         elif governors_v32 and kind in governors.ACTION_FIELDS:
             governors.validate_action(action)
         elif initial_diplomacy_v33 and kind == 'diplomacy_initiate':
             initial_diplomacy.validate_action(action)
-        elif xp2_trade_v34 and kind == 'make_trade_route':
+        elif has_trade and kind == 'make_trade_route':
             trade.validate_route_action(action, value['trade_routes']['width'], value['trade_routes']['height'])
-        elif xp2_trade_v34 and kind == 'change_trade_origin':
+        elif has_trade and kind == 'change_trade_origin':
             trade.validate_origin_action(action, value['trade_origins']['width'], value['trade_origins']['height'])
         elif espionage_v35 and kind in espionage.ACTION_FIELDS:
             espionage.validate_action(action, espionage_catalogue['width'], espionage_catalogue['height'])
@@ -1096,7 +2163,7 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         expected = [] if diplomacy_catalogue is None else initial_diplomacy.candidates(diplomacy_catalogue)
         if offered != expected:
             raise ValueError('Initial diplomacy candidates differ from their exact public catalogue')
-    if xp2_trade_v34:
+    if has_trade:
         from . import trade
         for kind, expected in (
                 ('make_trade_route', [] if value['trade_routes'] is None else trade.route_actions(value['trade_routes'])),
@@ -1120,10 +2187,52 @@ def validate_capability_catalogue(value, identity, sequence, turn, *, player_id,
         offered = [row['action'] for row in candidates if row['action']['kind'] in envoys.ACTION_FIELDS]
         if offered != envoys.actions(envoy_catalogue):
             raise ValueError('Envoy candidates differ from their native query')
+    if has_city_state_levies:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == city_state_levies.ACTION]
+        if offered != city_state_levies.actions(levies):
+            raise ValueError('Military levy candidates differ from their native query')
     if unit_work_v15:
-        offered = [row['action'] for row in candidates if row['action']['kind'] in unit_work.NETWORK_ACTION_FIELDS]
+        offered = [row['action'] for row in candidates if row['action']['kind'] in work_fields]
         if offered != ([] if work_catalogue is None else unit_work.actions(work_catalogue)):
             raise ValueError('Unit-work candidates differ from their native catalogue')
+    if has_pantheon:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == pantheon.KIND]
+        if offered != (pantheon.state_actions if xp2_pantheon else pantheon.actions)(value['pantheon']):
+            raise ValueError('Pantheon candidates differ from the exact native choices')
+    if has_religion_beliefs:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == religion_beliefs.KIND]
+        if offered != religion_beliefs.actions(value['religion_beliefs']):
+            raise ValueError('Belief candidates differ from the exact native choices')
+    if has_religion_founding:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == religion_founding.KIND]
+        if offered != religion_founding.actions(value['religion_founding']):
+            raise ValueError('Religion foundation candidates differ from the exact native choices')
+    if xp1_religion_custom_names:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == religion_custom_names.KIND]
+        if offered != religion_custom_names.actions(value['religion_custom_names']):
+            raise ValueError('Custom religion candidates differ from the exact native icons')
+    if has_religious_unit_operations:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in religious_unit_operations.KINDS]
+        if offered != religious_unit_operations.actions(value['religious_unit_operations']):
+            raise ValueError('Religious unit candidates differ from the exact native UI offers')
+    if xp1_great_person_activation:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == great_person_activation.KIND]
+        if offered != great_person_activation.actions(value['great_person_activation']):
+            raise ValueError('Great Person activation candidates differ from the exact native flags')
+    if has_prophet_activation:
+        offered = [row['action'] for row in candidates if row['action']['kind'] == prophet_activation.KIND]
+        if offered != prophet_activation.actions(value['prophet_activation']):
+            raise ValueError('Prophet activation candidates differ from the exact native choices')
+    if great_people_commands:
+        offered = [row['action'] for row in candidates if row['action']['kind'] in great_people_actions.LEGACY_KINDS]
+        if offered != great_people_actions.actions(value['great_people']):
+            raise ValueError('Great Person candidates differ from the exact native offers and costs')
+        if great_people_reject:
+            offered = [row['action'] for row in candidates if row['action']['kind'] == great_people_actions.REJECT]
+            expected = [action for action in great_people_actions.actions(value['great_people'], include_reject=True)
+                        if action['kind'] == great_people_actions.REJECT]
+            if offered != expected:
+                raise ValueError('Great Person rejection candidates differ from the exact native offers and costs')
     if purchase_v20:
         offered = [row['action'] for row in candidates if row['action']['kind'] == 'purchase']
         expected = [] if purchases is None else plot_purchases.actions(purchases)
@@ -1180,17 +2289,21 @@ def upgrade_spy_completion_catalogue(value, spy_completion, observation=None):
     from . import spy_completion as completion_contract
     if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_ESPIONAGE_SCHEMA:
         raise ValueError('Spy completion requires the complete XP2 v35 query group')
-    unavailable = value.get('espionage') is None
-    if (spy_completion is None) != unavailable:
-        raise ValueError('Spy completion query differs from its native acting boundary')
+    espionage_available = value.get('espionage') is not None
+    waiting = is_waiting(value['turn_controls'])
+    if ((spy_completion is None and espionage_available)
+            or (spy_completion is not None and not espionage_available and not waiting)):
+        raise ValueError('Spy completion query differs from its session boundary')
     if spy_completion is not None:
         completion_contract.validate_catalogue(spy_completion, value['player_id'], value['turn'])
+        if waiting and spy_completion['current'] is None:
+            raise ValueError('Waiting spy completion requires a native occurrence')
         if observation is not None:
             completion_contract.compare_own(spy_completion, observation)
     result = copy.deepcopy(value)
     result['schema'] = CAPABILITY_XP2_SPY_COMPLETION_SCHEMA
     result['spy_completion'] = copy.deepcopy(spy_completion)
-    if not unavailable:
+    if espionage_available:
         for kind in espionage.ACTION_FIELDS:
             family = result['families'][kind]
             if (family.get('status') != 'queried_partial'
@@ -1203,7 +2316,7 @@ def upgrade_spy_completion_catalogue(value, spy_completion, observation=None):
     for kind in completion_contract.ACTION_FIELDS:
         result['families'][kind] = (
             dict(status='unqualified', reason='native_spy_completion_acting_boundary_unavailable')
-            if unavailable else dict(status='queried_partial', candidate_ids=[
+            if spy_completion is None else dict(status='queried_partial', candidate_ids=[
                 row['candidate_id'] for row in rows if row['action']['kind'] == kind],
                 unqualified=list(SPY_COMPLETION_GAPS)))
     result.pop('decision_id', None)
@@ -1236,12 +2349,7 @@ def upgrade_world_congress_catalogue(value, congress, observation=None, *, stock
     if stock:
         result['native_command_permissions'] = copy.deepcopy(stock_permissions)
     result['world_congress'] = copy.deepcopy(congress)
-    removed = {row['candidate_id'] for row in result['candidates']
-               if congress_action_read_only(result, row['action']['kind'])}
-    result['candidates'] = [row for row in result['candidates'] if row['candidate_id'] not in removed]
-    for family in result['families'].values():
-        if 'candidate_ids' in family:
-            family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
+    _remove_congress_read_only_candidates(result)
     rows = [dict(candidate_id=digest(action), action=action) for action in world_congress.actions(congress)]
     result['candidates'].extend(rows)
     for kind in world_congress.CANDIDATE_FIELDS:
@@ -1322,11 +2430,16 @@ def upgrade_active_effects_catalogue(value, effects, observation=None, *, status
 def upgrade_trade_overview_catalogue(value, panel, *, observation, status):
     """Add only the new public information group to a current decision."""
     from . import trade_overview
-    if type(value) is not dict or value.get('schema') != CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA:
-        raise ValueError('Trade overview requires the current v40 query group')
-    trade_overview.validate_group(panel, status, value, observation)
+    base = value.get('schema') if type(value) is dict else None
+    if base == CAPABILITY_XP1_TRADE_SCHEMA:
+        schema, profile = CAPABILITY_XP1_TRADE_OVERVIEW_SCHEMA, trade_overview.STOCK_PROFILE
+    elif base == CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA:
+        schema, profile = CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA, trade_overview.PROFILE
+    else:
+        raise ValueError('Trade overview requires its current trade query group')
+    trade_overview.validate_group(panel, status, value, observation, profile=profile)
     result = copy.deepcopy(value)
-    result['schema'] = CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA
+    result['schema'] = schema
     result['trade_overview'] = copy.deepcopy(panel)
     result['trade_overview_status'] = status
     result.pop('decision_id')
@@ -1335,15 +2448,17 @@ def upgrade_trade_overview_catalogue(value, panel, *, observation, status):
 
 
 def upgrade_captured_city_catalogue(value, occupation, *, actions_closed):
-    """Extend the current XP2 view with the native pending city and its directives."""
+    """Extend the selected expansion view with the native pending city."""
     from . import captured_city
     base_schema = value['schema']
-    if base_schema == CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA:
+    if base_schema == CAPABILITY_COMBAT_READINESS_SCHEMA:
+        schema = CAPABILITY_XP1_CAPTURED_CITY_SCHEMA
+    elif base_schema == CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA:
         schema = CAPABILITY_XP2_CAPTURED_CITY_SCHEMA
     else:
         schema = _STOCK_CAPTURE_SCHEMA_BY_BASE.get(base_schema)
         if schema is None:
-            raise ValueError('Captured city requires a supported XP2 query group')
+            raise ValueError('Captured city requires a supported expansion query group')
     result = copy.deepcopy(value)
     result['schema'] = schema
     result['captured_city'] = copy.deepcopy(occupation)
@@ -1357,7 +2472,495 @@ def upgrade_captured_city_catalogue(value, occupation, *, actions_closed):
         family = dict(status='queried_complete',
                       candidate_ids=[row['candidate_id'] for row in candidates])
     result['families'][captured_city.KIND] = family
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_xp1_city_shot_catalogue(value, shots):
+    """Add city-center fire to the installed Rise and Fall occupation view."""
+    from .city_ranged import city_actions
+
+    return _upgrade_xp1_shot_catalogue(value, shots, CAPABILITY_XP1_CITY_SHOT_SCHEMA, city_actions)
+
+
+def upgrade_xp1_district_shot_catalogue(value, shots):
+    """Add independent district fire to the Rise and Fall city-center view."""
+    from .city_ranged import district_actions
+
+    return _upgrade_xp1_shot_catalogue(value, shots, CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA, district_actions)
+
+
+def upgrade_xp1_governor_catalogue(value, catalogue):
+    """Add the installed Rise and Fall governor panel to its decision view."""
+    from . import governors
+
+    if value['schema'] != CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA:
+        raise ValueError('Rise and Fall governors require its current district catalogue')
+    result = copy.deepcopy(value)
+    result['schema'] = CAPABILITY_XP1_GOVERNORS_SCHEMA
+    result['governors'] = copy.deepcopy(catalogue)
+    rows = [dict(candidate_id=digest(action), action=action) for action in governors.actions(catalogue)]
+    result['candidates'].extend(rows)
+    for kind in governors.ACTION_FIELDS:
+        result['families'][kind] = (
+            dict(status='queried_complete',
+                 candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind])
+            if catalogue is not None else
+            dict(status='unqualified', reason='native_governor_acting_boundary_unavailable'))
+    result.pop('decision_id', None)
+    result['decision_id'] = digest(result)
+    return result
+
+
+def upgrade_xp1_city_state_envoys_catalogue(value, influence):
+    """Add the read-only native count to the existing Rise and Fall choices."""
+    if value['schema'] != CAPABILITY_XP1_GOVERNORS_SCHEMA:
+        raise ValueError('Rise and Fall city-state envoys require its governor catalogue')
+    result = dict(value, schema=CAPABILITY_XP1_CITY_STATE_ENVOYS_SCHEMA,
+                  city_state_envoys=copy.deepcopy(influence))
     del result['decision_id']
+    result['decision_id'] = digest(result)
+    return result
+
+
+def add_envoy_choices(value, catalogue, *, actions_closed):
+    """Add native envoy actions to the catalogue being built by the saved owner."""
+    from . import envoys
+
+    value['envoys'] = catalogue
+    rows = [dict(candidate_id=digest(action), action=action) for action in envoys.actions(catalogue)]
+    value['candidates'].extend(rows)
+    for kind in envoys.ACTION_FIELDS:
+        value['families'][kind] = (
+            dict(status='queried_complete',
+                 candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind])
+            if catalogue is not None else
+            dict(status='unqualified', reason=(
+                'session_closed' if actions_closed else 'native_envoy_acting_boundary_unavailable')))
+
+
+def add_xp1_city_state_levies(value, catalogue):
+    if value['schema'] != CAPABILITY_XP1_ENVOY_CHOICES_SCHEMA:
+        raise ValueError('Military levies require the preceding Rise and Fall catalogue')
+    value['schema'] = CAPABILITY_XP1_CITY_STATE_LEVIES_SCHEMA
+    _add_city_state_levies(value, catalogue)
+
+
+def add_xp2_levies(value, catalogue, unit_flags):
+    base = value['schema']
+    if base not in _XP2_LEVY_SCHEMA_BY_BASE:
+        raise ValueError('Military levies require a Gathering Storm catalogue with envoys')
+    value['schema'] = _XP2_LEVY_SCHEMA_BY_BASE[base]
+    _add_city_state_levies(value, catalogue)
+    value['unit_levies'] = unit_flags
+
+
+def _add_city_state_levies(value, catalogue):
+    from . import city_state_levies
+
+    value['city_state_levies'] = catalogue
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in city_state_levies.actions(catalogue)]
+    value['candidates'].extend(rows)
+    value['families'][city_state_levies.ACTION] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if catalogue is not None else
+        dict(status='unqualified', reason='native_levy_acting_boundary_unavailable'))
+
+
+def add_xp1_pantheon(value, catalogue, *, actions_closed=False):
+    from . import pantheon
+
+    schema = XP1_PANTHEON_SCHEMA_BY_BASE.get(value.get('schema'))
+    if (schema is None or 'pantheon' in value or pantheon.KIND in value['families']):
+        raise ValueError('Pantheon requires its preceding Rise and Fall catalogue')
+    unavailable = family_query_unavailable(value, pantheon.KIND, actions_closed=actions_closed)
+    if (catalogue is None) != unavailable:
+        raise ValueError('Pantheon query differs from its native acting boundary')
+    if catalogue is not None:
+        pantheon.validate(catalogue, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in pantheon.actions(catalogue)]
+    value['schema'] = schema
+    value['pantheon'] = copy.deepcopy(catalogue)
+    value['candidates'].extend(rows)
+    value['families'][pantheon.KIND] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_pantheon_acting_boundary_unavailable'))
+
+
+def add_xp2_pantheon(value, state, *, actions_closed=False):
+    from . import pantheon
+
+    schema = XP2_PANTHEON_SCHEMA_BY_BASE.get(value.get('schema'))
+    if (schema is None or 'pantheon' in value or pantheon.KIND in value['families']):
+        raise ValueError('Pantheon requires its preceding Gathering Storm state')
+    unavailable = family_query_unavailable(value, pantheon.KIND, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Pantheon query differs from its native acting boundary')
+    if state is not None:
+        pantheon.validate_state(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in pantheon.state_actions(state)]
+    value['schema'] = schema
+    value['pantheon'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][pantheon.KIND] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_pantheon_acting_boundary_unavailable'))
+
+
+def add_xp1_religion_beliefs(value, state, *, actions_closed=False):
+    return _add_religion_beliefs(value, state, XP1_RELIGION_BELIEFS_SCHEMA_BY_BASE,
+        'Rise and Fall', actions_closed=actions_closed)
+
+
+def add_xp2_religion_beliefs(value, state, *, actions_closed=False):
+    return _add_religion_beliefs(value, state, XP2_RELIGION_BELIEFS_SCHEMA_BY_BASE,
+        'Gathering Storm', actions_closed=actions_closed)
+
+
+def _add_religion_beliefs(value, state, schemas, engine, *, actions_closed):
+    from . import religion_beliefs
+
+    schema = schemas.get(value.get('schema'))
+    if (schema is None or 'religion_beliefs' in value or religion_beliefs.KIND in value['families']):
+        raise ValueError('Belief requires its preceding ' + engine + ' state')
+    unavailable = family_query_unavailable(value, religion_beliefs.KIND, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Belief query differs from its native acting boundary')
+    if state is not None:
+        religion_beliefs.validate(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in religion_beliefs.actions(state)]
+    value['schema'] = schema
+    value['religion_beliefs'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][religion_beliefs.KIND] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_religion_beliefs_acting_boundary_unavailable'))
+
+
+def add_xp1_religion_founding(value, state, *, actions_closed=False):
+    return _add_religion_founding(value, state, XP1_RELIGION_FOUNDING_SCHEMA_BY_BASE,
+        'Rise and Fall', actions_closed=actions_closed)
+
+
+def add_xp2_religion_founding(value, state, *, actions_closed=False):
+    return _add_religion_founding(value, state, XP2_RELIGION_FOUNDING_SCHEMA_BY_BASE,
+        'Gathering Storm', actions_closed=actions_closed)
+
+
+def _add_religion_founding(value, state, schemas, engine, *, actions_closed):
+    from . import religion_founding
+
+    schema = schemas.get(value.get('schema'))
+    if (schema is None or 'religion_founding' in value or religion_founding.KIND in value['families']):
+        raise ValueError('Religion foundation requires its preceding ' + engine + ' state')
+    unavailable = family_query_unavailable(value, religion_founding.KIND, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Religion foundation query differs from its native acting boundary')
+    if state is not None:
+        religion_founding.validate(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in religion_founding.actions(state)]
+    value['schema'] = schema
+    value['religion_founding'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][religion_founding.KIND] = (
+        dict(status='queried_partial', candidate_ids=[row['candidate_id'] for row in rows],
+             unqualified=list(religion_founding.UNQUALIFIED))
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_religion_founding_acting_boundary_unavailable'))
+
+
+def add_xp1_great_people(value, state, *, actions_closed=False):
+    return _add_great_people(value, state, XP1_GREAT_PEOPLE_SCHEMA_BY_BASE,
+                             'Rise and Fall', actions_closed=actions_closed)
+
+
+def add_xp2_great_people(value, state, *, actions_closed=False):
+    return _add_great_people(value, state, XP2_GREAT_PEOPLE_SCHEMA_BY_BASE,
+                             'Gathering Storm', actions_closed=actions_closed)
+
+
+def _add_great_people(value, state, schemas, engine, *, actions_closed):
+    from . import great_people
+
+    schema = schemas.get(value.get('schema'))
+    if schema is None or 'great_people' in value:
+        raise ValueError(f'Great People query requires its preceding {engine} state')
+    unavailable = family_query_unavailable(value, 'great_people', actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Great People query differs from its native acting boundary')
+    projected = None if state is None else great_people.project(state, value['player_id'], value['turn'])
+    value['schema'] = schema
+    value['great_people'] = projected
+
+
+def add_xp1_prophet_activation(value, state, *, actions_closed=False):
+    return _add_prophet_activation(value, state, XP1_PROPHET_ACTIVATION_SCHEMA_BY_BASE,
+        'Rise and Fall', actions_closed=actions_closed)
+
+
+def add_xp2_prophet_activation(value, state, *, actions_closed=False):
+    return _add_prophet_activation(value, state, XP2_PROPHET_ACTIVATION_SCHEMA_BY_BASE,
+        'Gathering Storm', actions_closed=actions_closed)
+
+
+def _add_prophet_activation(value, state, schemas, engine, *, actions_closed):
+    from . import prophet_activation
+
+    schema = schemas.get(value.get('schema'))
+    if (schema is None or 'prophet_activation' in value or prophet_activation.KIND in value['families']):
+        raise ValueError('Prophet activation requires its preceding ' + engine + ' state')
+    unavailable = family_query_unavailable(value, prophet_activation.KIND, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Prophet activation query differs from its native acting boundary')
+    if state is not None:
+        prophet_activation.validate(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in prophet_activation.actions(state)]
+    value['schema'] = schema
+    value['prophet_activation'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][prophet_activation.KIND] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_prophet_activation_acting_boundary_unavailable'))
+
+
+def add_xp1_great_people_actions(value, *, actions_closed=False):
+    _add_great_people_actions(value, XP1_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE, 'Rise and Fall',
+                              include_reject=False, actions_closed=actions_closed)
+
+
+def add_xp2_great_people_actions(value, *, actions_closed=False):
+    _add_great_people_actions(value, XP2_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE, 'Gathering Storm',
+                              include_reject=True, actions_closed=actions_closed)
+
+
+def _add_great_people_actions(value, schemas, engine, *, include_reject, actions_closed):
+    from . import great_people_actions
+
+    schema = schemas.get(value.get('schema'))
+    if (schema is None or 'great_people' not in value
+            or any(kind in value['families'] for kind in great_people_actions.KINDS)):
+        raise ValueError(f'Great Person commands require their preceding {engine} query')
+    unavailable = family_query_unavailable(value, 'great_people', actions_closed=actions_closed)
+    state = value['great_people']
+    if (state is None) != unavailable:
+        raise ValueError('Great Person commands differ from their native query boundary')
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in great_people_actions.actions(state, include_reject=include_reject)]
+    value['schema'] = schema
+    value['candidates'].extend(rows)
+    for kind in (great_people_actions.KINDS if include_reject else great_people_actions.LEGACY_KINDS):
+        value['families'][kind] = (
+            dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind']==kind])
+            if not unavailable else
+            dict(status='unqualified', reason='session_closed' if actions_closed else 'native_great_people_acting_boundary_unavailable'))
+
+
+def add_xp1_great_people_reject(value, *, actions_closed=False):
+    from . import great_people_actions
+
+    schema = XP1_GREAT_PEOPLE_REJECT_SCHEMA_BY_BASE.get(value.get('schema'))
+    kind = great_people_actions.REJECT
+    if (schema is None or 'great_people' not in value or kind in value['families']
+            or any(legacy not in value['families'] for legacy in great_people_actions.LEGACY_KINDS)):
+        raise ValueError('Great Person rejection requires the preceding Rise and Fall commands')
+    unavailable = family_query_unavailable(value, 'great_people', actions_closed=actions_closed)
+    state = value['great_people']
+    if (state is None) != unavailable:
+        raise ValueError('Great Person rejection differs from its native query boundary')
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in great_people_actions.actions(state, include_reject=True) if action['kind'] == kind]
+    value['schema'] = schema
+    value['candidates'].extend(rows)
+    value['families'][kind] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_great_people_acting_boundary_unavailable'))
+
+
+def add_xp1_religion_custom_names(value, state, *, actions_closed=False):
+    from . import religion_custom_names
+
+    schema = XP1_RELIGION_CUSTOM_NAMES_SCHEMA_BY_BASE.get(value.get('schema'))
+    kind = religion_custom_names.KIND
+    if (schema is None or 'religion_founding' not in value
+            or 'religion_custom_names' in value or kind in value['families']):
+        raise ValueError('Custom religion names require preceding Rise and Fall foundation choices')
+    unavailable = family_query_unavailable(value, kind, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Custom religion names differ from their native query boundary')
+    if state is not None:
+        religion_custom_names.validate(state, value['player_id'], value['turn'])
+        if value['religion_founding'] is None or state['own'] != value['religion_founding']['own']:
+            raise ValueError('Custom and predefined religion foundation own states differ')
+    rows = [dict(candidate_id=digest(action), action=action) for action in religion_custom_names.actions(state)]
+    value['schema'] = schema
+    value['religion_custom_names'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][kind] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_religion_custom_names_acting_boundary_unavailable'))
+
+
+def add_xp1_great_person_activation(value, state, *, actions_closed=False):
+    return _add_great_person_activation(value, state, XP1_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE,
+                                        actions_closed=actions_closed)
+
+
+def add_xp2_great_person_activation(value, state, *, actions_closed=False):
+    return _add_great_person_activation(value, state, XP2_GREAT_PERSON_ACTIVATION_SCHEMA_BY_BASE,
+                                        actions_closed=actions_closed)
+
+
+def _add_great_person_activation(value, state, schema_map, *, actions_closed):
+    from . import great_person_activation
+
+    schema = schema_map.get(value.get('schema'))
+    kind = great_person_activation.KIND
+    if schema is None or 'great_person_activation' in value or kind in value['families']:
+        raise ValueError('Great Person activation requires its preceding expansion public queries')
+    unavailable = family_query_unavailable(value, kind, actions_closed=actions_closed)
+    if (state is None) != unavailable:
+        raise ValueError('Great Person activation differs from its native query boundary')
+    if state is not None:
+        great_person_activation.validate(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in great_person_activation.actions(state)]
+    value['schema'] = schema
+    value['great_person_activation'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    value['families'][kind] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if not unavailable else
+        dict(status='unqualified', reason='session_closed' if actions_closed else 'native_great_person_activation_acting_boundary_unavailable'))
+
+
+def _xp2_great_person_projection(value, *, observation, actions_closed):
+    from . import great_person_activation
+
+    kind = great_person_activation.KIND
+    if (type(value.get('families')) is not dict or type(value.get('candidates')) is not list
+            or 'great_person_activation' not in value or kind not in value['families']
+            or any(type(row) is not dict or type(row.get('action')) is not dict
+                   for row in value['candidates'])):
+        raise ValueError('Malformed Gathering Storm activation catalogue')
+    old = dict(value, schema=xp2_great_person_base_schema(value['schema']),
+               candidates=[row for row in value['candidates'] if row['action'].get('kind') != kind],
+               families={k: row for k, row in value['families'].items() if k != kind})
+    state = old.pop('great_person_activation')
+    if state is not None:
+        great_person_activation.validate(state, value['player_id'], value['turn'], observation=observation)
+    for row in value['candidates']:
+        if row['action'].get('kind') == kind:
+            great_person_activation.validate_action(row['action'])
+    expected = dict(old, candidates=list(old['candidates']), families=dict(old['families']))
+    add_xp2_great_person_activation(expected, state, actions_closed=actions_closed)
+    # Optional UnitPanel families can append choices after this overlay.
+    # Preserve their placement while checking the exact activation row order.
+    actual_rows = [row for row in value['candidates'] if row['action']['kind'] == kind]
+    expected_rows = [row for row in expected['candidates'] if row['action']['kind'] == kind]
+    if actual_rows != expected_rows:
+        raise ValueError('Gathering Storm activation rows differ from their native choices')
+    expected['candidates'] = list(value['candidates'])
+    expected.pop('decision_id', None)
+    expected['decision_id'] = digest(expected)
+    if expected != value or value.get('decision_id') != digest({k: v for k, v in value.items() if k != 'decision_id'}):
+        raise ValueError('Gathering Storm activation choices or public decision identity differ')
+    old.pop('decision_id', None)
+    old['decision_id'] = digest(old)
+    return old
+
+
+def add_xp1_city_religion_details(value, state):
+    """Upgrade own religious information without changing existing choices."""
+    from . import city_religion
+    schema = XP1_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE.get(value.get('schema'))
+    if schema is None or 'city_religion' not in value:
+        raise ValueError('City religion details require their exact preceding revision')
+    city_religion.validate_details(state, value['player_id'], value['turn'])
+    if city_religion.project_majority(state, value['player_id'], value['turn']) != value['city_religion']:
+        raise ValueError('City religion details changed the existing majority readback')
+    value['schema'] = schema
+    value['city_religion'] = copy.deepcopy(state)
+    value.pop('decision_id',None)
+    value['decision_id'] = digest(value)
+    return value
+
+
+def add_xp2_city_religion_details(value, state):
+    """Own-city observation; no action permission or strategic choice filter."""
+    from . import city_religion
+    schema = XP2_CITY_RELIGION_DETAILS_SCHEMA_BY_BASE.get(value.get('schema'))
+    if schema is None or 'city_religion' in value:
+        raise ValueError('City religion requires its preceding Gathering Storm catalogue')
+    city_religion.validate_details(state,value['player_id'],value['turn'])
+    value['schema'] = schema
+    value['city_religion'] = copy.deepcopy(state)
+    value.pop('decision_id',None)
+    value['decision_id'] = digest(value)
+    return value
+
+
+def add_xp1_religious_unit_operations(value, state, *, actions_closed=False):
+    return _add_religious_unit_operations(value, state, XP1_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE,
+                                         'Rise and Fall', actions_closed=actions_closed)
+
+
+def add_xp2_religious_unit_operations(value, state, *, actions_closed=False):
+    return _add_religious_unit_operations(value, state, XP2_RELIGIOUS_UNIT_OPERATIONS_SCHEMA_BY_BASE,
+                                         'Gathering Storm', actions_closed=actions_closed)
+
+
+def _add_religious_unit_operations(value, state, schemas, engine, *, actions_closed):
+    from . import religious_unit_operations
+
+    kinds = religious_unit_operations.KINDS
+    schema = schemas.get(value.get('schema'))
+    if schema is None or 'religious_unit_operations' in value or any(kind in value['families'] for kind in kinds):
+        raise ValueError('Religious units require preceding ' + engine + ' public queries')
+    unavailable = any(family_query_unavailable(value, kind, actions_closed=actions_closed) for kind in kinds)
+    if (state is None) != unavailable:
+        raise ValueError('Religious units differ from their native query boundary')
+    if state is not None:
+        religious_unit_operations.validate(state, value['player_id'], value['turn'])
+    rows = [dict(candidate_id=digest(action), action=action) for action in religious_unit_operations.actions(state)]
+    value['schema'] = schema
+    value['religious_unit_operations'] = copy.deepcopy(state)
+    value['candidates'].extend(rows)
+    for kind in kinds:
+        value['families'][kind] = (
+            dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind])
+            if not unavailable else
+            dict(status='unqualified', reason='session_closed' if actions_closed else 'native_religious_unit_operations_acting_boundary_unavailable'))
+
+
+def add_xp1_unit_levies(value, flags):
+    if value['schema'] != CAPABILITY_XP1_CITY_STATE_LEVIES_SCHEMA:
+        raise ValueError('Unit levy flags require the preceding Rise and Fall catalogue')
+    value['schema'] = CAPABILITY_XP1_UNIT_LEVIES_SCHEMA
+    value['unit_levies'] = flags
+
+
+def _upgrade_xp1_shot_catalogue(value, shots, schema, actions):
+    base, field, kind = _XP1_SHOT_TRANSITIONS[schema]
+    if value['schema'] != base:
+        raise ValueError(f'Rise and Fall {field} requires its preceding catalogue')
+    result = copy.deepcopy(value)
+    result['schema'] = schema
+    result[field] = copy.deepcopy(shots)
+    rows = [dict(candidate_id=digest(action), action=action)
+            for action in actions(shots)] if shots is not None else []
+    result['candidates'].extend(rows)
+    result['families'][kind] = (
+        dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+        if shots is not None else dict(status='unqualified',
+            reason=f"native_{field.removesuffix('s')}_acting_boundary_unavailable"))
+    result.pop('decision_id', None)
     result['decision_id'] = digest(result)
     return result
 
@@ -1374,17 +2977,28 @@ def select_capability(value, selection):
                if row['candidate_id'] == selection['candidate_id']]
     if len(matches) != 1:
         raise ValueError('Choice is absent from the completed family queries')
+    schema = xp2_great_person_base_schema(value['schema'])
     if (type(matches[0].get('kind')) is str and matches[0].get('kind').startswith('congress_')):
         from . import world_congress
-        if value.get('schema') not in WORLD_CONGRESS_CAPABILITY_SCHEMAS:
+        borrowed_congress = schema in _SECONDARY_UNIT_SCHEMAS and 'world_congress_review' in value
+        if schema not in WORLD_CONGRESS_CAPABILITY_SCHEMAS and not borrowed_congress:
             raise ValueError('Congress requires its explicit capability revision')
         has_parameters = matches[0]['kind'] in world_congress.PARAMETER_FIELDS
         if ('parameters' in selection) != has_parameters:
             raise ValueError('Congress selection parameters differ from its operation')
         return world_congress.choose(value['world_congress'], matches[0], selection.get('parameters'))
+    if matches[0].get('kind') == 'found_custom_religion':
+        from . import religion_custom_names
+        if schema not in XP1_RELIGION_CUSTOM_NAMES_SCHEMAS:
+            raise ValueError('Custom religion names require their explicit capability revision')
+        state = value['religion_custom_names']
+        if state is None or ('parameters' in selection) != state['rename_allowed']:
+            raise ValueError('Custom religion parameters differ from the native rename capability')
+        return religion_custom_names.choose(state, matches[0], selection.get('parameters'))
     if matches[0].get('kind') == 'confirm_dedications':
         from . import dedications
-        if value['schema'] not in STOCK_DEDICATION_SCHEMAS:
+        if (schema not in DEDICATION_SCHEMAS
+                and not (schema in _SECONDARY_UNIT_SCHEMAS and 'dedications' in value)):
             raise ValueError('Dedications require their explicit capability revision')
         return dedications.choose(value['dedications'], matches[0], selection.get('parameters'))
     if matches[0].get('kind') == 'policies':
@@ -1396,14 +3010,781 @@ def select_capability(value, selection):
         from . import policies
         candidate = policies.choose(matches[0]['slots'], parameters['assignments'],
                                     value['player_id'], value['turn'],
-                                    allow_relocation=(
-                                        _capability_version(value['schema']) >= 28),
-                                    allow_unchanged=(
-                                        _capability_version(value['schema']) >= 29))
+                                    allow_relocation=schema in POLICY_RELOCATION_CAPABILITY_SCHEMAS,
+                                    allow_unchanged=schema in POLICY_RECONFIRM_CAPABILITY_SCHEMAS)
         return dict(kind='policies', candidate=candidate)
     if set(selection) != {'decision_id', 'candidate_id'}:
         raise ValueError('Parameters are unsupported for this capability action')
     return copy.deepcopy(matches[0])
+
+
+def _great_work_family(panel):
+    from . import city_buildings
+    if not panel['great_work_moves_available']:
+        return dict(status='unqualified', reason='native_great_work_acting_boundary_unavailable')
+    return dict(status='queried_complete',
+                candidate_ids=[digest(action) for action in city_buildings.great_work_actions(panel)])
+
+
+def add_great_work_choices(value, panel):
+    from . import city_buildings
+    choices = city_buildings.great_work_actions(panel)
+    value['families'][city_buildings.GREAT_WORK_MOVE] = _great_work_family(panel)
+    value['candidates'].extend(dict(candidate_id=digest(action), action=action) for action in choices)
+
+
+def _remove_great_work_choices(value):
+    from .city_buildings import GREAT_WORK_MOVE
+    del value['families'][GREAT_WORK_MOVE]
+    value['candidates'] = [row for row in value['candidates'] if row['action']['kind'] != GREAT_WORK_MOVE]
+    return GREAT_WORK_MOVE
+
+
+def project_city_building_version(value, target_schema):
+    """Project a validated live decision to a specific recorded panel version."""
+    from . import city_buildings
+    panel = value['city_buildings']
+    current_schema = panel['schema']
+    versions = (city_buildings.SCHEMA, *city_buildings.GREAT_WORK_SCHEMAS)
+    if target_schema not in versions or versions.index(target_schema) > versions.index(current_schema):
+        raise ValueError('Unsupported city building checkpoint version')
+    if current_schema == target_schema:
+        return value, [], []
+    projected = copy.deepcopy(value)
+    panel = projected['city_buildings']
+    panel['schema'] = target_schema
+    removed = []
+    for version, field in zip(versions[1:], ('great_work_slots', 'great_work_move_targets',
+                                           'great_work_moves_available', 'great_work_building_bonuses', None), strict=True):
+        if field is not None and versions.index(target_schema) < versions.index(version) <= versions.index(current_schema):
+            del panel[field]
+            removed.append('city_buildings.' + field)
+    families = ([_remove_great_work_choices(projected)]
+                if current_schema in city_buildings.GREAT_WORK_COMMAND_SCHEMAS
+                and target_schema not in city_buildings.GREAT_WORK_COMMAND_SCHEMAS else [])
+    if (current_schema == city_buildings.GREAT_WORK_XP1_COMMANDS_SCHEMA
+            and target_schema == city_buildings.GREAT_WORK_OVERVIEW_SCHEMA):
+        _remove_great_work_choices(projected)
+        panel['great_work_moves_available'] = False
+        add_great_work_choices(projected, panel)
+    del projected['decision_id']
+    projected['decision_id'] = digest(projected)
+    return projected, removed, families
+
+
+def secondary_unit_catalogue(identity, sequence, turn, player_id, controls, catalogue, *,
+                             observation=None, actions_closed=False,
+                             schema=CAPABILITY_SECONDARY_UNIT_ORDERS_SCHEMA,
+                             turn_availability=None, research_choices=None, founders=None,
+                             production_choices=None, production_queues=None,
+                             city_focus_catalogs=None, citizen_catalogs=None,
+                             world_input=None, queued_orders=None,
+                             unit_promotions=None, unit_upgrades=None, unit_attacks=None, occupation=None,
+                             city_shots=None, district_shots=None,
+                             plot_purchases=None, city_purchases=None, government_state=None,
+                             policy_state=None, unlock_state=None, envoy_state=None,
+                             city_state_levies=None, unit_levies=None, work_catalog=None,
+                             work_state=None, work_info=None, city_panels=None,
+                             great_people_state=None, great_people_mode='off',
+                             pantheon_state=None, pantheon_enabled=False, governor_state=None,
+                             governors_enabled=False, espionage_state=None, espionage_enabled=False,
+                             completion_state=None, spy_completion_enabled=False, religion_states=None,
+                             trade_states=None, formation_state=None, formation_enabled=False,
+                             dedication_state=None, dedication_enabled=False, congress=None,
+                             unit_panel_actions=None, city_state_peace=None, city_state_peace_enabled=False,
+                             world_score_state=None, world_score_enabled=False,
+                             archaeology_state=None, archaeology_mode='off', excavation_actions=None):
+    """Build the explicit partial catalogue for one additional LAN human."""
+    from . import capability_unit_orders as orders
+
+    if schema not in _SECONDARY_UNIT_SCHEMAS:
+        raise ValueError('Unknown secondary unit-order schema')
+    controls = validate_turn_controls(controls, player_id, turn)
+    unavailable = catalogue is None or actions_closed or is_waiting(controls)
+    allow_operations = schema != CAPABILITY_SECONDARY_UNIT_SCHEMA
+    orders.validate_catalog(catalogue, player_id, turn, observation=observation,
+                            unavailable=unavailable, allow_skip=allow_operations)
+    candidates = []
+    if catalogue is not None:
+        if not allow_operations and any(row['action']['route'] != 'command' for row in catalogue['offers']):
+            raise ValueError('Borrowed unit-order catalogue contains an unsupported route')
+        candidates = [dict(candidate_id=digest(action), action=action)
+                      for action in orders.actions(catalogue)]
+    order_family = (dict(status='unqualified', reason='native_unit_commands_unavailable')
+                    if unavailable else dict(status='queried_partial',
+                        candidate_ids=[row['candidate_id'] for row in candidates],
+                        unqualified=list(orders.UNQUALIFIED_UNIT_ORDERS)))
+    value = dict(schema=schema, episode_id=identity.episode_id,
+        game_generation=identity.game_generation, sequence=sequence, turn=turn, player_id=player_id,
+        turn_controls=controls, unit_orders=catalogue, candidates=candidates,
+        families=dict(unit_order=order_family, other_human_actions=dict(
+            status='unqualified', reason='secondary_seat_gameplay_routes_not_yet_qualified')),
+        family_inventory_complete=False, complete_action_space=False)
+    if schema in _SECONDARY_TURN_SCHEMAS:
+        if turn_availability is None:
+            turn_availability = dict.fromkeys(_CAPABILITY_TURN_KINDS)
+        if (type(turn_availability) is not dict or set(turn_availability) != _CAPABILITY_TURN_KINDS
+                or any(flag is not None and type(flag) is not bool for flag in turn_availability.values())
+                or (actions_closed and any(flag is not None for flag in turn_availability.values()))
+                or (turn_availability['end_turn'] is True and is_waiting(controls))
+                or (turn_availability['unready_turn'] is True and not unready_action_available(controls))):
+            raise ValueError('Invalid borrowed native turn availability')
+        value['turn_availability'] = dict(turn_availability)
+        for kind in sorted(_CAPABILITY_TURN_KINDS):
+            available = turn_availability[kind]
+            if available is None:
+                value['families'][kind] = dict(status='unqualified', reason='native_turn_ui_gate_unknown')
+                continue
+            ids = []
+            if available:
+                action = dict(kind=kind)
+                ids = [digest(action)]
+                candidates.append(dict(candidate_id=ids[0], action=action))
+            value['families'][kind] = dict(status='queried_complete', candidate_ids=ids)
+    elif turn_availability is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry turn availability')
+    if schema in _SECONDARY_RESEARCH_SCHEMAS:
+        from .capability_choices import RESEARCH_KINDS, research_actions
+        value['research_choices'] = research_choices
+        if research_choices is None:
+            for kind in RESEARCH_KINDS:
+                value['families'][kind] = dict(status='unqualified',
+                                              reason='native_research_unavailable')
+        else:
+            if actions_closed or is_waiting(controls):
+                raise ValueError('Borrowed research choices require a native acting boundary')
+            for kind, actions in research_actions(research_choices).items():
+                rows = [dict(candidate_id=digest(action), action=action) for action in actions]
+                candidates.extend(rows)
+                value['families'][kind] = dict(status='queried_complete',
+                    candidate_ids=[row['candidate_id'] for row in rows])
+    elif research_choices is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry research choices')
+    if schema in _SECONDARY_FOUNDERS_SCHEMAS:
+        value['founders'] = founders
+        if founders is None:
+            value['families']['found_city'] = dict(status='unqualified', reason='native_foundation_unavailable')
+        else:
+            from .capability_choices import validate_founder_action
+            if type(founders) is not list or len(founders) > 4096 or actions_closed or is_waiting(controls):
+                raise ValueError('Borrowed founders require a native acting boundary')
+            own_units = None if observation is None else {
+                row['id']: row for row in observation['units'] if row['owner'] == player_id}
+            previous, rows = -1, []
+            for action in founders:
+                validate_founder_action(action, own_units)
+                if action['unit_id'] <= previous:
+                    raise ValueError('Borrowed founders are unordered or duplicate')
+                rows.append(dict(candidate_id=digest(action), action=action))
+                previous = action['unit_id']
+            candidates.extend(rows)
+            value['families']['found_city'] = dict(status='queried_complete',
+                candidate_ids=[row['candidate_id'] for row in rows])
+    elif founders is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry founder choices')
+    if schema in _SECONDARY_PRODUCTION_SCHEMAS:
+        from .capability_choices import validate_action, validate_production_state
+        value['production_choices'] = production_choices
+        family = dict(status='unqualified', reason='native_production_unavailable')
+        if production_choices is not None:
+            if (type(production_choices) is not dict or set(production_choices) != {'current', 'actions'}
+                    or type(production_choices['actions']) is not list
+                    or len(production_choices['actions']) > 256 * 256
+                    or actions_closed or is_waiting(controls)):
+                raise ValueError('Borrowed production requires a native acting boundary')
+            current = production_choices['current']
+            own_cities = None if observation is None else {
+                city['id'] for city in observation['cities'] if city['owner'] == player_id}
+            validate_production_state(current, own_cities)
+            known_cities = {row['city_id'] for row in current}
+            rows, seen = [], set()
+            for action in production_choices['actions']:
+                if type(action) is not dict or action.get('kind') != 'production':
+                    raise ValueError('Borrowed production offers must be replacement actions')
+                validate_action(action, known_cities)
+                key = (action['city_id'], action['category'], action['index'])
+                if key in seen:
+                    raise ValueError('Duplicate borrowed production choice')
+                seen.add(key)
+                rows.append(dict(candidate_id=digest(action), action=action))
+            candidates.extend(rows)
+            gaps = ['placement', 'formations', 'purchases']
+            if schema == CAPABILITY_SECONDARY_PRODUCTION_SCHEMA:
+                gaps.insert(1, 'queue_edits')
+            family = dict(status='queried_partial', candidate_ids=[row['candidate_id'] for row in rows],
+                          unqualified=gaps)
+        value['families']['production'] = family
+    elif production_choices is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry production choices')
+    if schema in _SECONDARY_QUEUE_SCHEMAS:
+        from . import production_queue as queues
+        heads = None if production_choices is None else dict(production=production_choices['current'])
+        queues.validate_public(production_queues, player_id, turn, observation=observation,
+                               choice_state=heads, unavailable=heads is None)
+        gates = {city['enabled'] for city in production_queues or ()}
+        if len(gates) > 1:
+            raise ValueError('Borrowed city queues disagree about UI admission')
+        value['production_queues'] = production_queues
+        offers = {kind: [] for kind in queues.FIELDS}
+        for city in production_queues or ():
+            for action in city['offers']:
+                row = dict(candidate_id=digest(action), action=action)
+                offers[action['kind']].append(row['candidate_id'])
+                candidates.append(row)
+        for kind, ids in offers.items():
+            if production_queues is None or False in gates:
+                family = dict(status='unqualified', reason='native_queue_unavailable')
+            elif kind == 'queue_append':
+                family = dict(status='queried_partial', candidate_ids=ids,
+                              unqualified=list(queues.UNQUALIFIED_APPEND))
+            else:
+                family = dict(status='queried_complete', candidate_ids=ids)
+            value['families'][kind] = family
+    elif production_queues is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry production queues')
+    if schema in _SECONDARY_CITY_SCHEMAS:
+        from .capability_city_controls import validate_catalogs
+
+        fields = {'city_focus': 'city_focus_catalogs', 'city_citizen': 'citizen_catalogs'}
+        state = {'city_focus': city_focus_catalogs, 'city_citizen': citizen_catalogs}
+        own_ids = None if production_choices is None else [r['city_id'] for r in production_choices['current']]
+        offers = validate_catalogs(city_focus_catalogs, citizen_catalogs, player_id, turn,
+            observation=observation, unavailable=unavailable or own_ids is None, own_city_ids=own_ids)
+        for kind, field in fields.items():
+            value[field] = state[kind]
+            rows = [dict(candidate_id=digest(action), action=action) for action in offers[kind]]
+            candidates.extend(rows)
+            value['families'][kind] = (
+                dict(status='unqualified', reason='native_city_control_unavailable') if state[kind] is None
+                else dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows]))
+    elif city_focus_catalogs is not None or citizen_catalogs is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry city controls')
+    if schema in _SECONDARY_DEVELOPMENT_SCHEMAS:
+        from . import unit_promotions as promotions, unit_upgrades as upgrades
+
+        value.update(unit_promotions=unit_promotions, unit_upgrades=unit_upgrades)
+        for kind, state in (('promote_unit', unit_promotions), ('upgrade_unit', unit_upgrades)):
+            if state is None:
+                value['families'][kind] = dict(status='unqualified', reason='native_unit_development_unavailable')
+                continue
+            if actions_closed or is_waiting(controls) or (kind == 'upgrade_unit' and unavailable):
+                raise ValueError('Borrowed unit development requires its native acting boundary')
+            if kind == 'promote_unit':
+                offers = promotions.validate_catalogue(state, player_id, turn, observation=observation)['offers']
+            else:
+                offers = upgrades.actions(upgrades.validate_catalogue(state, player_id, turn, observation=observation))
+            rows = [dict(candidate_id=digest(action), action=action) for action in offers]
+            candidates.extend(rows)
+            value['families'][kind] = dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+    elif unit_promotions is not None or unit_upgrades is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry promotion or upgrade choices')
+    if schema in _SECONDARY_COMBAT_SCHEMAS:
+        from . import capability_unit_attacks as attacks
+
+        if unit_attacks is not None and queued_orders is None:
+            raise ValueError('Borrowed attacks require a native queued-order observation')
+        attacks.validate_public_catalog(unit_attacks, player_id, turn, observation=observation,
+            queued_orders=queued_orders, unavailable=unavailable or unit_attacks is None)
+        value['unit_attacks'] = unit_attacks
+        if unit_attacks is None:
+            value['families']['unit_attack'] = dict(status='unqualified', reason='native_unit_attack_unavailable')
+        else:
+            rows = [dict(candidate_id=digest(action), action=action) for action in unit_attacks['offers']]
+            candidates.extend(rows)
+            value['families']['unit_attack'] = dict(status='queried_partial',
+                candidate_ids=[row['candidate_id'] for row in rows],
+                unqualified=list(attacks.UNQUALIFIED_UNIT_ATTACKS))
+    elif unit_attacks is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry attack choices')
+    if schema in _SECONDARY_OCCUPATION_SCHEMAS:
+        from . import captured_city
+
+        value['captured_city'] = occupation
+        if occupation is None:
+            value['families'][captured_city.KIND] = dict(
+                status='unqualified', reason='native_captured_city_acting_boundary_unavailable')
+        else:
+            if actions_closed or is_waiting(controls):
+                raise ValueError('Borrowed city choices require their native acting boundary')
+            captured_city.validate_public_catalog(occupation, player_id, turn, observation=observation)
+            rows = [dict(candidate_id=digest(action), action=action)
+                    for action in captured_city.public_actions(occupation)]
+            candidates.extend(rows)
+            value['families'][captured_city.KIND] = dict(
+                status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+    elif occupation is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry captured-city choices')
+    if schema in _SECONDARY_RANGED_SCHEMAS:
+        from . import city_ranged as ranged
+
+        value.update(city_shots=city_shots, district_shots=district_shots)
+        groups = (
+            ('city', city_shots, ranged.city_validate_catalog, ranged.city_compare_own_cities, ranged.city_actions),
+            ('district', district_shots, ranged.district_validate_catalog,
+             ranged.district_compare_own_cities, ranged.district_actions),
+        )
+        for shooter, shots, validate, compare_own, actions in groups:
+            kind = shooter + '_range_attack'
+            if shots is None:
+                value['families'][kind] = dict(status='unqualified',
+                    reason='native_' + shooter + '_shot_acting_boundary_unavailable')
+                continue
+            if unavailable:
+                raise ValueError('Borrowed ranged shots require their native acting boundary')
+            validate(shots, player_id, turn)
+            if observation is not None:
+                compare_own(shots, observation)
+            rows = [dict(candidate_id=digest(action), action=action) for action in actions(shots)]
+            candidates.extend(rows)
+            value['families'][kind] = dict(status='queried_complete',
+                                           candidate_ids=[row['candidate_id'] for row in rows])
+    elif city_shots is not None or district_shots is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry city or district shots')
+    if schema in _SECONDARY_PURCHASE_SCHEMAS:
+        from . import plot_purchases as purchases
+
+        value.update(plot_purchases=plot_purchases, city_purchases=city_purchases)
+        if plot_purchases is None and city_purchases is None:
+            value['families']['purchase'] = dict(status='unqualified', reason='native_purchase_unavailable')
+        else:
+            if unavailable or plot_purchases is None or city_purchases is None:
+                raise ValueError('Borrowed purchase quotes require their complete native acting boundary')
+            dimensions = observation if observation is not None else world_input
+            if dimensions is None:
+                raise ValueError('Borrowed purchase quotes require native map dimensions')
+            own = None if observation is None else [row['id'] for row in observation['cities']]
+            purchases.validate_catalogue(plot_purchases, player_id, turn, width=dimensions['width'],
+                height=dimensions['height'], own_cities=own)
+            purchases.validate_catalogue(city_purchases, player_id, turn, own_cities=own,
+                city_items=True, allow_faith=True)
+            offers = purchases.actions(plot_purchases + city_purchases)
+            rows = [dict(candidate_id=digest(action), action=action) for action in offers]
+            candidates.extend(rows)
+            value['families']['purchase'] = dict(status='queried_partial',
+                candidate_ids=[row['candidate_id'] for row in rows], unqualified=list(purchases.CITY_FAITH_GAPS))
+    elif plot_purchases is not None or city_purchases is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry purchase quotes')
+    if schema in _SECONDARY_GOVERNMENT_SCHEMAS:
+        from . import capability_policies, government, policy_unlock
+
+        value.update(government=government_state, policies=policy_state, policy_unlock=unlock_state)
+        if unavailable and any(state is not None for state in (government_state, policy_state, unlock_state)):
+            raise ValueError('Borrowed government decisions require their native acting boundary')
+        if government_state is not None:
+            government.validate_catalogue(government_state, player_id, turn)
+        if policy_state is not None:
+            capability_policies.validate_catalogue(policy_state, player_id, turn, allow_relocation=True)
+        if unlock_state is not None:
+            policy_unlock.validate(unlock_state, player_id, turn)
+        options = (
+            ('government', government_state, government.actions(government_state)),
+            ('policies', policy_state, capability_policies.actions(
+                policy_state, allow_relocation=True, allow_unchanged=True)),
+            ('policy_unlock', unlock_state, policy_unlock.actions(unlock_state)),
+        )
+        for kind, state, offers in options:
+            if state is None:
+                value['families'][kind] = dict(status='unqualified',
+                    reason='native_' + kind + '_acting_boundary_unavailable')
+                continue
+            rows = [dict(candidate_id=digest(action), action=action) for action in offers]
+            candidates.extend(rows)
+            family = dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+            if kind == 'government':
+                family.update(status='queried_partial', unqualified=['anarchy_transition'])
+            value['families'][kind] = family
+    elif any(state is not None for state in (government_state, policy_state, unlock_state)):
+        raise ValueError('Legacy borrowed unit schema does not carry government or policy choices')
+    if schema in _SECONDARY_CITY_STATE_SCHEMAS:
+        from . import city_state_levies as levies, envoys
+
+        value.update(envoys=envoy_state, city_state_levies=city_state_levies, unit_levies=unit_levies)
+        if envoy_state is not None:
+            if unavailable:
+                raise ValueError('Borrowed envoys require native strategic command permission')
+            envoys.validate_catalogue(envoy_state, player_id, turn)
+        if city_state_levies is not None or unit_levies is not None:
+            if (actions_closed or is_waiting(controls) or city_state_levies is None or unit_levies is None):
+                raise ValueError('Borrowed levies require their native acting boundary')
+            levies.validate(city_state_levies, player_id, turn)
+            levies.validate_unit_flags(unit_levies, player_id, turn, observation=observation)
+        envoy_actions = envoys.actions(envoy_state)
+        for kind, state, offers in (
+                ('send_envoy', envoy_state, (a for a in envoy_actions if a['kind'] == 'send_envoy')),
+                ('retain_envoys', envoy_state, (a for a in envoy_actions if a['kind'] == 'retain_envoys')),
+                (levies.ACTION, city_state_levies, levies.actions(city_state_levies))):
+            if state is None:
+                value['families'][kind] = dict(status='unqualified',
+                    reason='native_city_state_acting_boundary_unavailable')
+            else:
+                rows = [dict(candidate_id=digest(action), action=action) for action in offers]
+                candidates.extend(rows)
+                value['families'][kind] = dict(status='queried_complete',
+                    candidate_ids=[row['candidate_id'] for row in rows])
+    elif any(state is not None for state in (envoy_state, city_state_levies, unit_levies)):
+        raise ValueError('Legacy borrowed unit schema does not carry city-state choices')
+    if (type(city_state_peace_enabled) is not bool
+            or (city_state_peace_enabled and schema not in _SECONDARY_CITY_STATE_SCHEMAS)
+            or (city_state_peace is not None and (not city_state_peace_enabled or unavailable))):
+        raise ValueError('Invalid borrowed city-state peace availability')
+    if city_state_peace_enabled:
+        from .diplomacy_overview import city_state_peace_actions
+
+        value['city_state_peace'] = city_state_peace
+        if city_state_peace is None:
+            value['families']['diplomacy_initiate'] = dict(
+                status='unqualified', reason='native_city_state_peace_acting_boundary_unavailable')
+        else:
+            rows = [dict(candidate_id=digest(action), action=action)
+                    for action in city_state_peace_actions(city_state_peace, player_id)]
+            candidates.extend(rows)
+            value['families']['diplomacy_initiate'] = dict(
+                status='queried_partial', unqualified=['other_initial_diplomacy_choices'],
+                candidate_ids=[row['candidate_id'] for row in rows])
+    if schema in _SECONDARY_WORK_SCHEMAS:
+        from . import unit_work, unit_work_info, unit_work_state
+
+        value.update(unit_work=work_catalog, unit_work_state=work_state, unit_work_info=work_info)
+        adjacent = schema == CAPABILITY_SECONDARY_ADJACENT_WORK_SCHEMA
+        work_available = work_catalog is not None
+        if work_available:
+            if actions_closed or is_waiting(controls):
+                raise ValueError('Borrowed unit work requires native turn activity')
+            unit_work.validate_network_catalog(work_catalog, player_id, turn, observation=observation,
+                                               adjacent=adjacent)
+            unit_work_state.validate(work_state, player_id, turn, observation=observation,
+                                     work_catalog=work_catalog, include_plot=True)
+            unit_work_info.validate(work_info, player_id, turn, observation=observation,
+                                    work_catalog=work_catalog, work_state=work_state, visible_work=adjacent)
+            rows = [dict(candidate_id=digest(action), action=action) for action in unit_work.actions(work_catalog)]
+            candidates.extend(rows)
+        elif work_info is not None or work_state is not None:
+            raise ValueError('Borrowed unit work cannot publish data without the native catalogue')
+        value['families'].update(unit_work.network_families(work_catalog, rows if work_available else [],
+            adjacent=adjacent, unavailable_reason='native_unit_work_acting_boundary_unavailable'))
+    elif any(state is not None for state in (work_catalog, work_state, work_info)):
+        raise ValueError('Legacy borrowed unit schema does not carry unit work')
+    if schema in _SECONDARY_WORLD_SCHEMAS:
+        from . import capability_world_input as world
+        from .action_budget import validate_action_count
+
+        world_unavailable = unavailable or world_input is None
+        world.validate_state(world_input, player_id, turn, observation=observation,
+                             unavailable=world_unavailable)
+        world.validate_queued_orders(queued_orders, player_id, turn, observation=observation,
+                                     world_input=world_input, unavailable=world_unavailable)
+        value.update(world_input=world_input, queued_orders=queued_orders)
+        families = {kind: [] for kind in sorted(world.WORLD_KINDS)}
+        for action in world.actions(world_input) if world_input is not None else ():
+            candidate_id = digest(action)
+            families[action['kind']].append(candidate_id)
+            candidates.append(dict(candidate_id=candidate_id, action=action))
+        for kind, ids in families.items():
+            if world_unavailable:
+                family = dict(status='unqualified', reason='native_world_input_unavailable')
+            elif kind == 'world_plot_click':
+                family = dict(status='queried_partial', candidate_ids=ids,
+                              unqualified=['other_world_click_operations', 'war_confirmation'])
+            else:
+                family = dict(status='queried_complete', candidate_ids=ids)
+            value['families'][kind] = family
+        validate_action_count([row['action'] for row in candidates], world_input=world_input, map_coordinates=True)
+    elif world_input is not None or queued_orders is not None:
+        raise ValueError('Legacy borrowed unit schema does not carry world input')
+    if city_panels is not None:
+        if type(city_panels) is not dict or set(city_panels) - set(SECONDARY_CITY_PANEL_FIELDS):
+            raise ValueError('Invalid borrowed city panel group')
+        if city_panels and actions_closed:
+            raise ValueError('Closed secondary decisions cannot publish city panels')
+        if 'city_growth' in city_panels:
+            from . import city_growth
+            state = city_growth.validate(city_panels['city_growth'], player_id, turn, observation=observation)
+            if state['schema'] != city_growth.EXPANSION_SCHEMA:
+                raise ValueError('Borrowed city growth requires the expansion display')
+        if 'rock_bands' in city_panels:
+            from . import rock_bands
+            rock_bands.validate(city_panels['rock_bands'], player_id, turn, observation=observation)
+        if 'city_loyalty' in city_panels:
+            from . import city_loyalty
+            city_loyalty.validate(city_panels['city_loyalty'], player_id, turn, observation=observation)
+        if 'city_buildings' in city_panels:
+            from . import city_buildings
+            buildings = city_buildings.validate(city_panels['city_buildings'], player_id, turn, observation=observation)
+            if buildings['schema'] == city_buildings.GREAT_WORK_XP1_COMMANDS_SCHEMA:
+                raise ValueError('Borrowed Great Work panels require the Gathering Storm route')
+            if buildings['schema'] in city_buildings.GREAT_WORK_COMMAND_SCHEMAS:
+                if unavailable and buildings['great_work_moves_available']:
+                    raise ValueError('Borrowed Great Work commands require their native acting boundary')
+                add_great_work_choices(value, buildings)
+        if 'city_religion' in city_panels:
+            from . import city_religion
+            city_religion.validate_details(city_panels['city_religion'], player_id, turn, observation=observation)
+        value.update(city_panels)
+    if (type(world_score_enabled) is not bool or (actions_closed and world_score_enabled)
+            or (world_score_state is not None and not world_score_enabled)):
+        raise ValueError('Invalid borrowed world score availability')
+    if world_score_enabled:
+        from . import world_score
+
+        value['world_score'] = (None if world_score_state is None
+                                else world_score.validate(world_score_state, player_id, turn))
+    if great_people_mode not in ('off', 'read', 'actions') or (
+            great_people_state is not None and (great_people_mode == 'off' or actions_closed or is_waiting(controls))):
+        raise ValueError('Invalid borrowed Great People availability')
+    if great_people_mode != 'off':
+        from . import great_people, great_people_actions
+
+        if great_people_state is not None:
+            great_people.validate(great_people_state, player_id, turn, observation=observation)
+            if great_people_state['schema'] != great_people.SCHEMA_V2:
+                raise ValueError('Borrowed Great People require the Gathering Storm panel')
+        can_act = great_people_mode == 'actions'
+        value.update(great_people=great_people_state, great_people_actions=can_act)
+        if can_act:
+            rows = [dict(candidate_id=digest(action), action=action)
+                    for action in great_people_actions.actions(great_people_state, include_reject=True)]
+            candidates.extend(rows)
+            for kind in great_people_actions.KINDS:
+                value['families'][kind] = (
+                    dict(status='unqualified', reason='native_great_people_acting_boundary_unavailable')
+                    if great_people_state is None else dict(status='queried_complete',
+                        candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind]))
+    if type(pantheon_enabled) is not bool or (pantheon_state is not None and (
+            not pantheon_enabled or unavailable)):
+        raise ValueError('Invalid borrowed pantheon availability')
+    if pantheon_enabled:
+        from . import pantheon
+
+        if pantheon_state is not None:
+            pantheon.validate_state(pantheon_state, player_id, turn)
+        value['pantheon'] = pantheon_state
+        rows = [dict(candidate_id=digest(action), action=action) for action in pantheon.state_actions(pantheon_state)]
+        candidates.extend(rows)
+        value['families'][pantheon.KIND] = (
+            dict(status='unqualified', reason='native_pantheon_acting_boundary_unavailable')
+            if pantheon_state is None else dict(status='queried_complete',
+                candidate_ids=[row['candidate_id'] for row in rows]))
+    if type(governors_enabled) is not bool or (governor_state is not None and (
+            not governors_enabled or unavailable)):
+        raise ValueError('Invalid borrowed governor availability')
+    if governors_enabled:
+        from . import governors
+
+        if governor_state is not None:
+            governors.validate_catalogue(governor_state, player_id, turn)
+        value['governors'] = governor_state
+        rows = [dict(candidate_id=digest(action), action=action) for action in governors.actions(governor_state)]
+        candidates.extend(rows)
+        for kind in governors.ACTION_FIELDS:
+            value['families'][kind] = (
+                dict(status='unqualified', reason='native_governor_acting_boundary_unavailable')
+                if governor_state is None else dict(status='queried_complete',
+                    candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind]))
+    if type(espionage_enabled) is not bool or (espionage_state is not None and (
+            not espionage_enabled or actions_closed or is_waiting(controls))):
+        raise ValueError('Invalid borrowed espionage availability')
+    if espionage_enabled:
+        from . import espionage
+
+        if espionage_state is not None:
+            espionage.validate_catalogue(espionage_state, player_id, turn)
+            if observation is not None:
+                espionage.compare_own(espionage_state, observation)
+        value['espionage'] = espionage_state
+        rows = [dict(candidate_id=digest(action), action=action) for action in espionage.actions(espionage_state)]
+        candidates.extend(rows)
+        for kind in espionage.ACTION_FIELDS:
+            value['families'][kind] = (
+                dict(status='unqualified', reason='native_spy_acting_boundary_unavailable')
+                if espionage_state is None else dict(status='queried_complete',
+                    candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind]))
+    if type(spy_completion_enabled) is not bool or (completion_state is not None and (
+            not spy_completion_enabled or actions_closed)):
+        raise ValueError('Invalid borrowed spy completion availability')
+    if spy_completion_enabled:
+        from . import spy_completion
+
+        if completion_state is not None:
+            spy_completion.validate_catalogue(completion_state, player_id, turn)
+            if is_waiting(controls) and completion_state['current'] is None:
+                raise ValueError('Waiting spy completion requires a native occurrence')
+            if observation is not None:
+                spy_completion.compare_own(completion_state, observation)
+        value['spy_completion'] = completion_state
+        rows = [dict(candidate_id=digest(action), action=action) for action in spy_completion.actions(completion_state)]
+        candidates.extend(rows)
+        for kind in spy_completion.ACTION_FIELDS:
+            value['families'][kind] = (
+                dict(status='unqualified', reason='native_spy_completion_acting_boundary_unavailable')
+                if completion_state is None else dict(status='queried_partial', unqualified=list(SPY_COMPLETION_GAPS),
+                    candidate_ids=[row['candidate_id'] for row in rows if row['action']['kind'] == kind]))
+    if religion_states is not None:
+        if type(religion_states) is not dict or religion_states.keys() - SECONDARY_RELIGION_CONTRACTS.keys():
+            raise ValueError('Invalid borrowed religion group')
+        for field, contract in SECONDARY_RELIGION_CONTRACTS.items():
+            if field not in religion_states:
+                continue
+            state = religion_states[field]
+            value[field] = state
+            kinds = SECONDARY_RELIGION_KINDS[field]
+            if state is None:
+                for kind in kinds:
+                    value['families'][kind] = dict(status='unqualified',
+                        reason='native_religion_acting_boundary_unavailable')
+                continue
+            if unavailable:
+                raise ValueError('Borrowed religion state requires the native acting boundary')
+            contract.validate(state, player_id, turn, observation=observation)
+            choices = [dict(candidate_id=digest(action), action=action) for action in contract.actions(state)]
+            candidates.extend(choices)
+            for kind in kinds:
+                family = dict(status='queried_complete', candidate_ids=[
+                    row['candidate_id'] for row in choices if row['action']['kind'] == kind])
+                if contract is religion_founding:
+                    family.update(status='queried_partial', unqualified=list(contract.UNQUALIFIED))
+                value['families'][kind] = family
+    if trade_states:
+        from . import trade
+
+        if type(trade_states) is not dict or set(trade_states) != {'trade_routes', 'trade_origins'}:
+            raise ValueError('Borrowed trade requires both reader fields')
+        value.update(trade_states)
+        for field, kind, choices in (
+                ('trade_routes', 'make_trade_route', trade.route_actions),
+                ('trade_origins', 'change_trade_origin', trade.origin_actions)):
+            state = trade_states[field]
+            if state is None:
+                value['families'][kind] = dict(status='unqualified',
+                    reason='native_trade_acting_boundary_unavailable')
+                continue
+            if (actions_closed or is_waiting(controls)
+                    or field == 'trade_origins' and unavailable):
+                raise ValueError('Borrowed trade fields require the native acting boundary')
+            rows = [dict(candidate_id=digest(action), action=action) for action in choices(state)]
+            candidates.extend(rows)
+            value['families'][kind] = dict(status='queried_complete',
+                                          candidate_ids=[row['candidate_id'] for row in rows])
+        trade.validate_decisions(value, observation, actions_closed=actions_closed)
+    if type(formation_enabled) is not bool or (formation_state is not None and (
+            not formation_enabled or unavailable)):
+        raise ValueError('Borrowed formations require the native acting boundary')
+    if formation_enabled:
+        from . import unit_formations
+
+        value['unit_formations'] = formation_state
+        if formation_state is None:
+            value['families'][unit_formations.KIND] = dict(status='unqualified',
+                reason='native_unit_formation_boundary_unavailable')
+        else:
+            unit_formations.validate(formation_state, player_id, turn, observation=observation)
+            rows = [dict(candidate_id=digest(action), action=action)
+                    for action in unit_formations.actions(formation_state)]
+            candidates.extend(rows)
+            value['families'][unit_formations.KIND] = dict(status='queried_complete',
+                candidate_ids=[row['candidate_id'] for row in rows])
+    if type(dedication_enabled) is not bool or (dedication_state is not None and (
+            not dedication_enabled or actions_closed or is_waiting(controls))):
+        raise ValueError('Borrowed dedications require the native acting boundary')
+    if dedication_enabled:
+        from . import dedications
+
+        value['dedications'] = dedication_state
+        if dedication_state is None:
+            value['families'][dedications.KIND] = dict(status='unqualified',
+                reason='native_dedication_acting_boundary_unavailable')
+        else:
+            dedications.validate_state(dedication_state, player_id, turn)
+            rows = [dict(candidate_id=digest(action), action=action)
+                    for action in dedications.candidates(dedication_state)]
+            candidates.extend(rows)
+            value['families'][dedications.KIND] = dict(status='queried_complete',
+                candidate_ids=[row['candidate_id'] for row in rows])
+    if congress is not None and type(congress) is not dict:
+        raise ValueError('Invalid borrowed Congress information scope')
+    if congress:
+        from . import world_congress, world_congress_active_effects, world_congress_review
+
+        fields = set(congress)
+        if fields not in ({'world_congress'}, set(SECONDARY_CONGRESS_FIELDS)):
+            raise ValueError('Invalid borrowed Congress information scope')
+        public = world_congress.validate_catalogue(congress['world_congress'], player_id, turn, sequence)
+        congress_actions = world_congress.actions(public)
+        if ((public['presentation'] != 'closed' or congress_actions)
+                and ('world_congress_review' not in congress or actions_closed or is_waiting(controls))):
+            raise ValueError('Borrowed Congress actions have no qualified command route')
+        if 'world_congress_review' in congress:
+            world_congress_review.validate_group(congress['world_congress_review'],
+                congress['world_congress_review_status'], public, player_id, turn, sequence)
+            world_congress_active_effects.validate_group(congress['world_congress_active_effects'],
+                congress['world_congress_active_effects_status'], public, player_id, turn, sequence)
+        value.update(congress)
+        _remove_congress_read_only_candidates(value)
+        rows = [dict(candidate_id=digest(action), action=action) for action in congress_actions]
+        value['candidates'].extend(rows)
+        for kind in world_congress.CANDIDATE_FIELDS:
+            value['families'][kind] = dict(status='unqualified',
+                reason='secondary_congress_command_route_unqualified')
+        for row in rows:
+            value['families'][row['action']['kind']] = dict(status='queried_partial',
+                candidate_ids=[row['candidate_id']], unqualified=list(world_congress.GAPS))
+    if unit_panel_actions is not None:
+        from . import air_operations, national_parks, rock_bands, unit_work
+
+        if (type(unit_panel_actions) is not dict
+                or not unit_panel_actions.keys() <= set(SECONDARY_UNIT_PANEL_KINDS)):
+            raise ValueError('Unknown borrowed UnitPanel command family')
+        for kind in SECONDARY_UNIT_PANEL_KINDS:
+            if kind not in unit_panel_actions:
+                continue
+            actions = unit_panel_actions[kind]
+            if type(actions) is not list or len(actions) > 4096:
+                raise ValueError('Malformed borrowed UnitPanel choices')
+            if actions and (actions_closed or is_waiting(controls)):
+                raise ValueError('Borrowed UnitPanel choices require an active seat')
+            if kind == air_operations.KIND:
+                for action in actions:
+                    air_operations.validate(action, observation)
+                keys = [(action['unit_id'], action['operation'], action['plot_id']) for action in actions]
+                if keys != sorted(set(keys)):
+                    raise ValueError('Borrowed air destinations are unordered or repeated')
+                add_air_choices(value, actions, actions_closed)
+            elif kind == unit_work.BUILD_ROUTE:
+                for action in actions:
+                    unit_work.validate_route(action, observation)
+                units = [action['unit_id'] for action in actions]
+                if units != sorted(set(units)):
+                    raise ValueError('Borrowed route constructors are unordered or repeated')
+                add_build_route_choices(value, actions, actions_closed)
+            elif kind == national_parks.DESIGNATE:
+                national_parks.validate_designations(actions, observation)
+                add_park_designation_choices(value, actions, actions_closed)
+            else:
+                panel = value.get('rock_bands')
+                if actions != ([] if panel is None else rock_bands.actions(panel)):
+                    raise ValueError('Borrowed concert choices differ from their own unit information')
+                if panel is not None or actions_closed:
+                    add_rock_band_choices(value, panel, actions_closed)
+    if (archaeology_mode not in ('off', 'read', 'commands')
+            or (archaeology_state is not None) != (archaeology_mode != 'off')
+            or (excavation_actions is not None) != (archaeology_mode == 'commands')
+            or (actions_closed and archaeology_mode != 'off')):
+        raise ValueError('Invalid borrowed archaeology availability')
+    if archaeology_mode != 'off':
+        from . import archaeology
+
+        value['archaeology'] = archaeology.validate(archaeology_state, player_id, turn,
+            observation=observation, panel=value.get('city_buildings'))
+        if archaeology_mode == 'commands':
+            if (type(excavation_actions) is not list or len(excavation_actions) > 4096
+                    or excavation_actions and is_waiting(controls)):
+                raise ValueError('Borrowed excavations require their active seat')
+            units = [archaeology.validate_excavation(action, observation=observation)['unit_id']
+                     for action in excavation_actions]
+            if units != sorted(set(units)):
+                raise ValueError('Borrowed excavations are unordered or repeated')
+            add_archaeology_choices(value, actions_closed=actions_closed, excavations=excavation_actions)
+    value['decision_id'] = digest(value)
+    return value
 
 
 def digest(value):
@@ -1479,10 +3860,11 @@ def checkpoint_city_query_projection(current, saved, observation, *, requested=(
     pairs=(('city_focus','city_focus_catalogs'),('city_citizen','citizen_catalogs'))
     added=[(kind,key) for flag,(kind,key) in zip(requested,pairs)
            if flag and saved.get(key) is None and current.get(key) is not None]
-    if not added:
+    introduced_fields={key for _,key in pairs if key in current and key not in saved}
+    if not added and not introduced_fields:
         return current, None
     if (current.get('schema')!=saved.get('schema')
-            or current.get('schema') not in _capability_schemas_from(CAPABILITY_CITY_CONTROLS_SCHEMA)):
+            or current.get('schema') not in COMBAT_READINESS_CAPABILITY_SCHEMAS):
         raise ValueError('City-query activation cannot substitute a catalogue version')
     from types import SimpleNamespace
     for value in (current,saved):
@@ -1517,6 +3899,186 @@ def checkpoint_city_query_projection(current, saved, observation, *, requested=(
         added_action_families=[kind for kind,_ in added])
 
 
+def checkpoint_xp1_unit_work_projection(current, saved, observation):
+    """Keep new UnitPanel queries out of comparison with pre-query saves."""
+    if not has_xp1_unit_work(current) or 'unit_work' in saved:
+        return current, None
+    if current['schema'] != saved.get('schema'):
+        raise ValueError('Unit work query activation cannot substitute a catalogue version')
+    from types import SimpleNamespace
+    from .unit_work import NETWORK_ACTION_FIELDS
+    for value in (current, saved):
+        identity = SimpleNamespace(episode_id=value['episode_id'], game_generation=value['game_generation'])
+        validate_capability_catalogue(value, identity, value['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+    fields = ('unit_work', 'unit_work_state', 'unit_work_info')
+    if any(field in saved for field in fields) or any(kind in saved['families'] for kind in NETWORK_ACTION_FIELDS):
+        raise ValueError('Known unit work state cannot be excluded from checkpoint comparison')
+    projected = copy.deepcopy(current)
+    for field in fields:
+        del projected[field]
+    for kind in NETWORK_ACTION_FIELDS:
+        del projected['families'][kind]
+    projected['candidates'] = [row for row in projected['candidates']
+                               if row['action']['kind'] not in NETWORK_ACTION_FIELDS]
+    del projected['decision_id']
+    projected['decision_id'] = digest(projected)
+    return projected, dict(source_schema=saved['schema'], target_schema=current['schema'],
+                           historical_fields_unchanged=True, explicit_xp1_unit_work_query=True,
+                           added_public_fields=list(fields), added_action_families=list(NETWORK_ACTION_FIELDS))
+
+
+def checkpoint_world_score_projection(current, saved, observation):
+    if 'world_score' not in current or 'world_score' in saved:
+        return current, None
+    if current.get('schema') != saved.get('schema'):
+        raise ValueError('World score opt-in cannot substitute a catalogue version')
+    from types import SimpleNamespace
+    for value in (current, saved):
+        identity = SimpleNamespace(episode_id=value['episode_id'], game_generation=value['game_generation'])
+        validate_capability_catalogue(value, identity, value['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+    projected = copy.deepcopy(current)
+    del projected['world_score'], projected['decision_id']
+    projected['decision_id'] = digest(projected)
+    return projected, dict(source_schema=saved['schema'], target_schema=current['schema'],
+                           historical_fields_unchanged=True, explicit_world_score_query=True,
+                           added_public_fields=['world_score'], added_action_families=[])
+
+
+def _archaeology_candidates(value, *, actions_closed):
+    from . import archaeology
+
+    return _archaeology_action_rows(value, archaeology.actions(value['archaeology']), actions_closed)
+
+
+def _archaeology_action_rows(value, actions, actions_closed):
+    if actions_closed or is_waiting(value['turn_controls']):
+        reason = 'session_closed' if actions_closed else 'native_archaeology_actor_waiting'
+        return [], dict(status='unqualified', reason=reason)
+    rows = [dict(candidate_id=digest(action), action=action) for action in actions]
+    return rows, dict(status='queried_complete', candidate_ids=[row['candidate_id'] for row in rows])
+
+
+def add_archaeology_choices(value, *, actions_closed=False, excavations=None):
+    from .archaeology import EXCAVATE, KIND
+
+    rows, family = _archaeology_candidates(value, actions_closed=actions_closed)
+    value['candidates'].extend(rows)
+    value['families'][KIND] = family
+    if excavations is not None:
+        rows, family = _archaeology_action_rows(value, excavations, actions_closed)
+        value['candidates'].extend(rows)
+        value['families'][EXCAVATE] = family
+
+
+def _unit_panel_rows(value, actions, actions_closed, kind, *, gaps=()):
+    if actions_closed or is_waiting(value['turn_controls']):
+        reason = 'session_closed' if actions_closed else f'native_{kind}_actor_waiting'
+        return [], dict(status='unqualified', reason=reason)
+    rows = [dict(candidate_id=digest(action), action=action) for action in actions]
+    family = dict(status='queried_partial' if gaps else 'queried_complete',
+                  candidate_ids=[row['candidate_id'] for row in rows])
+    if gaps:
+        family['unqualified'] = list(gaps)
+    return rows, family
+
+
+def add_air_choices(value, actions, actions_closed=False):
+    from .air_operations import KIND
+
+    rows, family = _unit_panel_rows(value, actions, actions_closed, KIND,
+                                    gaps=['unhighlighted_click_destinations'])
+    value['candidates'].extend(rows)
+    value['families'][KIND] = family
+
+
+def add_build_route_choices(value, actions, actions_closed=False):
+    from .unit_work import BUILD_ROUTE
+
+    rows, family = _unit_panel_rows(value, actions, actions_closed, BUILD_ROUTE)
+    value['candidates'].extend(rows)
+    value['families'][BUILD_ROUTE] = family
+
+
+def add_park_designation_choices(value, actions, actions_closed=False):
+    from .national_parks import DESIGNATE
+
+    rows, family = _unit_panel_rows(value, actions, actions_closed, DESIGNATE)
+    value['candidates'].extend(rows)
+    value['families'][DESIGNATE] = family
+
+
+def add_rock_band_choices(value, panel, actions_closed=False):
+    from .rock_bands import KIND, actions
+
+    value['rock_bands'] = panel
+    choices = [] if panel is None else actions(panel)
+    rows, family = _unit_panel_rows(value, choices, actions_closed, KIND)
+    value['candidates'].extend(rows)
+    value['families'][KIND] = family
+
+
+def _remove_city_purchase_choices(projected):
+    from .plot_purchases import GAPS
+
+    del projected['city_purchases']
+    removed = {row['candidate_id'] for row in projected['candidates']
+               if row['action']['kind'] == 'purchase' and 'plot_id' not in row['action']}
+    family = projected['families']['purchase']
+    if family['status'] == 'queried_partial':
+        family['unqualified'] = list(GAPS)
+        family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
+    projected['candidates'] = [row for row in projected['candidates'] if row['candidate_id'] not in removed]
+
+
+def _faith_purchase_checkpoint(current, saved, observation, *, target_base, required_core, **options):
+    if options['core_sha256'] != required_core or not is_capability_catalogue(saved):
+        engine = 'Rise and Fall' if required_core == _XP1_COMBAT_CORE else 'Gathering Storm'
+        raise ValueError('Faith-purchase checkpoint transition requires ' + engine)
+    from types import SimpleNamespace
+    from . import plot_purchases
+    identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+    validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                  player_id=observation['player_id'], observation=observation)
+    projected = copy.deepcopy(current)
+    projected['schema'] = target_base
+    if projected['city_purchases'] is not None:
+        for city in projected['city_purchases']:
+            city['offers'] = [row for row in city['offers'] if row['action']['currency'] != 'YIELD_FAITH']
+        faith_ids = {row['candidate_id'] for row in projected['candidates']
+                    if row['action'].get('kind') == 'purchase' and 'plot_id' not in row['action']
+                    and row['action']['currency'] == 'YIELD_FAITH'}
+        projected['candidates'] = [row for row in projected['candidates'] if row['candidate_id'] not in faith_ids]
+        family = projected['families']['purchase']
+        if family['status'] == 'queried_partial':
+            family['unqualified'] = list(plot_purchases.CITY_GAPS)
+            family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in faith_ids]
+    projected.pop('decision_id', None)
+    projected['decision_id'] = digest(projected)
+    projected, prior = checkpoint_catalogue(projected, saved, observation, **options)
+    transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                      historical_fields_unchanged=True)
+    transition['added_action_families'] = transition.get('added_action_families', []) + [
+        'faith_unit_building_purchase']
+    return projected, transition
+
+
+def _city_buildings_checkpoint_base(current_schema, saved_schema):
+    direct_base = _XP2_CITY_BUILDINGS_BASE_BY_SCHEMA.get(current_schema)
+    if direct_base is not None:
+        return direct_base
+    commands = _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(current_schema)
+    people = _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA.get(commands or current_schema)
+    bare = _XP2_CITY_BUILDINGS_BASE_BY_SCHEMA.get(people)
+    if bare not in XP2_GREAT_PEOPLE_SCHEMA_BY_BASE:
+        return None
+    base = XP2_GREAT_PEOPLE_SCHEMA_BY_BASE[bare]
+    if commands is not None:
+        base = XP2_GREAT_PEOPLE_ACTIONS_SCHEMA_BY_BASE[base]
+    return base if base == saved_schema else None
+
+
 def checkpoint_catalogue(current, saved, observation, *, production_evidence=None, combat_evidence=None, combat_source_sha256=None, combat_readiness_source_sha256=None, core_sha256=None):
     """Explicit source-bound readback transitions; never rewrite old data.
 
@@ -1524,19 +4086,847 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
     New families and the proven not-ready unit attack offers are excluded only
     from a validated comparison copy. Other schema changes remain mismatches.
     """
+    current_orders, saved_orders = current.get('unit_orders'), saved.get('unit_orders')
+    if (type(current_orders) is dict and 'extensions' in current_orders
+            and type(saved_orders) is dict and 'extensions' not in saved_orders):
+        if core_sha256 != _XP2_COMBAT_CORE:
+            raise ValueError('Additional unit-order transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from .capability_unit_orders import EXTENDED_OPERATIONS
+
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_catalogue(current, identity, current['sequence'], observation['turn'],
+                           player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        del projected['unit_orders']['extensions']
+        projected['unit_orders']['offers'] = [row for row in current_orders['offers']
+            if row['action']['item_type'] not in EXTENDED_OPERATIONS]
+        removed = {row['candidate_id'] for row in current['candidates']
+                   if row['action']['kind'] == 'unit_order'
+                   and row['action']['item_type'] in EXTENDED_OPERATIONS}
+        projected['candidates'] = [row for row in current['candidates'] if row['candidate_id'] not in removed]
+        family = projected['families'].get('unit_order')
+        if family is not None:
+            family['candidate_ids'] = [identifier for identifier in family['candidate_ids'] if identifier not in removed]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = list(transition.get('added_public_fields', []))+['unit_orders.extensions']
+        transition['added_action_variants'] = list(transition.get('added_action_variants', []))+[
+            'unit_order.'+name for name in EXTENDED_OPERATIONS]
+        return projected, transition
     precision_pin,readiness_pin=(combat_checkpoint_sources(core_sha256)
         if core_sha256 is None or core_sha256 in (_XP1_COMBAT_CORE,_XP2_COMBAT_CORE)
         else (None,None))
     if core_sha256 is not None and core_sha256 not in (_XP1_COMBAT_CORE,_XP2_COMBAT_CORE,
             'd7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'):
         raise ValueError('Unknown checkpoint transition engine')
+    from . import air_operations, archaeology, national_parks, rock_bands, unit_work
+    added_archaeology = 'archaeology' in current and 'archaeology' not in saved
+    added_rock_bands = 'rock_bands' in current and 'rock_bands' not in saved
+    current_archaeology, saved_archaeology = current.get('archaeology'), saved.get('archaeology')
+    added_museum = (type(current_archaeology) is dict and current_archaeology.get('schema') == archaeology.MUSEUM_SCHEMA
+                    and type(saved_archaeology) is dict and saved_archaeology.get('schema') == archaeology.SCHEMA)
+    added_expansion_actions = [kind for kind in (archaeology.KIND, archaeology.EXCAVATE,
+                                                 air_operations.KIND, unit_work.BUILD_ROUTE, national_parks.DESIGNATE,
+                                                 rock_bands.KIND)
+                               if kind in current.get('families', {}) and kind not in saved.get('families', {})]
+    if added_archaeology or added_museum or added_expansion_actions or added_rock_bands:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Optional action checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = dict(current)
+        del projected['decision_id']
+        if added_archaeology:
+            del projected['archaeology']
+        if added_rock_bands:
+            del projected['rock_bands']
+        if added_museum:
+            projected['archaeology'] = dict(current_archaeology, schema=archaeology.SCHEMA)
+            del projected['archaeology']['museum_artifacts']
+        if added_expansion_actions:
+            projected['families'] = {key: family for key, family in current['families'].items()
+                                     if key not in added_expansion_actions}
+            projected['candidates'] = [row for row in current['candidates']
+                                       if row['action']['kind'] not in added_expansion_actions]
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        fields = ['archaeology'] if added_archaeology else []
+        if added_rock_bands:
+            fields.append('rock_bands')
+        if added_museum:
+            fields.append('archaeology.museum_artifacts')
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + fields
+        transition['added_action_families'] = transition.get('added_action_families', []) + added_expansion_actions
+        return projected, transition
+    if (xp2_great_person_base_schema(current['schema']) != current['schema']
+            and xp2_great_person_base_schema(saved['schema']) == saved['schema']):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Gathering Storm activation checkpoint transition requires its engine')
+        from .great_person_activation import KIND
+        projected = _xp2_great_person_projection(current, observation=observation, actions_closed=False)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['great_person_activation']
+        transition['added_action_families'] = transition.get('added_action_families', []) + [KIND]
+        return projected, transition
+    from . import city_buildings, diplomacy_overview
+    current_buildings, saved_buildings = current.get('city_buildings'), saved.get('city_buildings')
+    building_schemas = (city_buildings.SCHEMA, *city_buildings.GREAT_WORK_SCHEMAS)
+    current_panel = current_buildings.get('schema') if type(current_buildings) is dict else None
+    saved_panel = saved_buildings.get('schema') if type(saved_buildings) is dict else None
+    if (current_panel in building_schemas and saved_panel in building_schemas
+            and building_schemas.index(current_panel) > building_schemas.index(saved_panel)):
+        if core_sha256 not in (_XP1_COMBAT_CORE, _XP2_COMBAT_CORE) or not is_capability_catalogue(saved):
+            raise ValueError('Great Work checkpoint transition requires an expansion')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        pid, turn = observation['player_id'], observation['turn']
+        validate_capability_catalogue(current, identity, current['sequence'], turn,
+                                      player_id=pid, observation=observation)
+        city_buildings.validate(saved_buildings, pid, turn, observation=observation)
+        projected, added, added_families = project_city_building_version(current, saved_panel)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition.setdefault('added_public_fields', []).extend(added)
+        transition.setdefault('added_action_families', []).extend(added_families)
+        if (current_panel == city_buildings.GREAT_WORK_XP1_COMMANDS_SCHEMA
+                and saved_panel == city_buildings.GREAT_WORK_OVERVIEW_SCHEMA):
+            transition.setdefault('added_action_variants', []).append(city_buildings.GREAT_WORK_MOVE)
+        return projected, transition
+    current_overview, saved_overview = current.get('diplomacy_overview'), saved.get('diplomacy_overview')
+    stock_base = xp2_levy_base_schema(_xp2_religious_chain_base_schema(current['schema']))
+    if (stock_base in STOCK_TRADE_CAPABILITY_SCHEMAS and 'diplomacy_overview' in current
+            and 'diplomacy_overview' not in saved):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Stock diplomacy checkpoint opt-in requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        del projected['diplomacy_overview']
+        del projected['families']['diplomacy_initiate']
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] != 'diplomacy_initiate']
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families', []) + ['diplomacy_initiate']
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['diplomacy_overview']
+        return projected, transition
+    current_diplo = current_overview.get('schema') if type(current_overview) is dict else None
+    saved_diplo = saved_overview.get('schema') if type(saved_overview) is dict else None
+    if (current_diplo in diplomacy_overview.SCHEMAS and saved_diplo in diplomacy_overview.SCHEMAS
+            and diplomacy_overview.SCHEMAS.index(current_diplo) > diplomacy_overview.SCHEMAS.index(saved_diplo)):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Diplomatic relationship checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        pid, turn = observation['player_id'], observation['turn']
+        validate_capability_catalogue(current, identity, current['sequence'], turn,
+                                      player_id=pid, observation=observation)
+        diplomacy_overview.validate(saved_overview, pid, turn)
+        projected = copy.deepcopy(current)
+        projected['diplomacy_overview'] = diplomacy_overview.project_legacy(
+            projected['diplomacy_overview'], pid, turn, schema=saved_diplo)
+        adds_city_state = (current_diplo in diplomacy_overview.CITY_STATE_SCHEMAS
+                           and saved_diplo not in diplomacy_overview.CITY_STATE_SCHEMAS)
+        adds_draft = current_diplo in diplomacy_overview.DRAFT_SCHEMAS and saved_diplo not in diplomacy_overview.DRAFT_SCHEMAS
+        adds_demand = (current_diplo in diplomacy_overview.DEMAND_SCHEMAS
+                       and saved_diplo not in diplomacy_overview.DEMAND_SCHEMAS)
+        adds_major_peace = (current_diplo in diplomacy_overview.MAJOR_PEACE_SCHEMAS
+                            and saved_diplo not in diplomacy_overview.MAJOR_PEACE_SCHEMAS)
+        stock_direct = diplomacy_overview.STOCK_DIRECT_AI_CHOICES
+        added_direct = stock_direct.get(current_diplo, frozenset()).difference(stock_direct.get(saved_diplo, ()))
+        peace_targets = {row['player_id'] for row in current_overview['targets']} if adds_major_peace else set()
+        if adds_city_state:
+            peace_targets.update(row['player_id'] for row in current_overview['city_state_peace']['targets'])
+        added_variants = set()
+        if adds_draft:
+            added_variants.add(diplomacy_overview.OPEN_DEAL)
+        if adds_demand:
+            added_variants.add(diplomacy_overview.OPEN_DEMAND)
+        added_variants.update(added_direct)
+        if added_variants or adds_major_peace or adds_city_state:
+            removed = {row['candidate_id'] for row in projected['candidates']
+                       if row['action']['kind'] == 'diplomacy_initiate'
+                       and (row['action']['choice'] in added_variants
+                            or (row['action']['choice'] == diplomacy_overview.MAKE_PEACE
+                                and row['action']['target_player_id'] in peace_targets))}
+            projected['candidates'] = [row for row in projected['candidates'] if row['candidate_id'] not in removed]
+            family = projected['families']['diplomacy_initiate']
+            family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
+            if current_diplo in diplomacy_overview.STOCK_SCHEMAS:
+                family['unqualified'] = list({
+                    diplomacy_overview.STOCK_MAJOR_PEACE_SCHEMA: STOCK_MAJOR_PEACE_GAPS,
+                    diplomacy_overview.STOCK_NEGOTIATION_SCHEMA: STOCK_NEGOTIATION_GAPS,
+                    diplomacy_overview.STOCK_FRIENDSHIP_SCHEMA: STOCK_FRIENDSHIP_GAPS,
+                    diplomacy_overview.STOCK_PROMISE_SCHEMA: STOCK_PROMISE_GAPS,
+                    diplomacy_overview.STOCK_PROMISE_STATUS_SCHEMA: STOCK_PROMISE_GAPS,
+                }.get(saved_diplo, STOCK_INITIAL_DIPLOMACY_GAPS))
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        fields = transition.setdefault('added_public_fields', [])
+        if saved_diplo == diplomacy_overview.SCHEMA:
+            fields.append('diplomacy_overview.targets[].relationship')
+        if adds_city_state:
+            fields.append('diplomacy_overview.city_state_peace')
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.city_state_peace')
+        if current_diplo in diplomacy_overview.MAJOR_DEAL_SCHEMAS and saved_diplo not in diplomacy_overview.MAJOR_DEAL_SCHEMAS:
+            fields.append('diplomacy_overview.major_deals')
+        if adds_draft:
+            if saved_diplo != diplomacy_overview.STOCK_MAJOR_PEACE_SCHEMA:
+                fields.append('diplomacy_overview.major_deals[].counterparty_is_human')
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.open_deal_draft')
+        if current_diplo in diplomacy_overview.BORDERS_SCHEMAS and saved_diplo not in diplomacy_overview.BORDERS_SCHEMAS:
+            fields.append('diplomacy_overview.major_deals[].open_borders')
+        if (current_diplo in diplomacy_overview.STOCK_PROMISE_STATUS_SCHEMAS
+                and saved_diplo not in diplomacy_overview.STOCK_PROMISE_STATUS_SCHEMAS):
+            fields.append('diplomacy_overview.targets[].active_promises')
+        if adds_demand:
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.open_demand')
+        if adds_major_peace:
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.open_major_peace')
+        if diplomacy_overview.DECLARE_FRIENDSHIP in added_direct:
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.declare_friendship')
+        if added_direct.intersection(diplomacy_overview.PROMISE_CHOICES):
+            transition.setdefault('added_action_variants', []).append('diplomacy_initiate.demand_promise')
+        transition.setdefault('added_action_families', [])
+        transition['public_schema_upgrades'] = transition.get('public_schema_upgrades', []) + [
+            dict(field='diplomacy_overview', source_schema=saved_diplo, target_schema=current_diplo)]
+        return projected, transition
+    if (has_adjacent_unit_work(current) and not has_adjacent_unit_work(saved)
+            and current.get('schema') not in _SECONDARY_UNIT_SCHEMAS):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Adjacent unit-work checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        from . import unit_work, unit_work_info
+
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        kind = unit_work.ADJACENT_KIND
+        del projected['families'][kind], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != kind]
+        if projected['unit_work'] is not None:
+            work, info = projected['unit_work'], projected['unit_work_info']
+            for group in (work, info):
+                group['offers'] = [row for row in group['offers'] if row['action']['kind'] != kind]
+            del info['visible_plots_with_work']
+            info['schema'] = unit_work_info.SCHEMA
+            projected['families'].update(unit_work.network_families(work, projected['candidates'],
+                adjacent=False, unavailable_reason='native_unit_work_acting_boundary_unavailable'))
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families', []) + [kind]
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + [
+            'unit_work_info.visible_plots_with_work']
+        transition['public_schema_upgrades'] = transition.get('public_schema_upgrades', []) + [
+            dict(field='unit_work_info', source_schema=unit_work_info.SCHEMA,
+                 target_schema=unit_work_info.VISIBLE_WORK_SCHEMA)]
+        return projected, transition
+    added_views = [name for name in ('city_growth', 'city_loyalty', 'national_parks')
+                   if name in current and name not in saved]
+    if added_views and is_capability_catalogue(current):
+        if core_sha256 not in (_XP1_COMBAT_CORE, _XP2_COMBAT_CORE) or not is_capability_catalogue(saved):
+            raise ValueError('Public view opt-in requires an expansion checkpoint')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        for name in added_views:
+            del projected[name]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current['schema'],
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + added_views
+        transition.setdefault('added_action_families', [])
+        return projected, transition
     additions = {
+        CAPABILITY_XP1_UNIT_LEVIES_SCHEMA: (CAPABILITY_XP1_CITY_STATE_LEVIES_SCHEMA, 'unit_levies'),
+        CAPABILITY_XP1_CITY_STATE_ENVOYS_SCHEMA: (CAPABILITY_XP1_GOVERNORS_SCHEMA, 'city_state_envoys'),
         CAPABILITY_XP2_STRATEGIC_RESOURCES_SCHEMA: (CAPABILITY_XP2_UNIT_UPGRADE_SCHEMA, 'strategic_resources'),
         CAPABILITY_CURRENT_PRODUCTION_SCHEMA: (CAPABILITY_UNIT_WORK_INFO_SCHEMA, 'production_current'),
         CAPABILITY_UNIT_WORK_INFO_SCHEMA: (CAPABILITY_UNIT_WORK_STATE_SCHEMA, 'unit_work_info'),
         CAPABILITY_UNIT_WORK_STATE_SCHEMA: (CAPABILITY_UNIT_WORK_SCHEMA, 'unit_work_state'),
     }
     current_schema = current.get('schema')
+    preceding_schema = _city_buildings_checkpoint_base(current_schema, saved.get('schema'))
+    if preceding_schema is not None:
+        added_field, group = 'city_buildings', 'City buildings'
+    elif current_schema in _XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA:
+        preceding_schema = _XP2_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA[current_schema]
+        added_field, group = 'city_religion', 'City religion'
+    if preceding_schema is not None and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError(f'{group} checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity=SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected=copy.deepcopy(current)
+        projected['schema'] = preceding_schema
+        del projected[added_field], projected['decision_id']
+        added_actions = ([_remove_great_work_choices(projected)] if added_field == 'city_buildings'
+                         and current_panel in city_buildings.GREAT_WORK_COMMAND_SCHEMAS else [])
+        projected['decision_id']=digest(projected)
+        projected,prior=checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition=dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                        historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + [added_field]
+        transition.setdefault('added_action_families', []).extend(added_actions)
+        return projected,transition
+    from . import placement_inventory
+    current_inventory,saved_inventory=current.get('placement_inventory'),saved.get('placement_inventory')
+    if (type(current_inventory) is dict and current_inventory.get('schema')==placement_inventory.DETAILS_SCHEMA
+            and type(saved_inventory) is dict and saved_inventory.get('schema')==placement_inventory.SCHEMA):
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Placement pillage checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity=SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        placement_inventory.validate(saved_inventory,observation['player_id'],observation['turn'],
+                                     observation=observation)
+        projected=copy.deepcopy(current)
+        projected['placement_inventory']=placement_inventory.project_legacy(
+            current_inventory,observation['player_id'],observation['turn'],observation=observation)
+        del projected['decision_id']
+        projected['decision_id']=digest(projected)
+        projected,prior=checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition=dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                        historical_fields_unchanged=True)
+        transition['added_public_fields']=transition.get('added_public_fields',[])+['placement_inventory.rows[].pillaged']
+        transition.setdefault('added_action_families',[])
+        transition['public_schema_upgrades']=transition.get('public_schema_upgrades',[])+[
+            dict(field='placement_inventory',source_schema=placement_inventory.SCHEMA,
+                 target_schema=placement_inventory.DETAILS_SCHEMA)]
+        return projected,transition
+    if current_schema in _XP2_PANTHEON_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Pantheon state checkpoint transition requires Gathering Storm')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP2_PANTHEON_BASE_BY_SCHEMA[current_schema]
+        del projected['pantheon'], projected['families']['pantheon'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != 'pantheon']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['pantheon']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['pantheon']
+        return projected,transition
+    if current_schema in _XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('City religion details checkpoint transition requires Rise and Fall')
+        from . import city_religion
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_CITY_RELIGION_DETAILS_BASE_BY_SCHEMA[current_schema]
+        projected['city_religion'] = city_religion.project_majority(
+            current['city_religion'], observation['player_id'], observation['turn'], observation=observation)
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['city_religion.cities[].religions']
+        transition['public_schema_upgrades'] = transition.get('public_schema_upgrades',[]) + [
+            dict(field='city_religion',source_schema=city_religion.SCHEMA,target_schema=city_religion.DETAILS_SCHEMA)]
+        return projected,transition
+    religion_base = (_XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA.get(current_schema)
+                     or _XP2_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA.get(current_schema))
+    if religion_base is not None and saved.get('schema') != current_schema:
+        religion_core = (_XP1_COMBAT_CORE if current_schema in _XP1_RELIGIOUS_UNIT_OPERATIONS_BASE_BY_SCHEMA
+                         else _XP2_COMBAT_CORE)
+        if core_sha256 != religion_core or not is_capability_catalogue(saved):
+            engine = 'Rise and Fall' if religion_core == _XP1_COMBAT_CORE else 'Gathering Storm'
+            raise ValueError('Religious unit operation checkpoint transition requires ' + engine)
+        from .religious_unit_operations import KINDS
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = religion_base
+        del projected['religious_unit_operations']
+        for kind in KINDS: del projected['families'][kind]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] not in KINDS]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['religious_unit_operations']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + list(KINDS)
+        return projected,transition
+    if current_schema in _XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Great Person activation checkpoint transition requires Rise and Fall')
+        from .great_person_activation import KIND
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_GREAT_PERSON_ACTIVATION_BASE_BY_SCHEMA[current_schema]
+        del projected['great_person_activation'], projected['families'][KIND]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != KIND]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['great_person_activation']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + [KIND]
+        return projected,transition
+    if current_schema in _XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Custom religion checkpoint transition requires Rise and Fall')
+        from .religion_custom_names import KIND
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_RELIGION_CUSTOM_NAMES_BASE_BY_SCHEMA[current_schema]
+        del projected['religion_custom_names'], projected['families'][KIND]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != KIND]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['religion_custom_names']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + [KIND]
+        return projected,transition
+    if current_schema in _XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Great Person rejection checkpoint transition requires Rise and Fall')
+        from .great_people_actions import REJECT
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_GREAT_PEOPLE_REJECT_BASE_BY_SCHEMA[current_schema]
+        del projected['families'][REJECT]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != REJECT]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families',[]) + [REJECT]
+        return projected,transition
+    gp_command_base = (_XP1_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(current_schema)
+                       or _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA.get(current_schema))
+    if gp_command_base is not None and saved.get('schema') != current_schema:
+        xp2 = current_schema in _XP2_GREAT_PEOPLE_ACTIONS_BASE_BY_SCHEMA
+        if core_sha256 != (_XP2_COMBAT_CORE if xp2 else _XP1_COMBAT_CORE) or not is_capability_catalogue(saved):
+            engine = 'Gathering Storm' if xp2 else 'Rise and Fall'
+            raise ValueError(f'Great Person command checkpoint transition requires {engine}')
+        from .great_people_actions import KINDS, LEGACY_KINDS
+        from types import SimpleNamespace
+        kinds = KINDS if xp2 else LEGACY_KINDS
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = gp_command_base
+        for kind in kinds:
+            del projected['families'][kind]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] not in kinds]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_action_families'] = transition.get('added_action_families',[]) + list(kinds)
+        return projected,transition
+    prophet_activation_base = (_XP1_PROPHET_ACTIVATION_BASE_BY_SCHEMA.get(current_schema)
+        or _XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA.get(current_schema))
+    if prophet_activation_base is not None and saved.get('schema') != current_schema:
+        expected_core = (_XP2_COMBAT_CORE if current_schema in _XP2_PROPHET_ACTIVATION_BASE_BY_SCHEMA
+                         else _XP1_COMBAT_CORE)
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            engine = 'Gathering Storm' if expected_core == _XP2_COMBAT_CORE else 'Rise and Fall'
+            raise ValueError('Prophet activation checkpoint transition requires ' + engine)
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = prophet_activation_base
+        del projected['prophet_activation'], projected['families']['activate_prophet'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='activate_prophet']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['prophet_activation']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['activate_prophet']
+        return projected,transition
+    great_people_base = (_XP1_GREAT_PEOPLE_BASE_BY_SCHEMA.get(current_schema)
+                         or _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA.get(current_schema))
+    if great_people_base is not None and saved.get('schema') != current_schema:
+        xp2 = current_schema in _XP2_GREAT_PEOPLE_BASE_BY_SCHEMA
+        if core_sha256 != (_XP2_COMBAT_CORE if xp2 else _XP1_COMBAT_CORE) or not is_capability_catalogue(saved):
+            engine = 'Gathering Storm' if xp2 else 'Rise and Fall'
+            raise ValueError(f'Great People checkpoint transition requires {engine}')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = great_people_base
+        del projected['great_people'], projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['great_people']
+        transition.setdefault('added_action_families', [])
+        return projected,transition
+    religion_founding_base = (_XP1_RELIGION_FOUNDING_BASE_BY_SCHEMA.get(current_schema)
+        or _XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA.get(current_schema))
+    if religion_founding_base is not None and saved.get('schema') != current_schema:
+        expected_core = (_XP2_COMBAT_CORE if current_schema in _XP2_RELIGION_FOUNDING_BASE_BY_SCHEMA
+                         else _XP1_COMBAT_CORE)
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            engine = 'Gathering Storm' if expected_core == _XP2_COMBAT_CORE else 'Rise and Fall'
+            raise ValueError('Religion foundation checkpoint transition requires ' + engine)
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = religion_founding_base
+        del projected['religion_founding'], projected['families']['found_religion'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='found_religion']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['religion_founding']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['found_religion']
+        return projected,transition
+    religion_beliefs_base = (_XP1_RELIGION_BELIEFS_BASE_BY_SCHEMA.get(current_schema)
+        or _XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA.get(current_schema))
+    if religion_beliefs_base is not None and saved.get('schema') != current_schema:
+        expected_core = (_XP2_COMBAT_CORE if current_schema in _XP2_RELIGION_BELIEFS_BASE_BY_SCHEMA
+                         else _XP1_COMBAT_CORE)
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            engine = 'Gathering Storm' if expected_core == _XP2_COMBAT_CORE else 'Rise and Fall'
+            raise ValueError('Belief checkpoint transition requires ' + engine)
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = religion_beliefs_base
+        del projected['religion_beliefs'], projected['families']['add_belief'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='add_belief']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['religion_beliefs']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['add_belief']
+        return projected,transition
+    if current_schema in _XP1_PANTHEON_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Pantheon checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_PANTHEON_BASE_BY_SCHEMA[current_schema]
+        del projected['pantheon'], projected['families']['pantheon'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='pantheon']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['pantheon']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['pantheon']
+        return projected,transition
+    if current_schema in _XP1_CITY_RELIGION_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('City religion checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_CITY_RELIGION_BASE_BY_SCHEMA[current_schema]
+        del projected['city_religion'], projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['city_religion']
+        return projected,transition
+    if current_schema in _XP1_PRODUCTION_INFO_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Production information checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_PRODUCTION_INFO_BASE_BY_SCHEMA[current_schema]
+        del projected['production_current'], projected['production_info'], projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['production_current','production_info']
+        return projected,transition
+    if current_schema in _XP1_UPGRADE_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Unit upgrade checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_UPGRADE_BASE_BY_SCHEMA[current_schema]
+        del projected['unit_upgrades'], projected['families']['upgrade_unit'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='upgrade_unit']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['unit_upgrades']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['upgrade_unit']
+        return projected,transition
+    if current_schema in _XP1_PROMOTION_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Unit promotion checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_PROMOTION_BASE_BY_SCHEMA[current_schema]
+        del projected['unit_promotions'], projected['families']['promote_unit'], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind']!='promote_unit']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['unit_promotions']
+        transition['added_action_families'] = transition.get('added_action_families',[]) + ['promote_unit']
+        return projected,transition
+    if current_schema in _XP1_CITY_BUILDINGS_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('City building checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current,identity,current['sequence'],observation['turn'],
+                                      player_id=observation['player_id'],observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_CITY_BUILDINGS_BASE_BY_SCHEMA[current_schema]
+        del projected['city_buildings'], projected['decision_id']
+        added_actions = ([_remove_great_work_choices(projected)]
+                         if current_panel in city_buildings.GREAT_WORK_COMMAND_SCHEMAS else [])
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected,saved,observation,
+            production_evidence=production_evidence,combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256,core_sha256=core_sha256)
+        transition = dict(prior or {},source_schema=saved['schema'],target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields',[]) + ['city_buildings']
+        transition.setdefault('added_action_families', []).extend(added_actions)
+        return projected,transition
+    if current_schema in _XP1_FAITH_PURCHASE_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        return _faith_purchase_checkpoint(current, saved, observation,
+            target_base=_XP1_FAITH_PURCHASE_BASE_BY_SCHEMA[current_schema], required_core=_XP1_COMBAT_CORE,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+    if current_schema in _XP1_CITY_PURCHASE_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Gold purchase checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_CITY_PURCHASE_BASE_BY_SCHEMA[current_schema]
+        _remove_city_purchase_choices(projected)
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['city_purchases']
+        transition['added_action_families'] = transition.get('added_action_families', []) + [
+            'standard_gold_unit_building_purchase']
+        return projected, transition
+    if current_schema in _XP1_PLOT_PURCHASE_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Plot purchase checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_PLOT_PURCHASE_BASE_BY_SCHEMA[current_schema]
+        del projected['plot_purchases'], projected['families']['purchase']
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] != 'purchase']
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['plot_purchases']
+        transition['added_action_families'] = transition.get('added_action_families', []) + ['purchase']
+        return projected, transition
+    if current_schema in _XP1_GOVERNMENT_BASE_BY_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Government and policy checkpoint transition requires Rise and Fall')
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'],
+                                   game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        fields = ('government', 'policies')
+        projected = copy.deepcopy(current)
+        projected['schema'] = _XP1_GOVERNMENT_BASE_BY_SCHEMA[current_schema]
+        for field in fields:
+            del projected[field]
+            del projected['families'][field]
+        kinds = (*fields, 'retain_government')
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] not in kinds]
+        del projected['decision_id']
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + list(fields)
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(fields)
+        return projected, transition
     if current_schema == CAPABILITY_XP2_STOCK_CONGRESS_SCHEMA and saved.get('schema') != current_schema:
         if core_sha256 != _XP2_COMBAT_CORE or saved.get('schema') != CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA:
             raise ValueError('Congress transition requires the previous stock dedication checkpoint')
@@ -1560,9 +4950,15 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         return projected, dict(source_schema=saved['schema'], target_schema=current_schema,
             historical_fields_unchanged=True, added_public_fields=list(fields),
             added_action_families=list(world_congress.CANDIDATE_FIELDS))
-    if (current_schema == CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA
-            and saved.get('schema') != current_schema):
-        if core_sha256 != _XP2_COMBAT_CORE or saved.get('schema') != CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA:
+    dedication_predecessors = {
+        CAPABILITY_XP1_DEDICATIONS_SCHEMA: (_XP1_COMBAT_CORE, CAPABILITY_XP1_UNIT_LEVIES_SCHEMA),
+        CAPABILITY_XP2_STOCK_DEDICATIONS_SCHEMA: (_XP2_COMBAT_CORE, CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA),
+    }
+    if current_schema in dedication_predecessors and saved.get('schema') != current_schema:
+        expected_core, previous_schema = dedication_predecessors[current_schema]
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            raise ValueError('Dedication transition requires its exact expansion checkpoint')
+        if core_sha256 == _XP2_COMBAT_CORE and saved.get('schema') != previous_schema:
             raise ValueError('Dedication transition requires its previous stock formation checkpoint')
         from types import SimpleNamespace
         from . import dedications
@@ -1570,16 +4966,22 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
                                       player_id=observation['player_id'], observation=observation)
         projected = copy.deepcopy(current)
-        projected['schema'] = CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA
+        projected['schema'] = previous_schema
         del projected['dedications']
         del projected['families'][dedications.KIND]
         projected['candidates'] = [row for row in projected['candidates']
                                    if row['action']['kind'] != dedications.KIND]
         del projected['decision_id']
         projected['decision_id'] = digest(projected)
-        return projected, dict(source_schema=saved['schema'], target_schema=current_schema,
-            historical_fields_unchanged=True, added_public_fields=['dedications'],
-            added_action_families=[dedications.KIND])
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['dedications']
+        transition['added_action_families'] = transition.get('added_action_families', []) + [dedications.KIND]
+        return projected, transition
     if current_schema == CAPABILITY_XP2_STOCK_FORMATIONS_SCHEMA and saved.get('schema') != current_schema:
         if core_sha256 != _XP2_COMBAT_CORE or saved.get('schema') != CAPABILITY_XP2_STANDARD_TRADE_SCHEMA:
             raise ValueError('Formation transition requires the previous stock trade checkpoint')
@@ -1617,12 +5019,61 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         projected['decision_id'] = digest(projected)
         return projected, dict(source_schema=saved['schema'], target_schema=current_schema,
             historical_fields_unchanged=True, added_public_fields=list(fields), added_action_families=list(kinds))
+    if current_schema == CAPABILITY_XP1_GOVERNORS_SCHEMA and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Governor checkpoint transition requires the Rise and Fall catalogue')
+        from .governors import ACTION_FIELDS
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = CAPABILITY_XP1_DISTRICT_SHOT_SCHEMA
+        del projected['governors'], projected['decision_id']
+        for kind in ACTION_FIELDS:
+            del projected['families'][kind]
+        projected['candidates'] = [row for row in projected['candidates'] if row['action']['kind'] not in ACTION_FIELDS]
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['governors']
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(ACTION_FIELDS)
+        return projected, transition
+    if current_schema in _XP1_SHOT_TRANSITIONS and saved.get('schema') != current_schema:
+        if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+            raise ValueError('Ranged-shot checkpoint transition requires the Rise and Fall catalogue')
+        base, field, kind = _XP1_SHOT_TRANSITIONS[current_schema]
+        from types import SimpleNamespace
+        identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
+        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
+                                      player_id=observation['player_id'], observation=observation)
+        projected = copy.deepcopy(current)
+        projected['schema'] = base
+        del projected[field], projected['families'][kind], projected['decision_id']
+        projected['candidates'] = [row for row in projected['candidates']
+                                   if row['action']['kind'] != kind]
+        projected['decision_id'] = digest(projected)
+        projected, prior = checkpoint_catalogue(projected, saved, observation,
+            production_evidence=production_evidence, combat_evidence=combat_evidence,
+            combat_source_sha256=combat_source_sha256,
+            combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
+        transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
+                          historical_fields_unchanged=True)
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + [field]
+        transition['added_action_families'] = transition.get('added_action_families', []) + [kind]
+        return projected, transition
     if current_schema in _CAPTURE_BASE_SCHEMA and saved.get('schema') != current_schema:
         from . import captured_city
         from types import SimpleNamespace
         identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
-            raise ValueError('Captured-city checkpoint transition requires Gathering Storm')
+        capture_core = (_XP1_COMBAT_CORE if current_schema == CAPABILITY_XP1_CAPTURED_CITY_SCHEMA
+                        else _XP2_COMBAT_CORE)
+        if core_sha256 != capture_core or not is_capability_catalogue(saved):
+            raise ValueError('Captured-city checkpoint transition requires its exact expansion')
         validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
                                       player_id=observation['player_id'], observation=observation)
         if current['captured_city'] is None or current['captured_city']['city'] is not None:
@@ -1640,15 +5091,20 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         transition['added_public_fields'] = transition.get('added_public_fields', []) + ['captured_city']
         transition['added_action_families'] = transition.get('added_action_families', []) + [captured_city.KIND]
         return projected, transition
-    if current_schema == CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA and saved.get('schema') != current_schema:
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
-            raise ValueError('Trade overview checkpoint transition requires Gathering Storm')
+    overview_predecessors = {
+        CAPABILITY_XP1_TRADE_OVERVIEW_SCHEMA: (_XP1_COMBAT_CORE, CAPABILITY_XP1_TRADE_SCHEMA),
+        CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA: (_XP2_COMBAT_CORE, CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA),
+    }
+    if current_schema in overview_predecessors and saved.get('schema') != current_schema:
+        expected_core, previous_schema = overview_predecessors[current_schema]
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            raise ValueError('Trade overview checkpoint transition requires its exact expansion engine')
         from types import SimpleNamespace
         identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])
         validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
                                       player_id=observation['player_id'], observation=observation)
         projected = copy.deepcopy(current)
-        projected['schema'] = CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA
+        projected['schema'] = previous_schema
         projected.pop('trade_overview')
         projected.pop('trade_overview_status')
         projected.pop('decision_id')
@@ -1823,16 +5279,21 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         transition['added_public_fields'] = transition.get('added_public_fields', []) + ['espionage']
         transition['added_action_families'] = transition.get('added_action_families', []) + list(kinds)
         return projected, transition
-    if current_schema == CAPABILITY_XP2_TRADE_SCHEMA and saved.get('schema') != current_schema:
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
-            raise ValueError('Trade checkpoint transition requires Gathering Storm')
+    trade_predecessors = {
+        CAPABILITY_XP1_TRADE_SCHEMA: (_XP1_COMBAT_CORE, CAPABILITY_XP1_DEDICATIONS_SCHEMA),
+        CAPABILITY_XP2_TRADE_SCHEMA: (_XP2_COMBAT_CORE, CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA),
+    }
+    if current_schema in trade_predecessors and saved.get('schema') != current_schema:
+        expected_core, previous_schema = trade_predecessors[current_schema]
+        if core_sha256 != expected_core or not is_capability_catalogue(saved):
+            raise ValueError('Trade checkpoint transition requires its exact expansion engine')
         from types import SimpleNamespace
         identity = SimpleNamespace(episode_id=current['episode_id'],
                                    game_generation=current['game_generation'])
         validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
                                       player_id=observation['player_id'], observation=observation)
         projected = copy.deepcopy(current)
-        projected['schema'] = CAPABILITY_XP2_INITIAL_DIPLOMACY_SCHEMA
+        projected['schema'] = previous_schema
         fields = ('trade_routes', 'trade_origins')
         kinds = ('make_trade_route', 'change_trade_origin')
         for field in fields:
@@ -1906,22 +5367,33 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         transition['added_public_fields'] = transition.get('added_public_fields', []) + ['governors']
         transition['added_action_families'] = transition.get('added_action_families', []) + list(governor_fields)
         return projected, transition
-    if (current_schema == CAPABILITY_XP2_ENVOYS_SCHEMA
-            and saved.get('schema') != CAPABILITY_XP2_ENVOYS_SCHEMA):
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
-            raise ValueError('Envoy checkpoint transition requires Gathering Storm')
+    city_state_additions = {
+        CAPABILITY_XP1_CITY_STATE_LEVIES_SCHEMA: (CAPABILITY_XP1_ENVOY_CHOICES_SCHEMA,
+            _XP1_COMBAT_CORE, ('city_state_levies',), ('levy_city_state_military',)),
+        CAPABILITY_XP1_ENVOY_CHOICES_SCHEMA: (CAPABILITY_XP1_CITY_STATE_ENVOYS_SCHEMA,
+            _XP1_COMBAT_CORE, ('envoys',), ('send_envoy', 'retain_envoys')),
+        CAPABILITY_XP2_ENVOYS_SCHEMA: (CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA,
+            _XP2_COMBAT_CORE, ('envoys',), ('send_envoy', 'retain_envoys')),
+        **{schema: (base, _XP2_COMBAT_CORE, ('city_state_levies', 'unit_levies'),
+                    ('levy_city_state_military',)) for schema, base in _XP2_LEVY_BASE_SCHEMA.items()},
+    }
+    if current_schema in city_state_additions and saved.get('schema') != current_schema:
+        previous_schema, required_core, fields, kinds = city_state_additions[current_schema]
+        if core_sha256 != required_core or not is_capability_catalogue(saved):
+            raise ValueError('Envoy checkpoint transition requires its exact engine')
         from types import SimpleNamespace
         identity = SimpleNamespace(episode_id=current['episode_id'],
                                    game_generation=current['game_generation'])
         validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
                                       player_id=observation['player_id'], observation=observation)
         projected = copy.deepcopy(current)
-        projected['schema'] = CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA
-        projected.pop('envoys')
-        for kind in ('send_envoy', 'retain_envoys'):
+        projected['schema'] = previous_schema
+        for field in fields:
+            projected.pop(field)
+        for kind in kinds:
             projected['families'].pop(kind)
         projected['candidates'] = [row for row in projected['candidates']
-            if row['action']['kind'] not in ('send_envoy', 'retain_envoys')]
+            if row['action']['kind'] not in kinds]
         projected.pop('decision_id')
         projected['decision_id'] = digest(projected)
         projected, prior = checkpoint_catalogue(projected, saved, observation,
@@ -1930,48 +5402,16 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
             combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
         transition = dict(prior or {}, source_schema=saved['schema'], target_schema=current_schema,
                           historical_fields_unchanged=True)
-        transition['added_public_fields'] = transition.get('added_public_fields', []) + ['envoys']
-        transition['added_action_families'] = transition.get('added_action_families', []) + [
-            'send_envoy', 'retain_envoys']
+        transition['added_public_fields'] = transition.get('added_public_fields', []) + list(fields)
+        transition['added_action_families'] = transition.get('added_action_families', []) + list(kinds)
         return projected, transition
     if (current_schema == CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA
             and saved.get('schema') != CAPABILITY_XP2_FAITH_PURCHASE_SCHEMA):
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
-            raise ValueError('Faith-purchase checkpoint transition requires Gathering Storm')
-        from types import SimpleNamespace
-        identity = SimpleNamespace(episode_id=current['episode_id'],
-                                   game_generation=current['game_generation'])
-        validate_capability_catalogue(current, identity, current['sequence'], observation['turn'],
-                                      player_id=observation['player_id'], observation=observation)
-        from . import plot_purchases
-        projected = copy.deepcopy(current)
-        projected['schema'] = CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA
-        if projected['city_purchases'] is not None:
-            for city in projected['city_purchases']:
-                city['offers'] = [row for row in city['offers']
-                                  if row['action']['currency'] != 'YIELD_FAITH']
-            faith_ids = {row['candidate_id'] for row in projected['candidates']
-                         if row['action'].get('kind') == 'purchase'
-                         and 'plot_id' not in row['action']
-                         and row['action']['currency'] == 'YIELD_FAITH'}
-            projected['candidates'] = [row for row in projected['candidates']
-                                       if row['candidate_id'] not in faith_ids]
-            family = projected['families']['purchase']
-            if family['status'] == 'queried_partial':
-                family['unqualified'] = list(plot_purchases.CITY_GAPS)
-                family['candidate_ids'] = [key for key in family['candidate_ids']
-                                           if key not in faith_ids]
-        projected.pop('decision_id', None)
-        projected['decision_id'] = digest(projected)
-        projected, prior = checkpoint_catalogue(projected, saved, observation,
+        return _faith_purchase_checkpoint(current, saved, observation,
+            target_base=CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA, required_core=_XP2_COMBAT_CORE,
             production_evidence=production_evidence, combat_evidence=combat_evidence,
             combat_source_sha256=combat_source_sha256,
             combat_readiness_source_sha256=combat_readiness_source_sha256, core_sha256=core_sha256)
-        transition = dict(prior or {}, source_schema=saved['schema'],
-                          target_schema=current_schema, historical_fields_unchanged=True)
-        transition['added_action_families'] = transition.get('added_action_families', []) + [
-            'faith_unit_building_purchase']
-        return projected, transition
     if (current_schema == CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA
             and saved.get('schema') != CAPABILITY_XP2_POLICY_RECONFIRM_SCHEMA):
         if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
@@ -2153,16 +5593,8 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
                                        if row['action']['kind'] != 'promote_unit']
             added = 'promote_unit'
         elif current_schema == CAPABILITY_XP2_CITY_PURCHASE_SCHEMA:
-            from .plot_purchases import GAPS
             projected['schema'] = CAPABILITY_XP2_PLOT_PURCHASE_SCHEMA
-            del projected['city_purchases']
-            removed = {row['candidate_id'] for row in projected['candidates']
-                       if row['action']['kind'] == 'purchase' and 'plot_id' not in row['action']}
-            family = projected['families']['purchase']
-            if family['status'] == 'queried_partial':
-                family['unqualified'] = list(GAPS)
-                family['candidate_ids'] = [key for key in family['candidate_ids'] if key not in removed]
-            projected['candidates'] = [row for row in projected['candidates'] if row['candidate_id'] not in removed]
+            _remove_city_purchase_choices(projected)
             added = 'standard_gold_unit_building_purchase'
         else:
             projected['schema'] = CAPABILITY_XP2_UNIT_SKIP_SCHEMA
@@ -2207,7 +5639,10 @@ def checkpoint_catalogue(current, saved, observation, *, production_evidence=Non
         return projected, transition
     if current_schema in additions and saved.get('schema') != current_schema:
         previous_schema, added_field = additions[current_schema]
-        if core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
+        if current_schema in (CAPABILITY_XP1_CITY_STATE_ENVOYS_SCHEMA, CAPABILITY_XP1_UNIT_LEVIES_SCHEMA):
+            if core_sha256 != _XP1_COMBAT_CORE or not is_capability_catalogue(saved):
+                raise ValueError('City-state information checkpoint transition requires Rise and Fall')
+        elif core_sha256 != _XP2_COMBAT_CORE or not is_capability_catalogue(saved):
             raise ValueError('Public information checkpoint transition requires Gathering Storm')
         from types import SimpleNamespace
         identity = SimpleNamespace(episode_id=current['episode_id'], game_generation=current['game_generation'])

@@ -128,6 +128,56 @@ class AbsentEventTests(unittest.TestCase):
         self.assertEqual(f.deferred._sequence,0);self.assertEqual(f.deferred.drain(),0)
         self.assertEqual(f.native_feedback,[]);self.assertEqual(f.calls,[])
 
+    def test_installed_unit_transfer_copies_only_its_known_descriptor(self):
+        import pefile
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+
+        proof = profile.unit_transfer_source(_XP1_PROFILE)
+        with Path(_XP1_PROFILE.path).open('rb') as source:
+            self.assertEqual(hashlib.file_digest(source, 'sha256').hexdigest(), proof['image']['sha256'])
+        image = pefile.PE(_XP1_PROFILE.path, fast_load=True)
+        spans = [(row['rva'], image.get_data(row['rva'], row['bytes']))
+                 for row in proof['core_spans'].values()]
+        kind = profile.UNIT_TRANSFER_KIND
+        for case in ('valid', 'unknown', 'missing', 'foreign_image', 'changed_native_bytes'):
+            with self.subTest(case=case):
+                f = self.fixture()
+                if case != 'foreign_image':
+                    f.backend.core._civ6_host_execution_image = _XP1_PROFILE
+                for rva, raw in spans:
+                    f.memory.put(f.memory.base + rva, raw)
+                if case == 'changed_native_bytes':
+                    rva, raw = spans[0]
+                    f.memory.put(f.memory.base + rva, bytes([raw[0] ^ 1]) + raw[1:])
+                fields = f.fields()
+                fields[VALUE] = scalar(2, 62)
+                if case != 'missing':
+                    fields[profile.UNIT_TRANSFER_SECOND_KEY] = scalar(2, 63)
+                event = kind + 1 if case == 'unknown' else kind
+                if case == 'valid':
+                    preceding = 0xc52231ab
+                    f.registry(preceding)
+                    self.assertEqual(f.deferred.cache_update(f.host.pointer, preceding, (23 << 32) | 0x15d11e18), 0)
+                    pending = list(f.deferred.pending)
+                    self.assertEqual(len(pending), 1)
+                    self.assertEqual(f.dispatch(event, fields), 0)
+                    receipt = next(r for stage, r in f.emitted if stage == 'native_shared_absent_descriptor_event')
+                    self.assertEqual(receipt['normalized_fields']['scalar_values'], [62, 63])
+                    self.assertEqual(receipt['normalized_fields']['normalized_descriptor_hex'],
+                                     struct.pack('<HHI', 0xffff, 1, 0xfffffffe).hex())
+                    self.assertFalse(receipt['normalized_fields']['gameplay_success_asserted'])
+                    self.assertTrue(receipt['preceding_fifo_preserved'])
+                    self.assertEqual(f.all_reads.count((0x7a200000, 8)), 1)
+                    self.assertEqual(f.deferred.pending, pending)
+                    self.assertEqual(f.deferred._sequence, 1)
+                    self.assertEqual(f.deferred.drain(), 1)
+                else:
+                    with self.assertRaises(ValueError):
+                        f.dispatch(event, fields)
+                    self.assertNotIn((0x7a200000, 8), f.all_reads)
+                    self.assertEqual(f.deferred._sequence, 0)
+                self.assertEqual(f.deferred.pending, [])
+
     def test_closed_registry_profile_and_bad_borrows_refuse(self):
         profile.verify_source()
         messages={'registered':'absent from the captured registry','unknown_shape':'scalar descriptor keys',
@@ -171,8 +221,10 @@ class AbsentEventTests(unittest.TestCase):
         self.assertEqual(len(f.all_reads),before);self.assertEqual(f.deferred.pending,[])
 
     def test_source_dependency_files_match_exact_pins(self):
-        dependencies=profile.source_dependencies()
-        for relative,digest in (profile.SOURCE,profile.TWO_SOURCE):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+
+        dependencies=profile.source_dependencies(execution_image=_XP1_PROFILE)
+        for relative,digest in (profile.SOURCE,profile.TWO_SOURCE,profile.UNIT_TRANSFER_SOURCE):
             self.assertEqual(dependencies[str((LAB/relative).resolve())],digest)
         self.assertGreaterEqual(len(dependencies),12)
         for name,expected in dependencies.items():

@@ -173,7 +173,9 @@ def source_dependencies(*,execution_image):
     result[str(resolve_path(resource_root()/SOURCE[0]).resolve())]=SOURCE[1]
     for row in [*proof['inputs'].values(),*proof['files'].values()]:
         path=resolve_path(Path(row['path']))
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        with path.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual!=row['sha256']:
             raise ValueError('Congress active effects source dependency changed')
         result[str(path.resolve())]=row['sha256']
     ui=_source(UI_SOURCE)
@@ -189,7 +191,9 @@ def source_dependencies(*,execution_image):
     result[str(resolve_path(resource_root()/UI_SOURCE[0]).resolve())]=UI_SOURCE[1]
     for row in ui['inputs'].values():
         path=resolve_path(Path(row['path']))
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        with path.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual!=row['sha256']:
             raise ValueError('Congress emergency UI dependency changed')
         result[str(path.resolve())]=row['sha256']
     return result

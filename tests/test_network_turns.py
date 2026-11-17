@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from civ6_host.runtime.network_turns import parse_activity, advance, submit
+from civ6_host.runtime.network_turns import parse_activity, advance, read_activity, submit
 
 
 class NetworkTurnTests(unittest.TestCase):
@@ -12,6 +12,43 @@ class NetworkTurnTests(unittest.TestCase):
         parsed = parse_activity(b'4|0|0|0,1,1,0;1,1,1,0;2,0,0,0', (0,1,2))
         self.assertEqual([r['player_id'] for r in parsed['rows'] if r['active']], [0,1])
         self.assertEqual(parsed['turn'], 4)
+
+    def test_inactive_local_observer_only_reads_active_flags_for_the_roster(self):
+        from lupa.lua51 import LuaError, LuaRuntime
+        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+
+        lua = LuaRuntime(encoding=None)
+        lua.execute(b"""
+alive,observer,localID,localActive=false,64,0,false
+PlayerTypes={OBSERVER=64}
+Game={GetCurrentGameTurn=function() return 4 end,
+ GetLocalPlayer=function() return localID end, GetLocalObserver=function() return observer end}
+Players={[0]={IsAlive=function() return alive end, WasEverAlive=function() return true end,
+   IsTurnActive=function() return localActive end},
+ [1]={IsTurnActive=function() return true end}}
+""")
+        owner = SimpleNamespace(
+            network_reference={'major_player_ids': (0, 1)},
+            backend=SimpleNamespace(load_abi=SimpleNamespace(core_sha256=XP2_CORE_SHA256),
+                                    core=object(), runtime=SimpleNamespace(read=Mock())),
+            prefix=SimpleNamespace(ui_child=object(), runtime=SimpleNamespace(
+                evaluate_text=lambda child, source, name, **kwargs: lua.execute(source))),
+        )
+        with patch('civ6_host.runtime.xp1_status_profiles.bind_owner'):
+            args = dict(core_sha256=XP2_CORE_SHA256, inactive_player_id=0)
+            facts = read_activity(owner, **args)
+            self.assertEqual(facts, dict(turn=4, local_player_id=0, observer_id=None, rows=[
+                dict(player_id=0, active=False), dict(player_id=1, active=True)]))
+            for key, bad, old in ((b'localID', 1, 0), (b'observer', 1, 64), (b'alive', True, False)):
+                lua.globals()[key] = bad
+                with self.assertRaises(LuaError):
+                    read_activity(owner, **args)
+                lua.globals()[key] = old
+            lua.globals()[b'localActive'] = True
+            with self.assertRaisesRegex(ValueError, 'Inactive LAN actor is foreign or active'):
+                read_activity(owner, **args)
+        with self.assertRaises(ValueError):
+            parse_activity(b'4|0|inactive|0,0;1,1', (0, 1))
 
     def test_activity_rejects_out_of_range_identity_and_malformed_expected_roster(self):
         for raw, roster in ((b'4|64|0|0,1,1,0', (0,)),

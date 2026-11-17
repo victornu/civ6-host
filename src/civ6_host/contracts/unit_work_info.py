@@ -1,11 +1,18 @@
 """Public UnitPanel result text and visible own-unit terrain state."""
 SCHEMA = 'civ6-host.unit-work-info.v1'
+VISIBLE_WORK_SCHEMA = 'civ6-host.unit-work-info.v2'
 MAX_BYTES = 4 * 1024 * 1024
+_PLOT_FIELDS = {'plot_id', 'improvement', 'improvement_pillaged', 'route', 'route_pillaged'}
 
 
-def validate(value, player_id, turn, *, work_catalog, observation=None, work_state=None):
-    if (type(value) is not dict or set(value) != {'schema','player_id','turn','offers','targets'}
-            or value['schema'] != SCHEMA or type(value['player_id']) is not int
+def validate(value, player_id, turn, *, work_catalog, observation=None, work_state=None,
+             visible_work=False):
+    fields = {'schema', 'player_id', 'turn', 'offers', 'targets'}
+    if visible_work:
+        fields.add('visible_plots_with_work')
+    if (type(value) is not dict or set(value) != fields
+            or value['schema'] != (VISIBLE_WORK_SCHEMA if visible_work else SCHEMA)
+            or type(value['player_id']) is not int
             or value['player_id'] != player_id or type(value['turn']) is not int
             or value['turn'] != turn):
         raise ValueError('Foreign public unit-work information')
@@ -70,4 +77,30 @@ def validate(value, player_id, turn, *, work_catalog, observation=None, work_sta
             if (u['owner']!=player_id or row['plot_id']!=u['y']*observation['width']+u['x']
                     or plot is None or plot['visible'] is not True):
                 raise ValueError('Work target is not the visible own-unit tile')
+    if visible_work:
+        visible = value['visible_plots_with_work']
+        if type(visible) is not list or len(visible) > 16384:
+            raise ValueError('Unbounded visible work plots')
+        sparse = {}
+        previous = -1
+        for row in visible:
+            if (type(row) is not dict or set(row) != _PLOT_FIELDS
+                    or type(row['plot_id']) is not int or not previous < row['plot_id'] < 16384
+                    or (observation is not None
+                        and (row['plot_id'] not in plots or plots[row['plot_id']]['visible'] is not True))):
+                raise ValueError('Visible work plot identity differs')
+            previous = row['plot_id']
+            for key in ('improvement', 'route'):
+                if (type(row[key]) is not int or not -1 <= row[key] < 2**31
+                        or type(row[key + '_pillaged']) is not bool):
+                    raise ValueError('Invalid visible plot work')
+            if row['improvement'] == row['route'] == -1 and not (
+                    row['improvement_pillaged'] or row['route_pillaged']):
+                raise ValueError('Sparse visible work has a default row')
+            sparse[previous] = row
+        for row in targets:
+            blank = dict(plot_id=row['plot_id'], improvement=-1, route=-1,
+                         improvement_pillaged=False, route_pillaged=False)
+            if sparse.get(row['plot_id'], blank) != {key: row[key] for key in _PLOT_FIELDS}:
+                raise ValueError('Visible work differs from the own-unit tile')
     return value

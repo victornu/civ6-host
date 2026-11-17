@@ -189,6 +189,7 @@ class ReviewIntegrationTests(unittest.TestCase):
             with patch.object(captured_saved_load,'select_load_closure',return_value=selected), \
                     patch.object(captured_saved_load,'validate_candidate_inputs'), \
                     patch('civ6_host.runtime.captured_session_profile.for_backend',return_value=NS(human_ids=(0,))), \
+                    patch('civ6_host.runtime.captured_session_profile.saved_geometry',return_value={'taken_player_ids':(0,)}), \
                     patch('civ6_host.runtime.session_configuration.read_saved_roster',return_value={'taken_slot_ids':[0]}):
                 captured_saved_load.configure_requested(backend,closure)
             self.assertIs(backend._xp2_world_congress_review_requested,flag)

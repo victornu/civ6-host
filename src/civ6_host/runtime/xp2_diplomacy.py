@@ -5,6 +5,7 @@ It reuses the native statement codec and explicit menu/response adapter while
 keeping the saved owner's own command boundary and identity checks.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 import hashlib
 
 from .configuration_profiles import XP2_CORE_SHA256
@@ -38,12 +39,12 @@ def _check(saved):
     return backend, continuation, deferred, ledger
 
 
-def _pending(saved, backend, continuation, statement):
+def _pending(saved, backend, continuation, statement, *, player_id=None):
     from .native import native_pending_diplomacy as pending
     from .native.native_diplomacy_choices import official_source, VIEW_SHA
     from .native.native_plot_display990 import _UI, CAPABILITY_SOURCE_SHA256
     from .resource_resolution import resolve_path
-    pid = continuation.observation['player_id']
+    pid = continuation.observation['player_id'] if player_id is None else player_id
     official_source('DiplomacyActionView.lua', VIEW_SHA)
     capability = resolve_path(_UI / 'Scripts/GameCapabilities.lua').read_bytes()
     if hashlib.sha256(capability).hexdigest() != CAPABILITY_SOURCE_SHA256:
@@ -144,6 +145,152 @@ class _SavedDialogueContext:
         return observation
 
 
+class PublicViewDialogue:
+    """Keep the first seat's surprise-war dialogue intact while reading views."""
+
+    def __init__(self, saved):
+        self.saved = saved
+        self.backend = saved.backend
+        self.context = getattr(saved, '_xp2_diplomacy', None)
+        if type(self.context) is not _SavedDialogueContext or self.context.saved is not saved:
+            raise RuntimeError('XP2 public view requires the exact retained dialogue')
+        self.state = self.context.validate(self.backend)
+        self.pending = self.state.pending
+        if (self.pending.session['statement_type'] != 'DECLARE_SURPRISE_WAR'
+                or getattr(saved, '_xp2_requested_deal', None) is not None):
+            raise ValueError('XP2 public views need a qualified pending-dialogue type')
+        self.ledger = saved.prefix.deferred_events.pending_diplomacy_statements
+        self.entry = self.ledger[0]
+        self.statement = deepcopy(self.pending.statement)
+        self.session = deepcopy(self.pending.session)
+
+    def check_ledger(self):
+        saved, context = self.saved, self.context
+        ledger = saved.prefix.deferred_events.pending_diplomacy_statements
+        if (saved.backend is not self.backend or getattr(saved, '_xp2_diplomacy', None) is not context
+                or getattr(self.backend, '_xp2_saved_diplomacy', None) is not context
+                or context.state is not self.state or self.state.pending is not self.pending
+                or self.pending.statement != self.statement or self.pending.session != self.session
+                or ledger is not self.ledger or ledger != [self.statement]
+                or ledger[0] is not self.entry):
+            raise RuntimeError('XP2 public perspective changed the retained dialogue')
+        self.backend.control(empty=True, allow_diplomacy=True)
+
+    def check_open(self):
+        # Call from the original seat. The official Lua reader checks the
+        # live actor, observer, participants, session ID and statement keys.
+        self.check_ledger()
+        current = _pending(self.saved, self.backend, self.saved.continuation, self.statement)
+        if current.session != self.session:
+            raise RuntimeError('XP2 public perspective did not restore the original dialogue')
+
+
+class BorrowedWarDialogue:
+    """Hold an explicit surprise-war statement for the secondary LAN actor."""
+
+    def __init__(self, saved, session, turn):
+        from .native.native_turn_continuation import TurnContinuation
+
+        saved._check_active()
+        self.saved = saved
+        self.backend = saved.backend
+        self.player_id = session['player_id']
+        self.turn = turn
+        self.ledger = saved.prefix.deferred_events.pending_diplomacy_statements
+        self.entry, = self.ledger
+        pending = _pending(saved, self.backend, saved.continuation, self.entry,
+                           player_id=self.player_id)
+        if pending.session != session or session['statement_type'] != 'DECLARE_SURPRISE_WAR':
+            raise RuntimeError('Borrowed war cannot retain another native dialogue')
+        self.state = TurnContinuation(None, turn, pending=pending, origin='xp2_saved_load')
+        self.public_display = self.public_display_source_sha256 = None
+
+    @property
+    def pending(self):
+        return self.state.pending
+
+    def check_ledger(self):
+        saved = self.saved
+        if (saved.backend is not self.backend or getattr(saved, '_xp2_borrowed_war', None) is not self
+                or saved.continuation.observation['turn'] != self.turn or self.state.finished
+                or saved.prefix.deferred_events.pending_diplomacy_statements is not self.ledger
+                or self.ledger != [self.pending.statement] or self.ledger[0] is not self.entry):
+            raise RuntimeError('Borrowed war lost its retained native statement')
+        saved.continuation.transport.require_empty_native_queue()
+        self.backend.control(empty=True, allow_diplomacy=True)
+
+    def check_open(self):
+        self.check_ledger()
+        current = _pending(self.saved, self.backend, self.saved.continuation, self.entry,
+                           player_id=self.player_id)
+        if current.session != self.pending.session:
+            raise RuntimeError('Borrowed war lost its open native session')
+
+    def validate(self, backend):
+        self.saved._check_active()
+        if backend is not self.backend:
+            raise RuntimeError('Borrowed diplomacy belongs to another backend')
+        self.check_ledger()
+        return self.state
+
+    begin_response = validate
+
+    def end_response(self, backend):
+        self.saved._check_active()
+        if (backend is not self.backend or self.ledger
+                or self.saved.prefix.deferred_events.pending_diplomacy_statements is not self.ledger):
+            raise RuntimeError('Borrowed surprise-war exit produced an unexpected statement')
+
+    def poison(self, backend):
+        self.saved._poison()
+
+    def resume(self, backend):
+        self.end_response(backend)
+        from .native.native_player_observation import observe_player
+
+        prefix = self.saved.prefix
+        observation = observe_player(prefix.runtime, prefix.ui_child, self.player_id)
+        if (observation['player_id'], observation['turn']) != (self.player_id, self.turn):
+            raise RuntimeError('Borrowed war response crossed its actor or turn')
+        backend.control(empty=True)
+        self.state.finished = True
+        self.state.pending = None
+        self.saved._xp2_borrowed_war = None
+        return observation
+
+    @contextmanager
+    def _explicit_cache(self):
+        backend = self.backend
+        previous_observation = getattr(backend, 'explicit_observation', None)
+        previous_diplomacy = getattr(backend, 'explicit_diplomacy', None)
+        try:
+            yield
+        finally:
+            backend.explicit_observation = previous_observation
+            backend.explicit_diplomacy = previous_diplomacy
+
+    def read(self, sequence, before):
+        with self._explicit_cache():
+            observed, choices = _read_public(self.saved, sequence, self)
+        if observed != before or any(row['action']['choice'] != 'CHOICE_EXIT' for row in choices['candidates']):
+            raise RuntimeError('Borrowed surprise-war menu differs from the supported native response')
+        return choices, self.public_display, self.public_display_source_sha256
+
+    def respond(self, action, before, published):
+        from .native import native_diplomacy_choices
+
+        refusal = dict(status='refused', requested_action=action, reason='native_diplomacy_response_changed')
+        if published is None or action['choice'] != 'CHOICE_EXIT':
+            return refusal, None
+        with self._explicit_cache():
+            observed, current = native_diplomacy_choices.read(self.backend, published['sequence'],
+                                                              saved_context=self)
+            if observed != before or action not in [row['action'] for row in current['candidates']]:
+                return refusal, None
+            after = native_diplomacy_choices.apply(self.backend, action, saved_context=self)
+        return dict(status='completed', requested_action=action, reason=None), after
+
+
 def retain(saved):
     """Retain only a delivered, open type-132 statement on the XP2 owner."""
     backend, continuation, deferred, ledger = _check(saved)
@@ -166,6 +313,9 @@ def retain(saved):
         turn=state.turn, statement_sequence=item.statement['event_sequence'],
         session=item.session, game_update_called=False, automatic_response=False,
         strategic_training_ready=False)
+    if getattr(saved, '_xp2_major_peace', False):
+        from .xp2_deal_draft import inspect_initial_peace
+        inspect_initial_peace(saved)
     return True
 
 
@@ -177,6 +327,14 @@ def read(saved, sequence):
     context.validate(backend)
     context.public_display=None
     context.public_display_source_sha256=None
+    if getattr(saved, '_xp2_requested_deal', None) is not None:
+        from .xp2_deal_draft import read as read_draft
+        return read_draft(saved, sequence)
+    return _read_public(saved, sequence, context)
+
+
+def _read_public(saved, sequence, context):
+    backend = saved.backend
     from .xp2_diplomacy_display_source import verify_live,SOURCE
     image=getattr(backend.core,'_civ6_host_execution_image',None)
     verify_live(backend.core._handle,backend.runtime.read,execution_image=image)
@@ -201,6 +359,9 @@ def respond(saved, action, before):
     context.validate(backend)
     if type(before) is not dict or before != continuation.observation:
         raise ValueError('Diplomacy response requires the exact current saved observation')
+    if getattr(saved, '_xp2_requested_deal', None) is not None:
+        from . import xp2_deal_draft as draft
+        return draft.close(saved, action) if action['choice'] == 'CHOICE_EXIT' else draft.apply_gold(saved, action)
     from .native.native_diplomacy_choices import apply
     after = apply(backend, action, saved_context=context)
     saved.emit('xp2_saved_diplomacy_response_observed', action=deepcopy(action),

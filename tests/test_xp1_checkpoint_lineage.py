@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from civ6_host.contracts.network_turn import TURN_CONTROLS_SCHEMA
 from civ6_host.runtime import network_checkpoint as cp, xp1_saved_load as saved
 from civ6_host.runtime.xp1_session_checkpoint import expected_readback
 from civ6_host.runtime.native import native_official_bundle as official
@@ -66,7 +67,11 @@ class CheckpointLineageTests(unittest.TestCase):
             native_save_status=0,stream_closed=True,jobs_quiescent_unchanged=True,
             full_civ6save_container=False,lineage_depth=0,parent_checkpoint=None,
             observed_game_turn=2,player_id=0,observation=self.o,decisions=dict(turn=2,player_id=0),
-            network_boundary=dict(session=dict(turn=2)),
+            network_boundary=dict(session=dict(turn=2,game_mode='LAN',
+                turn_phase='TURNPHASE_SIMULTANEOUS',local_player_id=0,
+                human_player_ids=[0],active_human_player_ids=[0]),
+                controls=dict(schema=TURN_CONTROLS_SCHEMA,turn=2,player_id=0,active=True,
+                    active_complete=True,can_unready=False,timer_elapsed=False)),
             source_official_bundle=dict(zip(('path','sha256'),saved.REFERENCE)),components=components,
             input_components_sha256=dict(gamecore=self.sha(self.game),application_configuration=self.sha(self.config)),
             session_closure=cp.reference(closure),fixture=cp.reference(fixture),source_proofs=[],

@@ -116,6 +116,7 @@ class SessionClientTests(unittest.TestCase):
         self.initial = self.client.reset()
 
     def test_multi_actor_catalogues_survive_global_revision(self):
+        self.assertIsNone(self.client.controllable_player_ids)
         d0 = self.initial['decisions']
         view1 = self.client.observe(1)
         d1 = view1['decisions']
@@ -133,6 +134,21 @@ class SessionClientTests(unittest.TestCase):
             {'schema', 'nonce', 'episode_id', 'game_generation', 'sequence', 'operation', 'player_id', 'selection'})
         self.assertEqual(moved['sequence'], 2)
         self.assertEqual(self.client.view(1)['decisions']['decision_id'], d1['decision_id'])
+
+    def test_captured_but_unrouted_human_does_not_consume_session(self):
+        self.backend.controllable_player_ids = (0,)
+        self.assertEqual(self.client.controllable_player_ids, (0,))
+        self.assertEqual(self.backend.current['session']['human_player_ids'], [0, 1])
+        for request in (self.client.observe, self.client.poll, self.client.close):
+            with self.subTest(operation=request.__name__), self.assertRaisesRegex(ProtocolError, 'cannot route'):
+                request(1)
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.backend.aborts, [])
+        self.assertEqual(self.client.view(0)['sequence'], 0)
+        continued = self.client.observe(0)
+        self.assertEqual(continued['sequence'], 1)
+        self.client.close(0)
+        self.assertEqual(self.client.controllable_player_ids, ())
 
     def test_next_turn_discards_other_actors_catalogue_without_rpc(self):
         prior = self.client.observe(1)['decisions']

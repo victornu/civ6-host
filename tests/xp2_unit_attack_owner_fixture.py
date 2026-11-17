@@ -1,17 +1,15 @@
 """Real XP2 saved owner/continuation/transport/cache/FIFO; machine calls are fixtures."""
 from contextlib import ExitStack
 from copy import deepcopy
+from dataclasses import replace
 import ctypes as C
 import json
 from pathlib import Path
 import struct
 import threading
-from types import SimpleNamespace as NS
+from types import MappingProxyType, SimpleNamespace as NS
 from unittest.mock import Mock,patch
 
-import sys
-from civ6_host.runtime.paths import resource_root
-sys.path.append(str(resource_root()/'tools'))
 from test_xp1_unit_attack_owner import Fixture as XP1AttackFixture
 from test_xp1_world_input_owner import Fixture as WorldFixture
 from test_xp2_turn_notifications import XP2ComposedNotifications
@@ -37,7 +35,7 @@ class Fixture:
         self.payload=b'explicit-xp2-attack-fixture';self.goal=None
         self.attacks_left=1;self.no_effect=False;self.fail_after_receive=False
         self.selected_operation='RANGE_ATTACK';self.city_target=False;self.city_damage=0
-        from extract_phase31_next_export import pefile
+        import pefile
         from civ6_host.runtime import xp2_unit_attack_source as source
         self.pe=pefile.PE(source.verify_source()['image']['path'],fast_load=True)
         old=g.backend;b=OfficialLoadBackend.__new__(OfficialLoadBackend);b.__dict__.update(old.__dict__)
@@ -56,6 +54,11 @@ class Fixture:
         p.backend=b;t.owner=b
         for child in (t.publication,t.view,t.lease,t.lease.attempt):child.owner=b
         self.owner._foundation_backend=b
+        # The fixture clones its backend while retaining this Core and context.
+        # Keep installed presentation bindings on that same reconstructed owner.
+        bindings = {kind: replace(binding, backend=b)
+                    for kind, binding in self.owner.presentation_sources.items()}
+        self.owner.presentation_sources = self.owner._presentation_sources = MappingProxyType(bindings)
         b.raw_load_result={};b._xp2_postload_requested=True
         b.runtime.read=self.read
         self.owner.read=self.arguments.reader.read=self.read

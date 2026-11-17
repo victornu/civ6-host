@@ -20,6 +20,8 @@ PROJECT_KIND = 0x3182bc8e
 PROJECT_RECORDS = MappingProxyType({96: 112, 99: 128, 100: 128})
 PROJECT_SOURCE = ('work/host-extensions/xp2-game-history-static/turn30-project-completion-source.json',
                   '30e6ef4c84689dae86e47dced8b2b5f3e7f64e98bccefe5b6ca636b670fdb190')
+XP1_PROJECT_SOURCE = ('evidence/host-xp1-installed-project-completion-source.json',
+                      '91a1477aba41dab3e9d2b261c5816a4e3def8d5d417850a45779765896dc378e')
 
 
 def _rows(body):
@@ -54,12 +56,61 @@ def project_core_fragments():
                        b''.join(bytes.fromhex(row['bytes']) for row in fragment['instructions']))
 
 
-def verify_project_live(core_base, read):
-    for rva, raw in project_core_fragments():
+def xp1_project_source(execution_image):
+    from .execution_images import _XP1_PROFILE, identity
+    from .native import native_event_3182bc8e_project as codec
+    from .native import native_retained_game_getter as getter
+    from .retained_game_source import SOURCE as retained_source, getter_abi
+
+    proof = _source(XP1_PROJECT_SOURCE)
+    if (execution_image is not _XP1_PROFILE or proof['image'] != identity(execution_image)
+            or proof['schema'] != 'civ6-host.xp1-installed-project-completion.source.v1'
+            or proof['native_execution_qualified'] is not False
+            or proof['exe_receiver']['sha256'] != codec.PINNED_EVIDENCE_SHA256
+            or proof['retained_game']['sha256'] != retained_source[1]
+            or proof['contract'] != dict(kind=PROJECT_KIND, selector=0, descriptor_type=2,
+                project_category=3, plot_index=0xffffffff, records=tuple(PROJECT_RECORDS.items()))):
+        raise ValueError('Rise and Fall project completion source changed')
+    codec.verify_source_evidence()
+    getter.verify_source_evidence()
+    getter_abi(XP1_CORE_SHA256)
+    return proof
+
+
+def xp1_project_source_dependencies(execution_image):
+    from .native import native_event_3182bc8e as initial
+    from .native import native_event_3182bc8e_project as codec
+    from .native import native_retained_game_getter as getter
+    from .retained_game_source import SOURCE as retained_source
+
+    xp1_project_source(execution_image)
+    pins = {str(_path(path).resolve()): sha for path, sha in (XP1_PROJECT_SOURCE, retained_source)}
+    pins[str(initial._NORMALIZER_PROOF.resolve())] = initial.NORMALIZER_EVIDENCE_SHA256
+    for module in (initial, codec, getter):
+        pins[str(module._PROOF.resolve())] = module.PINNED_EVIDENCE_SHA256
+    verify_pinned_files(pins)
+    return pins
+
+
+def verify_project_live(core_base, read, *, xp1_image=None):
+    if xp1_image is None:
+        fragments = project_core_fragments()
+    else:
+        spans = xp1_project_source(xp1_image)['spans']
+        expected = {'caller': (0xd6288, 0x9a), 'builder': (0x518bd0, 0x15f)}
+        fragments = []
+        for name, (rva, size) in expected.items():
+            span = spans[name]
+            raw = bytes.fromhex(span['raw_hex'])
+            if (span['rva'] != rva or span['size'] != size or len(raw) != size
+                    or hashlib.sha256(raw).hexdigest() != span['sha256']):
+                raise ValueError('Rise and Fall project completion producer span changed')
+            fragments.append((rva, raw))
+    for rva, raw in fragments:
         for offset in range(0, len(raw), 4096):
             chunk = raw[offset:offset + 4096]
             if read(core_base + rva + offset, len(chunk)) != chunk:
-                raise ValueError('XP2 project completion producer live bytes changed')
+                raise ValueError('Project completion producer live bytes changed')
 
 
 PILLAGE_SOURCE = (
@@ -158,9 +209,11 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             from .xp2_feature_events import source_dependencies as feature_dependencies
             from .xp2_capture_notification_source import source_dependencies as capture_dependencies
             from .xp2_player_restored import source_dependencies as restored_dependencies
+            from .xp2_national_park_visibility import source_dependencies as park_dependencies
             for path, digest in (*feature_dependencies(execution_image=execution_image).items(),
                                  *capture_dependencies(execution_image).items(),
-                                 *restored_dependencies(execution_image=execution_image).items()):
+                                 *restored_dependencies(execution_image=execution_image).items(),
+                                 *park_dependencies().items()):
                 if selected.setdefault(path, digest) != digest:
                     raise ValueError('Conflicting current XP2 foundation event dependency')
         for path, digest in (PILLAGE_SOURCE, PROJECT_SOURCE):
@@ -203,8 +256,20 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
 def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if core_sha256 not in (XP1_CORE_SHA256,XP2_CORE_SHA256):
         raise ValueError('Unknown foundation event engine')
-    if execution_image is not None and core_sha256!=XP2_CORE_SHA256:
-        raise ValueError('Selected execution image requires the XP2 foundation event profile')
+    if execution_image is not None:
+        from .execution_images import identity
+        if identity(execution_image)['reference_core_sha256'] != core_sha256:
+            raise ValueError('Foundation event image has a different reference ABI')
+        if core_sha256 == XP1_CORE_SHA256:
+            from .xp1_capture_followup import source as capture_followup_source
+            from .xp1_city_transfer import source as city_transfer_source
+            from .xp1_great_work_source import source as great_work_source
+            from .xp1_great_work_move_source import source as great_work_move_source
+            great_work_source(execution_image)
+            great_work_move_source(execution_image)
+            city_transfer_source(execution_image)
+            capture_followup_source(execution_image)
+            xp1_project_source(execution_image)
     p = source()
     plot = plot_source()
     if core_sha256==XP2_CORE_SHA256:
@@ -231,27 +296,47 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     sizes.update({int(k): v for k, v in plot['record_type_to_size'].items()})
     receiver_rows = dict(p['receiver_rows'])
     receiver_rows.update(plot['receiver_rows'])
-    if core_sha256==XP2_CORE_SHA256:
-        from . import xp2_wmd_fallout_visibility as wmd
+    if core_sha256 == XP2_CORE_SHA256 or execution_image is not None:
         from .native.native_deferred_empty_profile import resolve_empty_receiver_row
-        if wmd.KIND in mapping or wmd.RECORD_TYPE in sizes:
-            raise ValueError('XP2 WMD visibility overlaps a foundation event')
-        row=resolve_empty_receiver_row(wmd.RECORD_TYPE)
-        if row!=wmd.receiver_row():
-            raise ValueError('XP2 WMD visibility receiver differs from dispatch')
-        mapping[wmd.KIND]=frozenset((wmd.RECORD_TYPE,))
-        sizes[wmd.RECORD_TYPE]=wmd.RECORD_SIZE
-        receiver_rows[str(wmd.RECORD_TYPE)]=row
-        available_rows={**_ROWS,wmd.RECORD_TYPE:row}
         if mapping.get(PROJECT_KIND) != frozenset((96,)) or sizes.get(96) != PROJECT_RECORDS[96]:
             raise ValueError('Unexpected existing project completion ownership')
+        available_rows = dict(available_rows)
         for record in (99, 100):
-            row = resolve_empty_receiver_row(record)
+            row = resolve_empty_receiver_row(record, execution_image=execution_image)
             if record in sizes or row is None or row['record_sizes'] != {PROJECT_RECORDS[record]}:
-                raise ValueError('XP2 project completion receiver differs')
+                raise ValueError('Project completion receiver differs')
             available_rows[record] = receiver_rows[str(record)] = row
             sizes[record] = PROJECT_RECORDS[record]
         mapping[PROJECT_KIND] = frozenset(PROJECT_RECORDS)
+    if core_sha256 == XP2_CORE_SHA256 or execution_image is not None:
+        if core_sha256 == XP1_CORE_SHA256:
+            from . import xp1_wmd_fallout_visibility as wmd
+        else:
+            from . import xp2_wmd_fallout_visibility as wmd
+        from .native.native_deferred_empty_profile import resolve_empty_receiver_row
+        if wmd.KIND in mapping or wmd.RECORD_TYPE in sizes:
+            raise ValueError('WMD visibility overlaps a foundation event')
+        receiver_image = execution_image if core_sha256 == XP1_CORE_SHA256 else None
+        row=resolve_empty_receiver_row(wmd.RECORD_TYPE, execution_image=receiver_image)
+        if row!=wmd.receiver_row():
+            raise ValueError('WMD visibility receiver differs from dispatch')
+        mapping[wmd.KIND]=frozenset((wmd.RECORD_TYPE,))
+        sizes[wmd.RECORD_TYPE]=wmd.RECORD_SIZE
+        receiver_rows[str(wmd.RECORD_TYPE)]=row
+        available_rows[wmd.RECORD_TYPE] = row
+    if execution_image is not None:
+        from . import xp2_great_work
+        from .native.native_deferred_empty_profile import resolve_empty_receiver_row
+
+        record_type = xp2_great_work.MOVED_RECORD_TYPE
+        row = resolve_empty_receiver_row(record_type, execution_image=execution_image)
+        if (xp2_great_work.MOVED_KIND in mapping or record_type in sizes
+                or row != xp2_great_work.moved_receiver_row()):
+            raise ValueError('GreatWorkMoved receiver differs from the registered source')
+        mapping[xp2_great_work.MOVED_KIND] = frozenset((record_type,))
+        sizes[record_type] = xp2_great_work.MOVED_RECORD_SIZE
+        available_rows[record_type] = receiver_rows[str(record_type)] = row
+    if core_sha256 == XP2_CORE_SHA256:
         from .native import native_event_e660_building_pillaged as pillage
         row = resolve_empty_receiver_row(pillage.RECORD_TYPE)
         if (mapping.get(pillage.EVENT_KIND) != frozenset((166, 169))
@@ -273,14 +358,6 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             sizes[record_type] = RECORD_SIZE
         mapping[KIND] |= frozenset(RECORD_TYPES)
         if execution_image is not None:
-            from .native import native_event_great_work as great_work
-            row = resolve_empty_receiver_row(great_work.RECORD_TYPE)
-            if (great_work.EVENT_KIND in mapping or great_work.RECORD_TYPE in sizes
-                    or row is None or row != great_work.receiver_row()):
-                raise ValueError('XP2 GreatWorkCreated receiver differs from the shared codec')
-            mapping[great_work.EVENT_KIND] = frozenset((great_work.RECORD_TYPE,))
-            sizes[great_work.RECORD_TYPE] = great_work.RECORD_SIZE
-            available_rows[great_work.RECORD_TYPE] = receiver_rows[str(great_work.RECORD_TYPE)] = row
             from . import xp2_feature_events as feature
             row = resolve_empty_receiver_row(feature.RECORD_TYPE)
             if (feature.ADDED in mapping or feature.RECORD_TYPE in sizes
@@ -289,33 +366,6 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             mapping[feature.ADDED] = frozenset((feature.RECORD_TYPE,))
             sizes[feature.RECORD_TYPE] = feature.RECORD_SIZE
             available_rows[feature.RECORD_TYPE] = receiver_rows[str(feature.RECORD_TYPE)] = row
-            from . import xp2_city_occupation_event as occupation
-            row = resolve_empty_receiver_row(occupation.RECORD_TYPE, execution_image=execution_image)
-            if (occupation.KIND in mapping or occupation.RECORD_TYPE in sizes
-                    or row != occupation.receiver_row()):
-                raise ValueError('XP2 city occupation receiver overlaps another source')
-            mapping[occupation.KIND] = frozenset((occupation.RECORD_TYPE,))
-            sizes[occupation.RECORD_TYPE] = occupation.RECORD_SIZE
-            available_rows[occupation.RECORD_TYPE] = receiver_rows[str(occupation.RECORD_TYPE)] = row
-            from . import xp2_building_removal as removal
-            row = resolve_empty_receiver_row(removal.RECORD_TYPE, execution_image=execution_image)
-            if (removal.KIND in mapping or removal.RECORD_TYPE in sizes
-                    or row != removal.receiver_row()):
-                raise ValueError('XP2 building removal receiver overlaps another source')
-            mapping[removal.KIND] = frozenset((removal.RECORD_TYPE,))
-            sizes[removal.RECORD_TYPE] = removal.RECORD_SIZE
-            available_rows[removal.RECORD_TYPE] = receiver_rows[str(removal.RECORD_TYPE)] = row
-            from . import xp2_capture_notification_source as capture
-            from . import xp2_player_can_construct_event as player_notification
-            if player_notification.KIND in mapping or player_notification.RECORD_TYPES.intersection(sizes):
-                raise ValueError('XP2 player notification overlaps another source')
-            mapping[player_notification.KIND] = player_notification.RECORD_TYPES
-            for record_type in player_notification.RECORD_TYPES:
-                row = resolve_empty_receiver_row(record_type, execution_image=execution_image)
-                if row != capture.receiver_row(record_type):
-                    raise ValueError('XP2 player notification receiver differs')
-                sizes[record_type] = player_notification.RECORD_SIZE
-                available_rows[record_type] = receiver_rows[str(record_type)] = row
             from . import xp2_player_restored as restored
             row = resolve_empty_receiver_row(restored.RECORD_TYPE, execution_image=execution_image)
             if (restored.KIND in mapping or restored.RECORD_TYPE in sizes
@@ -324,6 +374,51 @@ def event_profile(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
             mapping[restored.KIND] = frozenset((restored.RECORD_TYPE,))
             sizes[restored.RECORD_TYPE] = restored.RECORD_SIZE
             available_rows[restored.RECORD_TYPE] = receiver_rows[str(restored.RECORD_TYPE)] = row
+            from . import xp2_national_park_visibility as park
+            row = resolve_empty_receiver_row(park.RECORD_TYPE, execution_image=execution_image)
+            if park.KIND in mapping or park.RECORD_TYPE in sizes or row != park.receiver_row():
+                raise ValueError('National park visibility overlaps another XP2 receiver')
+            mapping[park.KIND] = frozenset((park.RECORD_TYPE,))
+            sizes[park.RECORD_TYPE] = park.RECORD_SIZE
+            available_rows[park.RECORD_TYPE] = receiver_rows[str(park.RECORD_TYPE)] = row
+    if execution_image is not None:
+        from . import xp2_building_removal as removal
+        from . import xp2_capture_notification_source as capture
+        from . import xp2_city_occupation_event as occupation
+        from . import xp2_player_can_construct_event as player_notification
+        from .native import native_event_great_work as great_work
+        from .native.native_deferred_empty_profile import resolve_empty_receiver_row
+        available_rows = dict(available_rows)
+        row = resolve_empty_receiver_row(removal.RECORD_TYPE, execution_image=execution_image)
+        if removal.KIND in mapping or removal.RECORD_TYPE in sizes or row != removal.receiver_row():
+            raise ValueError('Building removal receiver differs from the shared codec')
+        mapping[removal.KIND] = frozenset((removal.RECORD_TYPE,))
+        sizes[removal.RECORD_TYPE] = removal.RECORD_SIZE
+        available_rows[removal.RECORD_TYPE] = receiver_rows[str(removal.RECORD_TYPE)] = row
+        if player_notification.KIND in mapping or player_notification.RECORD_TYPES.intersection(sizes):
+            raise ValueError('Player notification overlaps another source')
+        mapping[player_notification.KIND] = player_notification.RECORD_TYPES
+        for record_type in player_notification.RECORD_TYPES:
+            row = resolve_empty_receiver_row(record_type, execution_image=execution_image)
+            if row != capture.receiver_row(record_type):
+                raise ValueError('Player notification receiver differs')
+            sizes[record_type] = player_notification.RECORD_SIZE
+            available_rows[record_type] = receiver_rows[str(record_type)] = row
+        row = resolve_empty_receiver_row(occupation.RECORD_TYPE, execution_image=execution_image)
+        if (occupation.KIND in mapping or occupation.RECORD_TYPE in sizes
+                or row != occupation.receiver_row()):
+            raise ValueError('City transfer receiver differs from the shared codec')
+        mapping[occupation.KIND] = frozenset((occupation.RECORD_TYPE,))
+        sizes[occupation.RECORD_TYPE] = occupation.RECORD_SIZE
+        available_rows[occupation.RECORD_TYPE] = receiver_rows[str(occupation.RECORD_TYPE)] = row
+        row = resolve_empty_receiver_row(great_work.RECORD_TYPE)
+        if (great_work.EVENT_KIND in mapping or great_work.RECORD_TYPE in sizes
+                or row != great_work.receiver_row()):
+            raise ValueError('GreatWorkCreated receiver differs from the shared codec')
+        mapping[great_work.EVENT_KIND] = frozenset((great_work.RECORD_TYPE,))
+        sizes[great_work.RECORD_TYPE] = great_work.RECORD_SIZE
+        available_rows = {**available_rows, great_work.RECORD_TYPE: row}
+        receiver_rows[str(great_work.RECORD_TYPE)] = row
     if set().union(*mapping.values()) != set(sizes):
         raise ValueError('Foundation record membership differs')
     for kind, size in sizes.items():

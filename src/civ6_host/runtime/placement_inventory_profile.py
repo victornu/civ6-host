@@ -12,18 +12,27 @@ _EXTRA=(0x671b0,0x16f220,0x16f4f0,0x109f0,0x9b6a0,0x9a140,0x25b20,
         0x6a27f0,0x6a2ad0,0x16e0f0,0xde050)
 
 
-def source_reference(core_sha256=XP1_CORE_SHA256):
+def _check_pillage_mode(core_sha256,include_pillage):
+    if type(include_pillage) is not bool:
+        raise ValueError('Placement inventory pillage mode must be Boolean')
+    if include_pillage and core_sha256!=XP2_CORE_SHA256:
+        raise ValueError('District pillage inventory requires the exact XP2 Core')
+
+
+def source_reference(core_sha256=XP1_CORE_SHA256, *, include_pillage=False):
+    _check_pillage_mode(core_sha256,include_pillage)
     if core_sha256==XP1_CORE_SHA256:return SOURCE
     if core_sha256==XP2_CORE_SHA256:
-        from .xp2_placement_inventory_source import SOURCE as selected
-        return selected
+        from .xp2_placement_inventory_source import source_reference as selected
+        return selected(core_sha256,include_pillage=include_pillage)
     raise ValueError('Unknown placement inventory engine')
 
 
-def verify_source(core_sha256=XP1_CORE_SHA256):
+def verify_source(core_sha256=XP1_CORE_SHA256, *, include_pillage=False):
+    _check_pillage_mode(core_sha256,include_pillage)
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_placement_inventory_source import verify_source as selected
-        return selected()
+        return selected(include_pillage=include_pillage)
     if core_sha256!=XP1_CORE_SHA256:
         raise ValueError('Placement inventory requires the qualified XP1 source')
     p=_source(SOURCE)
@@ -60,10 +69,11 @@ def verify_source(core_sha256=XP1_CORE_SHA256):
     return p
 
 
-def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
+def source_dependencies(core_sha256=XP1_CORE_SHA256, *, execution_image=None,include_pillage=False):
+    _check_pillage_mode(core_sha256,include_pillage)
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_placement_inventory_source import source_dependencies as selected
-        return selected(core_sha256,execution_image=execution_image)
+        return selected(core_sha256,execution_image=execution_image,include_pillage=include_pillage)
     if execution_image is not None:
         raise ValueError('Selected execution image requires the XP2 inventory ABI')
     if core_sha256!=XP1_CORE_SHA256:raise ValueError('Unknown placement inventory engine')
@@ -103,11 +113,13 @@ class VerifiedInventorySource:
     instruction_read_spans:int
 
 
-def bind_owner(owner,core,read):
+def bind_owner(owner,core,read,*,include_pillage=False):
     """Once per exact native lifetime; no action/turn-active prerequisite."""
-    if owner.load_abi.core_sha256==XP2_CORE_SHA256:
+    engine=owner.load_abi.core_sha256
+    _check_pillage_mode(engine,include_pillage)
+    if engine==XP2_CORE_SHA256:
         from .xp2_placement_inventory_source import bind_owner as selected
-        return selected(owner,core,read)
+        return selected(owner,core,read,include_pillage=include_pillage)
     owner.check_thread()
     if (owner.core is not core or owner.load_abi.core_sha256!=XP1_CORE_SHA256
             or type(core._handle) is not int or core._handle<=0 or read!=owner.runtime.read):

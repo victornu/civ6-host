@@ -1,5 +1,6 @@
 """Retained slot/owner/caller composition; source ABI has separate live-byte tests."""
 import ctypes as C
+import struct
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
@@ -123,6 +124,116 @@ class XP2OptionalAchievementServiceTests(unittest.TestCase):
         backend = fixture()
         self.install(backend)
         with self.assertRaises(ValueError): self.install(backend)
+
+    def test_xp1_routes_only_admit_proved_optional_callers_and_owner(self):
+        import pefile
+        from civ6_host.runtime import xp1_host_slot20_source as xp1
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.xp1_continuation import SavedContinuation
+
+        backend = fixture()
+        host = backend.host
+        backend.load_abi.core_sha256 = XP1_CORE_SHA256
+        backend.configuration_abi = NS(core_sha256=XP1_CORE_SHA256)
+        backend.core._civ6_host_execution_image = _XP1_PROFILE
+        image = pefile.PE(_XP1_PROFILE.path, fast_load=True)
+        self.addCleanup(image.close)
+        base = backend.core._handle
+        pointer_rva = xp1.source(_XP1_PROFILE)['host_pointer_rva']
+        backend.runtime.read.side_effect = lambda address, size: (
+            struct.pack('<Q', host.pointer) if (address, size) == (base + pointer_rva, 8)
+            else bytes(image.get_data(address - base, size)))
+        token = SavedContinuation.__new__(SavedContinuation)
+        token.owner = backend
+        backend._xp1_continuation = token
+        frames = [dict(module=xp1.CORE_MODULE, rva=rva) for rva in xp1.CALLER_PREFIX]
+        with (patch('civ6_host.runtime.native.native_absent_achievements.capture_stack',
+                    return_value=frames) as stack,
+              patch.object(SavedContinuation, 'check', autospec=True) as active):
+            receipt = service.install_xp1(backend)
+            callback = backend._xp1_host20[1]
+            self.assertIsNone(callback(host.pointer))
+            active.assert_called_once_with(token, active=True)
+            self.assertEqual(receipt['source_sha256'], xp1.SOURCE[1])
+            self.assertIs(backend.emit.call_args.kwargs['platform_success_reported'], False)
+            stack.return_value = frames[:-1] + [dict(module=xp1.CORE_MODULE, rva='0x205025')]
+            with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                callback(host.pointer)
+            worldbuilder = [dict(module=xp1.CORE_MODULE, rva=rva) for rva in xp1.WORLDBUILDER_CALLER]
+            stack.return_value = worldbuilder
+            self.assertIsNone(callback(host.pointer))
+            self.assertEqual(backend.emit.call_args.kwargs['source_proof_sha256'], xp1.ORIGINAL_SOURCE[1])
+            self.assertIs(backend.emit.call_args.kwargs['platform_request_submitted'], False)
+            stack.return_value = worldbuilder + [dict(module=xp1.CORE_MODULE, rva='0x5238ca')]
+            with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                callback(host.pointer)
+            for callers, source in ((xp1.TURN_CALLER, xp1.TURN_SOURCE),
+                                    (xp1.BESIEGED_CITY_CALLER, xp1.BESIEGED_CITY_SOURCE),
+                                    (xp1.CITY_STATE_CONTACT_CALLER, xp1.CITY_STATE_CONTACT_SOURCE),
+                                    (xp1.ENVOY_ASSIGNMENT_CALLER, xp1.ENVOY_ASSIGNMENT_SOURCE)):
+                frames = [dict(module=xp1.CORE_MODULE, rva=rva) for rva in callers]
+                stack.return_value = frames
+                self.assertIsNone(callback(host.pointer))
+                self.assertEqual(backend.emit.call_args.kwargs['source_proof_sha256'], source[1])
+                self.assertIs(backend.emit.call_args.kwargs['platform_request_submitted'], False)
+                # The shared envoy observer is qualified independently of the
+                # outer player operation. Missing the observer boundary is not.
+                stack.return_value = (frames[:3] if callers in
+                                     (xp1.ENVOY_ASSIGNMENT_CALLER, xp1.CITY_STATE_CONTACT_CALLER)
+                                     else frames[:-1])
+                with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                    callback(host.pointer)
+            shared = xp1._source(xp1.ENVOY_NOTIFICATION_SOURCE)
+            for callers in (shared['witness']['observed_core_frames'], xp1.ENVOY_NOTIFICATION_CALLER):
+                frames = [dict(module=xp1.CORE_MODULE, rva=rva) for rva in callers]
+                stack.return_value = frames
+                self.assertIsNone(callback(host.pointer))
+                event = backend.emit.call_args.kwargs
+                self.assertEqual(event['source_proof_sha256'], xp1.ENVOY_NOTIFICATION_SOURCE[1])
+                self.assertIs(event['platform_request_submitted'], False)
+                self.assertIs(event['platform_success_reported'], False)
+                for index in range(4):
+                    changed = [dict(frame) for frame in frames]
+                    changed[index]['rva'] = hex(int(changed[index]['rva'], 16) + 1)
+                    stack.return_value = changed
+                    with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                        callback(host.pointer)
+            for site in ('0x13eb88', '0x13ee1b'):
+                frames = [dict(module=xp1.CORE_MODULE, rva=rva)
+                          for rva in (xp1.CALLER_PREFIX[0], site, *xp1.TURN_LISTENER_TAIL)]
+                stack.return_value = frames
+                self.assertIsNone(callback(host.pointer))
+                self.assertEqual(backend.emit.call_args.kwargs['source_proof_sha256'],
+                                 xp1.TURN_LISTENER_SOURCE[1])
+                self.assertFalse(backend.emit.call_args.kwargs['platform_success_reported'])
+                stack.return_value = frames[:-1]
+                with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                    callback(host.pointer)
+            stack.return_value = [dict(frame, rva='0x13ee1c') if i == 1 else frame
+                                  for i, frame in enumerate(frames)]
+            with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                callback(host.pointer)
+            for site in xp1.GOVERNMENT_LISTENER_TAGS:
+                frames = [dict(module=xp1.CORE_MODULE, rva=rva)
+                          for rva in (xp1.CALLER_PREFIX[0], site, *xp1.GOVERNMENT_LISTENER_TAIL)]
+                stack.return_value = frames
+                self.assertIsNone(callback(host.pointer))
+                event = backend.emit.call_args.kwargs
+                self.assertEqual(event['source_proof_sha256'], xp1.GOVERNMENT_LISTENER_SOURCE[1])
+                self.assertIs(event['platform_request_submitted'], False)
+                self.assertIs(event['platform_success_reported'], False)
+                for outer in (frames[:4], frames[:-1],
+                              frames[:-1] + [dict(frames[-1], rva='0x35f99b')]):
+                    stack.return_value = outer
+                    self.assertIsNone(callback(host.pointer))
+                    self.assertEqual(backend.emit.call_args.kwargs['source_proof_sha256'],
+                                     xp1.SHARED_BOUNDARY_SOURCE[1])
+                stack.return_value = frames[:3]
+                with self.assertRaisesRegex(ValueError, 'Unproved XP1'):
+                    callback(host.pointer)
+            del backend._xp1_continuation
+            with self.assertRaisesRegex(ValueError, 'active saved-game owner'):
+                callback(host.pointer)
 
 
 if __name__ == '__main__': unittest.main()

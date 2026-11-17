@@ -56,6 +56,24 @@ def verify_source():
         raise ValueError('Public witness Core source differs')
     return value
 
+def verify_live_readers(base, read):
+    """Match the retained UI getter bodies and leaves in the selected Core."""
+    if type(base) is not int or base <= 0 or not callable(read):
+        raise ValueError('Public witness requires its loaded Core reader')
+    proof = verify_source()
+    image_base = int(proof['core']['image_base'], 16)
+    bodies = {**proof['bodies'], **proof['leaves']}
+    if len(bodies) != 13:
+        raise ValueError('Public witness getter set differs from the retained proof')
+    for name, body in bodies.items():
+        rva = int(body['start_va'], 16) - image_base
+        size = body['length']
+        if rva <= 0 or type(size) is not int or not 0 < size <= 16384:
+            raise ValueError('Public witness getter span is invalid: ' + name)
+        raw = read(base + rva, size)
+        if type(raw) is not bytes or len(raw) != size or hashlib.sha256(raw).hexdigest() != body['raw_sha256']:
+            raise ValueError('Public witness loaded getter differs: ' + name)
+
 def _source_for(player_id, turn, active_player_id):
     _integer(player_id, 0, 63, 'witness player')
     _integer(turn, 0, 1000000, 'witness turn')
@@ -97,7 +115,19 @@ def sources_from_closure(closure):
     source = str(_resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_public_objective_witness.py')))).resolve().relative_to(ROOT))
     result = dict(gamecore_sha256=transport.get('core_sha256'), host_sha256=transport.get('host_sha256'), collector_source_sha256=closure.get('pins', {}).get(source))
     validate_public_sources(result)
-    if result['gamecore_sha256'] != CORE_SHA:
+    if 'execution_image' in closure:
+        from civ6_host.runtime.base_capture_inputs import REFERENCE
+        from civ6_host.runtime.execution_images import _BASE_PROFILE, from_identity
+        image = from_identity(closure['execution_image'])
+        if (image is not _BASE_PROFILE or closure.get('input_profile') != 'hotseat-four'
+                or closure.get('official_bundle') != dict(zip(('path', 'sha256'), REFERENCE))
+                or result['gamecore_sha256'] != image.image_sha256
+                or result['host_sha256'] != image.native_host_build.executable_sha256):
+            raise ValueError('Public witness requires the installed Base Hotseat Core and host pair')
+        proof_path = str(PROOF.relative_to(ROOT))
+        if closure.get('pins', {}).get(proof_path) != SOURCE_SHA:
+            raise ValueError('Installed Base public witness requires its getter proof in the closure')
+    elif result['gamecore_sha256'] != CORE_SHA:
         raise ValueError('Public witness requires the pinned Base Core')
     return result
 
@@ -113,6 +143,12 @@ def collect(prefix, *, player_id, sequence, turn, active_player_id, closure, clo
     if any((closure.get('pins', {}).get(path) != pin for path, pin in pins.items())):
         raise ValueError('Public objective source is not pinned in closure')
     sources = sources_from_closure(closure)
+    if 'execution_image' in closure:
+        from civ6_host.runtime.execution_images import _BASE_PROFILE
+        core = prefix.core
+        if getattr(core, '_civ6_host_execution_image', None) is not _BASE_PROFILE:
+            raise ValueError('Public witness loaded Core differs from the installed Base closure')
+        verify_live_readers(core._handle, prefix.actions.read)
     path = _resolve_resource_path(Path(closure_path))
     before = _resolve_resource_path(path).read_bytes()
     if _loads(before) != closure:

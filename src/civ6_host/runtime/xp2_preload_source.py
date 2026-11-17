@@ -18,6 +18,7 @@ from .configuration_profiles import _source
 from .saved_load_profiles import XP2_CORE_SHA256
 from .resource_resolution import resolve_path
 from .native.native_source_cache import _stat_identity
+from .source_verification import file_sha256, verify_pinned_json_bytes
 
 SOURCE = ('work/host-extensions/xp2-preload-services/source-profile-v1.json',
           'c09f13c0895337f9bcecff5c2313242a35c50637ee8342fd558d544228386a57')
@@ -74,8 +75,8 @@ def source():
     for r in [capture['generator'], *p['references'].values()]:
         path = resolve_path(Path(r['path']))
         if path.suffix == '.json':
-            _source((str(path), r['sha256']))
-        elif hashlib.sha256(path.read_bytes()).hexdigest() != r['sha256']:
+            verify_pinned_json_bytes(path, r['sha256'])
+        elif file_sha256(path) != r['sha256']:
             raise ValueError('XP2 pre-Load capture dependency differs: ' + str(path))
     return p
 

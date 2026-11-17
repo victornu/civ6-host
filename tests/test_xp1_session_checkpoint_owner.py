@@ -17,6 +17,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from test_xp1_world_input_owner import Fixture as OwnerFixture, LAB
+from civ6_host.contracts.network_turn import CAPABILITY_SCHEMA
 from civ6_host.runtime import xp1_session_checkpoint as checkpoint
 from civ6_host.runtime import xp1_checkpoint_profile as save_profile
 from civ6_host.runtime import xp1_load_capability as capability
@@ -46,7 +47,6 @@ class Fixture(OwnerFixture):
         b.profile=b.load_abi=profile_for_sha(XP1_CORE_SHA256)
         b.inputs.profile=XP1_LAN_PROFILE;b.inputs.official_bundle=REFERENCE
         b.inputs.checkpoint=None;b.inputs.configuration=b'input-configuration-fixture'
-        b.captured_bundle=NS(reference=REFERENCE,inputs=b.inputs)
         b.streams=[];b.snapshot_phase='idle'
         self.saved.network_reference=dict(capture_manifest_sha256=REFERENCE[1],
             state=dict(player_id=0,observer_id=0,game_mode_u32=3,turn_phase_u32=0),
@@ -54,11 +54,12 @@ class Fixture(OwnerFixture):
         from civ6_host.runtime.lan_load import _LAN_MODE,_SIMULTANEOUS_PHASE
         self.saved.network_reference['state'].update(game_mode_u32=_LAN_MODE,turn_phase_u32=_SIMULTANEOUS_PHASE)
         t.world_input_prompts={};t.world_input_selections={0:17};t.explicit_placements={}
+        t.trade_feedback = None
         self.observation=dict(schema='civ6rl-player-observation-v1',player_id=0,turn=8,width=8,height=8,
             plots=[],visible_enemy_units=[],cities=[],units=[dict(id=17,type=1,x=0,y=0,damage=0,moves=2,max_moves=2,owner=0)],
             economy=dict(science=1,culture=1,gold=20,faith=0))
         t.observation=deepcopy(self.observation)
-        self.decisions=dict(player_id=0,turn=8)
+        self.decisions=dict(schema=CAPABILITY_SCHEMA,player_id=0,turn=8)
         self.status=0;self.human_active=True;self.failure=None;self.scope_seen=[]
         inner=int.from_bytes(self.read(b.context+8,8),'little')
         self.memory.put(inner,struct.pack('<Q',b.core._handle+b.load_abi.inner_vtable_rva))
@@ -131,7 +132,9 @@ class Fixture(OwnerFixture):
             for i,value in enumerate(words):out[i]=value
             return 0
         observer.backend=b;observer.busy=False;observer.last_snapshots={};observer.layout=layout
-        observer.core=dict(base=b.core._handle,sha256=XP1_CORE_SHA256,profile=2)
+        observer.core=dict(base=b.core._handle,sha256=XP1_CORE_SHA256,profile=2,
+                           execute_rva=0x465110,completed_offset=0xf0,
+                           source_sha256=jobs.SOURCE[1])
         observer.identity=dict(host_base=hostbase,os_thread_id=b.thread[1],executable_path=str(Path(__file__).resolve()))
         observer.build=dict(host_sha256='0'*64,fixture_only=True)
         observer.api=NS(main_module=lambda:hostbase,current_thread_id=lambda:b.thread[1],module_filename=lambda base:__file__)

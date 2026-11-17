@@ -4,10 +4,10 @@ This selects existing native serializers. It supplies no substitute bytes,
 callbacks, rule state, scheduler, or saved-Load implementation.
 """
 from collections.abc import Mapping
-import hashlib
 from pathlib import Path
 import struct
 
+from .source_verification import file_sha256
 from .configuration_profiles import XP2_CORE_SHA256, _source
 
 SOURCE=('work/host-extensions/xp2-checkpoint-preparation-static/source-profile-v1.json',
@@ -144,7 +144,7 @@ def source_dependencies(*, execution_image=None):
         if str(path) in pins:
             if pins[str(path)]!=digest:raise ValueError('Conflicting XP2 checkpoint source dependency')
             return
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:raise ValueError('XP2 checkpoint dependency changed')
+        if file_sha256(path)!=digest:raise ValueError('XP2 checkpoint dependency changed')
         pins[str(path)]=digest
     for ref in (SOURCE,SUPPLEMENT,RULES,XP2_SOURCE):add(dict(path=ref[0],sha256=ref[1]))
     for proof in (p,s,r):

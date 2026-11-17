@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import ctypes as C
+from pathlib import Path
 import struct
 from types import MappingProxyType
 
@@ -17,6 +18,8 @@ from .native import native_event_fdf12323 as codec
 
 SOURCE=('work/host-extensions/xp1-district-removed-static/xp1-district-removed-source-v1.json',
         '2b9a17b99ddc13ba3a83cfc5f46a07df8e91c630b83d0234854cdd099f98530f')
+XP1_CURRENT_SOURCE = ('evidence/host-xp1-installed-district-removal-assault-source.json',
+                      'd8ccc22e9cda386695c973c5041ee11abd73f78e838822281f46093b96a54f2e')
 ENTRIES={'get_player':0x4bd1a0,'release_player':0x4c6a80,'player_collection':0x4c6f90,
  'release_collection':0x4c8f50,'collection_index':0x4c8f70,'release_item':0x4c2f30,
  'item_variant':0x4c2f70,'item_raw':0x4baaf0}
@@ -59,19 +62,58 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256):
     return {str(_path(r['path'])):r['sha256'] for r in refs}
 
 
+def current_xp1_source_dependencies(execution_image):
+    from . import xp2_capture_notification_source as registered
+    from .execution_images import _XP1_PROFILE, identity
+
+    if execution_image is not _XP1_PROFILE:
+        raise ValueError('Current district removal requires the registered Rise and Fall image')
+    proof = _source(XP1_CURRENT_SOURCE)
+    receiver = registered.receiver_row(codec.RECORD_TYPE)
+    legacy, registration = proof['legacy_source'], proof['registered_source']
+    if (proof['schema'] != 'civ6-host.xp1-installed-district-removal-assault.source.v1'
+            or proof['image'] != identity(execution_image)
+            or (legacy['path'], legacy['sha256']) != SOURCE
+            or (registration['path'], registration['sha256']) != registered.SOURCE
+            or proof['exe'] != registered.source()['images']['exe']
+            or proof['receiver'] != dict(name=receiver['event_name'], type=codec.RECORD_TYPE,
+                                          size=codec.RECORD_SIZE)):
+        raise ValueError('Installed Rise and Fall district-removal proof differs')
+    registered.route('district_removed', codec.EVENT_KIND, {(codec.RECORD_TYPE, codec.RECORD_SIZE)})
+    pins = {
+        str(_path(XP1_CURRENT_SOURCE[0]).resolve()): XP1_CURRENT_SOURCE[1],
+        str(_path(registered.SOURCE[0]).resolve()): registered.SOURCE[1],
+        str(Path(execution_image.path).resolve()): execution_image.image_sha256,
+        str(Path(proof['exe']['path']).resolve()): proof['exe']['sha256'],
+    }
+    verify_pinned_files(pins)
+    return pins
+
+
 def event_profile(core_sha256=XP1_CORE_SHA256, *, execution_image=None):
     if execution_image is not None:
+        from .execution_images import identity
+        if identity(execution_image)['reference_core_sha256'] != core_sha256:
+            raise ValueError('District removal execution image has a different reference ABI')
+    if core_sha256 == XP2_CORE_SHA256 and execution_image is not None:
         from .xp2_district_removed_current import event_profile as current_profile
-        if core_sha256 != XP2_CORE_SHA256:
-            raise ValueError('Current district removal requires the XP2 reference ABI')
         return current_profile(execution_image)
-    p=source(core_sha256);verify_pinned_files(source_dependencies(core_sha256));verify_extracted_sources(p['source_pins'].values())
-    from .native.native_deferred_empty_profile import _ROWS
-    row=_ROWS[0xa0]
-    if row['handler_va']!='0x1400d9af0' or set(row['record_sizes'])!={128}:
+    p = source(core_sha256)
+    verify_pinned_files(source_dependencies(core_sha256))
+    verify_extracted_sources(p['source_pins'].values())
+    from .native.native_deferred_empty_profile import resolve_empty_receiver_row
+    row = resolve_empty_receiver_row(codec.RECORD_TYPE, execution_image=execution_image)
+    proof_sha256 = _binding(core_sha256)[2][1]
+    if execution_image is not None:
+        from . import xp2_capture_notification_source as registered
+        current_xp1_source_dependencies(execution_image)
+        if row != registered.receiver_row(codec.RECORD_TYPE):
+            raise ValueError('Current Rise and Fall district-removal receiver differs')
+        proof_sha256 = XP1_CURRENT_SOURCE[1]
+    elif row['handler_va']!='0x1400d9af0' or set(row['record_sizes'])!={128}:
         raise ValueError('DistrictRemoved empty receiver differs')
-    return A0FamilyProfile(MappingProxyType({codec.EVENT_KIND:frozenset((0xa0,))}),
-                           MappingProxyType({0xa0:128}),_binding(core_sha256)[2][1])
+    return A0FamilyProfile(MappingProxyType({codec.EVENT_KIND: frozenset((codec.RECORD_TYPE,))}),
+                           MappingProxyType({codec.RECORD_TYPE: codec.RECORD_SIZE}), proof_sha256)
 
 
 def _binding(core_sha256):
@@ -175,16 +217,14 @@ def record_lease(sequence,core,context,fields,*,read,empty_receiver_state,query_
 
 def dispatch(owner,kind,raw_fields):
     if kind!=codec.EVENT_KIND:raise ValueError('Unknown DistrictRemoved event kind')
-    execution_image = getattr(owner.deferred.core, '_civ6_host_execution_image', None)
+    core_sha256 = owner.deferred.cache_core_sha256
     if len(owner.pending)>=owner.limit:raise RuntimeError('Native deferred queue bound exceeded')
     fields=codec.decode_fields(raw_fields,owner.read);diagnostic={}
     with record_lease(owner._sequence+1,owner.deferred.core,owner.deferred.context,fields,
             read=owner.read,empty_receiver_state=owner.empty_receiver_state,query_diagnostic=diagnostic,
-            core_sha256=owner.deferred.cache_core_sha256) as record:
+            core_sha256=core_sha256) as record:
         owner._enqueue(record)
-    if execution_image is not None:
-        from .xp2_district_removed_current import SOURCE
-        diagnostic['source_sha256'] = SOURCE[1]
+    diagnostic['source_sha256'] = owner.district_event_profile.source_sha256
     owner.emit('native_deferred_host_event_enqueued',dispatch_kind=hex(kind),queue_type='0xa0',
         record_hex=record.hex(),owner=fields.owner,item_id=fields.item_id,pending_count=len(owner.pending),
         **diagnostic,retained_item_released=diagnostic['item_present'],

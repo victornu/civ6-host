@@ -1,18 +1,31 @@
-"""Reuse the two proven descriptor normalizers when EXE has no callback.
+"""Reuse source-qualified descriptor normalizers when EXE has no callback.
 
 The native internal dispatcher/B0 publication has already run. An absent EXE
 callback returns zero; this neither acknowledges gameplay nor consumes its FIFO.
 """
 from functools import lru_cache
+import hashlib
+from pathlib import Path
+import struct
+
 from .configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256,_source
 from .native import native_absent_unit_scalar_family as unit
 from .native import native_absent_b4_scalar_family as b4
 from .native import native_absent_d70ba51f as unit_two
+from .native.native_application_mirror import decode_scalar
+from .native.native_host_events import copy_eight_byte_variant
 
 SOURCE=('work/host-extensions/xp1-absent-descriptor-static/source-v1.json',
         '7cc3cbe76561c07e982f12d66da7f48fa0cc8fa2a53298971ecc59b8f67ffdb6')
 TWO_SOURCE=('work/host-extensions/xp1-absent-descriptor-static/two-field-supplement-v1.json',
             'de4eb3db1b714760c5eda9d248abbeb1197fe3b0a9da6fb9bf02b1a8b7138b13')
+UNIT_TRANSFER_KIND = 0x09a285e8
+UNIT_TRANSFER_SECOND_KEY = 0xa1fbc372
+UNIT_TRANSFER_SOURCE = ('evidence/host-xp1-installed-unit-transfer-absent-a0-source.json',
+                        'a4f8f2f880e9f1e34179a0dfaf2f1ce7c1bc0eeda54f16f4e651434e05403342')
+UNIT_TRANSFER_FIELD_TAGS = {
+    unit.SELECTOR_KEY: 3, unit.VALUE_KEY: 2, UNIT_TRANSFER_SECOND_KEY: 2, unit.DESCRIPTOR_KEY: 1024,
+}
 
 
 def _rows(p):
@@ -112,8 +125,61 @@ def source_dependencies(*,core_sha256=XP1_CORE_SHA256,execution_image=None):
     if execution_image is None:
         return pins
     from .runtime_source_dependencies import materialize_runtime_source_pins
-    return materialize_runtime_source_pins(pins, execution_image=execution_image,
+    pins = materialize_runtime_source_pins(pins, execution_image=execution_image,
                                            provenance_images=p['images'].values())
+    proof = unit_transfer_source(execution_image)
+    for path, digest in (UNIT_TRANSFER_SOURCE, (proof['exe']['path'], proof['exe']['sha256'])):
+        name = str(resolve_path(resource_root() / path).resolve())
+        if pins.setdefault(name, digest) != digest:
+            raise ValueError('Conflicting Rise and Fall unit transfer source pin')
+    return pins
+
+
+@lru_cache(maxsize=1)
+def unit_transfer_source(image):
+    from .execution_images import _XP1_PROFILE
+    from .native.native_host_event_registry import EXE_EVENT_CALLBACKS
+
+    if image is not _XP1_PROFILE:
+        raise ValueError('Unit transfer requires the installed Rise and Fall image')
+    proof = _source(UNIT_TRANSFER_SOURCE)
+    registry = proof['registry']
+    if (proof['schema'] != 'civ6-host.xp1-installed-unit-transfer-absent-a0.source.v1'
+            or proof['image']['sha256'] != image.image_sha256
+            or registry['registered_keys'] != tuple(sorted(EXE_EVENT_CALLBACKS))
+            or registry['closed_kind_absent'] != UNIT_TRANSFER_KIND
+            or (registry['lookup_inserts'], registry['inline_inserts']) != (252, 65)
+            or registry['lookup_calls_outside_initializer'] != 0
+            or UNIT_TRANSFER_KIND in EXE_EVENT_CALLBACKS
+            or proof['contract'] != dict(kind=UNIT_TRANSFER_KIND,
+                fields={hex(key): tag for key, tag in UNIT_TRANSFER_FIELD_TAGS.items()}, selector=0,
+                unit_descriptor_tag=1024, unit_descriptor_size=8, unit_descriptor_flags=0x21000001,
+                descriptor_owner_bits=16, descriptor_id_bits=32, core_internal_dispatch_before_host=True,
+                owned_dynamic_registration=False, owned_entity_listener_count=0,
+                queue_records_produced=0, host_result=0, gameplay_success_asserted=False)):
+        raise ValueError('Rise and Fall unit transfer source differs')
+    return proof
+
+
+def _normalize_unit_transfer(reader, fields):
+    proof = unit_transfer_source(getattr(reader.core, '_civ6_host_execution_image', None))
+    if type(fields) is not dict or set(fields) != UNIT_TRANSFER_FIELD_TAGS.keys():
+        raise ValueError('Unit transfer requires its exact four native fields')
+    for span in proof['core_spans'].values():
+        raw = reader.read(reader.base + span['rva'], span['bytes'])
+        if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
+            raise ValueError('Live Rise and Fall unit transfer producer differs')
+    selector = decode_scalar(fields[unit.SELECTOR_KEY], 3)
+    if selector != 0:
+        raise ValueError('Unit transfer selector differs')
+    values = [decode_scalar(fields[key], 2) for key in (unit.VALUE_KEY, UNIT_TRANSFER_SECOND_KEY)]
+    descriptor = copy_eight_byte_variant(fields[unit.DESCRIPTOR_KEY], reader.read, expected_tag=1024)
+    owner, _, identifier = struct.unpack('<HHI', descriptor)
+    return dict(kind=UNIT_TRANSFER_KIND, selector=selector, scalar_values=values,
+                normalized_descriptor_hex=struct.pack('<HHI', owner, 1, identifier).hex(),
+                descriptor_target_read=True, callback_registered=False, callback_invoked=False,
+                normalizer_result=0, queue_records_produced=0, gameplay_success_asserted=False,
+                source_sha256=UNIT_TRANSFER_SOURCE[1])
 
 
 def has_shape(fields):
@@ -161,7 +227,8 @@ def _bind_reader(arguments):
 def dispatch(arguments,kind,fields):
     """No queue mutation: retain preceding native B0 work for normal publication."""
     owner=_bind_reader(arguments)
-    if not has_shape(fields):raise ValueError('Unqualified absent descriptor shape')
+    if kind != UNIT_TRANSFER_KIND and not has_shape(fields):
+        raise ValueError('Unqualified absent descriptor shape')
     d=arguments.deferred
     before=(id(d.pending),tuple(d.pending),d._sequence,d.consumed_count,d.consumed_bytes,
             d.host_notification_counter,d.host_metadata_counter,d.consumed_digest.copy().digest())
@@ -169,7 +236,9 @@ def dispatch(arguments,kind,fields):
                  registry_profile=owner.callback_registry_profile,
                  dynamic_registration_present=owner.dynamic_event_registration_present,
                  entity_listener_count=owner.entity_listener_count)
-    if set(fields)==unit.FIELD_KEYS:
+    if kind == UNIT_TRANSFER_KIND:
+        result = _normalize_unit_transfer(arguments.reader, fields)
+    elif set(fields)==unit.FIELD_KEYS:
         result=unit.validate_absent_event(kind,fields,arguments.reader.read,**options)
     elif set(fields)==unit_two.FIELD_KEYS:
         result=unit_two._validate_profile_event(kind,fields,arguments.reader.read,**options)

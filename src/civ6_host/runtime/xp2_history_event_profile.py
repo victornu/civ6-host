@@ -427,10 +427,8 @@ def decode_score_fields(raw_fields):
     reading the normalized +0x50/+0x54 pair. No raw A1FBC field is invented.
     """
     source()
-    from .game_era_score_event_profile import verify_source as verify_score_source
-    from .native.native_two_value_event_family import verify_missing_b_source_evidence
+    from .game_era_score_event_profile import decode_missing_second, verify_source as verify_score_source
     verify_score_source()
-    verify_missing_b_source_evidence()
     from .native.native_scalar_event_encoder import _read_u32_variant
     if type(raw_fields) is not dict:
         raise ValueError('XP2 era-score Core arguments must be an exact field map')
@@ -438,10 +436,11 @@ def decode_score_fields(raw_fields):
     if keys not in ({SELECTOR_KEY, VALUE_KEY},
                     {SELECTOR_KEY, VALUE_KEY, SECOND_VALUE_KEY}):
         raise ValueError('XP2 era-score keys must match a retained emitter shape')
+    if SECOND_VALUE_KEY not in raw_fields:
+        return decode_missing_second(raw_fields)
     selector = _read_u32_variant(raw_fields[SELECTOR_KEY], 3, 'selector')
     value_a = _read_u32_variant(raw_fields[VALUE_KEY], 2, 'value A')
-    value_b = (_read_u32_variant(raw_fields[SECOND_VALUE_KEY], 2, 'value B')
-               if SECOND_VALUE_KEY in raw_fields else 0)
+    value_b = _read_u32_variant(raw_fields[SECOND_VALUE_KEY], 2, 'value B')
     if selector != 0:
         raise ValueError('XP2 era-score requires the common selector-zero normalizer route')
     return selector, value_a, value_b

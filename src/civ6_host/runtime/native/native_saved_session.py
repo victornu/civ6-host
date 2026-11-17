@@ -20,6 +20,9 @@ from civ6_host.runtime.native.legacy_budget import validate_collection
 from civ6_host.runtime.native.legacy_budget import is_extended
 ROOT = _resolve_resource_path(_resolve_resource_path(Path(_historical_source_file('civ6rl/native_saved_session.py')))).resolve().parents[1]
 MEMORY_LIMIT = 512 * 1024 * 1024
+DEFAULT_MEMORY_RESERVE_MIB = 2048
+MIN_EXPANSION_MEMORY_RESERVE_MIB = 1280
+RUNNING_MEMORY_FLOOR_BYTES = 1024 * 1024 ** 2
 LIFETIME = 45
 MAX_LINE = 1024 * 1024
 MAX_STDOUT = 64 * 1024 * 1024
@@ -34,7 +37,8 @@ def stdout_limit_ceiling(episode_budget):
     return MAX_STANDARD_STDOUT
 
 def sha(path):
-    return hashlib.sha256(_resolve_resource_path(_resolve_resource_path(Path(path))).read_bytes()).hexdigest()
+    with _resolve_resource_path(_resolve_resource_path(Path(path))).open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
 
 def write_json(path, value):
     _resolve_resource_path(Path(path)).write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
@@ -73,6 +77,7 @@ class NativeSavedSession:
     protocol_class = SessionProtocol
     response_validator = staticmethod(validate_response)
     command_schema = SCHEMA
+    memory_reserve_mib = DEFAULT_MEMORY_RESERVE_MIB
 
     def __init__(self, run_root=None, *, round_limit=8, lifetime_seconds=LIFETIME, stdout_limit_mib=64, official_bundle=None, episode_budget=None, _admitted_bundle=None):
         if type(round_limit) is not int or not 1 <= round_limit <= self.protocol_class.max_round_limit:
@@ -126,14 +131,20 @@ class NativeSavedSession:
             raise RuntimeError('Use the session from one parent thread')
 
     def _check_reset_resources(self, phase):
-        """Refuse before costly work, and recheck after it; never lower the reserve."""
+        """Budget the bounded child in addition to the selected system reserve."""
         available = self.win.available()
-        required = MEMORY_LIMIT + 2 * 1024 ** 3
-        admitted = min(available['physical_available_bytes'], available['commit_available_bytes']) >= required
-        self.reset_resource_samples.append(dict(phase=phase, elapsed_seconds=time.perf_counter() - self.reset_started, available=dict(available), parent_memory=self.win.memory(), required_available_bytes=required, admitted=admitted))
+        parent = self.win.memory()
+        required = MEMORY_LIMIT + self.memory_reserve_mib * 1024 ** 2
+        reduced_reserve = self.memory_reserve_mib < DEFAULT_MEMORY_RESERVE_MIB
+        parent_within_budget = not reduced_reserve or parent['private_bytes'] <= MEMORY_LIMIT
+        admitted = (parent_within_budget and
+                    min(available['physical_available_bytes'], available['commit_available_bytes']) >= required)
+        self.reset_resource_samples.append(dict(phase=phase, elapsed_seconds=time.perf_counter() - self.reset_started, available=dict(available), parent_memory=parent, required_available_bytes=required, admitted=admitted))
         if not admitted:
             self.reset_timings_seconds['reset_total_seconds'] = time.perf_counter() - self.reset_started
-            raise RuntimeError('Need 512 MiB child budget plus 2 GiB reserve (' + phase + ')')
+            if not parent_within_budget:
+                raise RuntimeError('Python supervisor exceeds 512 MiB in reduced reserve mode (' + phase + ')')
+            raise RuntimeError(f'Need 512 MiB child budget plus {self.memory_reserve_mib} MiB reserve ({phase})')
 
     def reset(self):
         reset_started = time.perf_counter()
@@ -169,25 +180,37 @@ class NativeSavedSession:
         from civ6_host.runtime.workers.run_official_postload909 import HOST_SHA
         from civ6_host.runtime.workers.run_official_postload909 import CACHE_MANIFEST
         from civ6_host.runtime.workers.run_official_postload909 import CACHE_MANIFEST_SHA
+        from civ6_host.runtime.native import native_stdout_transport as transport
+        base_image = getattr(self, '_base_execution_image', None)
+        host = HOST
         phase_started = time.perf_counter()
         try:
-            if sha(HOST) != HOST_SHA:
-                raise ValueError('Pinned host changed')
             captured = None
             source_fixture = CACHE_MANIFEST
-            if self.official_bundle is not None:
-                from civ6_host.runtime.native.native_official_bundle import prepare_official_bundle
-                captured, source_fixture = prepare_official_bundle(dict(path=self.official_bundle[0], sha256=self.official_bundle[1]), input_profile=self.input_profile, output_directory=self.run_root / ('inputs-' + uuid.uuid4().hex), **{'_admitted_bundle': self._admitted_bundle} if self._admitted_bundle is not None else {})
+            if base_image is not None:
+                from civ6_host.runtime import base_capture_inputs
+                host = base_capture_inputs.process_host(base_image)
+                captured, source_fixture = base_capture_inputs.prepare_bundle(
+                    self.official_bundle, execution_image=base_image, input_profile=self.input_profile,
+                    output_directory=self.run_root / ('inputs-' + uuid.uuid4().hex))
+                self.stdout_identity = dict(core_sha256=base_image.image_sha256,
+                                            host_sha256=base_image.native_host_build.executable_sha256)
+            else:
+                if sha(HOST) != HOST_SHA:
+                    raise ValueError('Pinned host changed')
+                if self.official_bundle is not None:
+                    from civ6_host.runtime.native.native_official_bundle import prepare_official_bundle
+                    captured, source_fixture = prepare_official_bundle(dict(path=self.official_bundle[0], sha256=self.official_bundle[1]), input_profile=self.input_profile, output_directory=self.run_root / ('inputs-' + uuid.uuid4().hex), **{'_admitted_bundle': self._admitted_bundle} if self._admitted_bundle is not None else {})
+                elif sha(CACHE_MANIFEST) != CACHE_MANIFEST_SHA:
+                    raise ValueError('Pinned official-cache fixture changed')
+                from civ6_host.runtime.native.native_checkpoint_load import verify_source
+                core_path = _resolve_resource_path(Path(verify_source()['provider']['images']['core']['path']))
+                self.stdout_identity = dict(core_sha256=sha(core_path), host_sha256=sha(HOST))
+                if self.stdout_identity != dict(core_sha256=transport.CORE_SHA256, host_sha256=transport.HOST_SHA256):
+                    raise ValueError('Saved-session stdout transport requires the exact Base Core and Host41')
+                transport.verify_source()
+            if captured is not None:
                 self._set_bundle_initial_turn(captured.initial_turn)
-            elif sha(CACHE_MANIFEST) != CACHE_MANIFEST_SHA:
-                raise ValueError('Pinned official-cache fixture changed')
-            from civ6_host.runtime.native.native_checkpoint_load import verify_source
-            from civ6_host.runtime.native import native_stdout_transport as transport
-            core_path = _resolve_resource_path(Path(verify_source()['provider']['images']['core']['path']))
-            self.stdout_identity = dict(core_sha256=sha(core_path), host_sha256=sha(HOST))
-            if self.stdout_identity != dict(core_sha256=transport.CORE_SHA256, host_sha256=transport.HOST_SHA256):
-                raise ValueError('Saved-session stdout transport requires the exact Base Core and Host41')
-            transport.verify_source()
             self._check_reset_resources('after_preflight')
         finally:
             self.reset_timings_seconds['parent_preflight_seconds'] = time.perf_counter() - phase_started
@@ -205,7 +228,7 @@ class NativeSavedSession:
         files.append(ROOT / 'civ6rl/learning/diagnostic_budget998.py')
         if captured is None:
             files += list(selected.folder.rglob('*'))
-        files += [worker, ROOT / 'tools/run_official_postload909.py', HOST, source_fixture, fixture, WITNESS_PATH, ROOT / 'work/official-save909/singleplayer-capability-branch-proof.json', ROOT / 'work/native-controller911/source-r2.json']
+        files += [worker, ROOT / 'tools/run_official_postload909.py', host, source_fixture, fixture, WITNESS_PATH, ROOT / 'work/official-save909/singleplayer-capability-branch-proof.json', ROOT / 'work/native-controller911/source-r2.json']
         if captured is None:
             files += [ROOT / 'work/official-cache912/database-comparison.json', ROOT / 'work/phase23-native-fixture02/icudt56l.dat']
         else:
@@ -225,6 +248,8 @@ class NativeSavedSession:
         if captured is not None:
             from civ6_host.runtime.native.native_official_bundle import DATABASE_PROFILE
             closure.update(database_profile=DATABASE_PROFILE, official_bundle=dict(path=captured.reference[0], sha256=captured.reference[1]), initial_turn=captured.initial_turn)
+        if base_image is not None:
+            base_capture_inputs.bind_worker(closure, captured)
         handoff_key = self._write_private_closure(closure, captured=captured)
         self.reset_timings_seconds['closure_pin_and_write_seconds'] = time.perf_counter() - phase_started
         from civ6_host.runtime.native.native_official_bundle import LOCALIZATION_HANDOFF_ENV
@@ -236,7 +261,7 @@ class NativeSavedSession:
         env.update(PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1', CIV6RL_PYTHON_HOME=sys.base_prefix)
         env['PATH'] = sys.base_prefix + os.pathsep + env.get('PATH', '')
         from civ6_host.runtime.session_launch import launch
-        return launch(self, HOST, worker, closure, env, captured, reset_started)
+        return launch(self, host, worker, closure, env, captured, reset_started)
 
     def _fail(self, reason, error=None):
         with self.error_lock:
@@ -250,10 +275,13 @@ class NativeSavedSession:
                     self.process.kill()
 
     def _watch(self):
+        reduced_reserve = self.memory_reserve_mib < DEFAULT_MEMORY_RESERVE_MIB
+        next_pressure_sample = self.started
         while not self.done.wait(0.1):
             if self.process.poll() is not None:
                 return
-            if time.perf_counter() - self.started >= self.lifetime_seconds:
+            now = time.perf_counter()
+            if now - self.started >= self.lifetime_seconds:
                 self._fail('lifetime_limit', 'Session lifetime exceeded')
                 return
             try:
@@ -261,10 +289,32 @@ class NativeSavedSession:
                 self.samples += 1
                 for key, value in memory.items():
                     self.peak[key] = max(value, self.peak.get(key, 0))
+                if reduced_reserve and now >= next_pressure_sample:
+                    if not self._check_running_memory():
+                        return
+                    next_pressure_sample = now + 1.0
             except OSError as exc:
                 if self.process.poll() is None:
                     self._fail('memory_monitor_failed', repr(exc))
                 return
+
+    def _check_running_memory(self):
+        parent = self.win.memory()
+        available = self.win.available()
+        min_available = min(available['physical_available_bytes'], available['commit_available_bytes'])
+        recorded = self.supervisor_memory
+        recorded['runtime_samples'] += 1
+        recorded['minimum_available_bytes'] = min(recorded.get('minimum_available_bytes', min_available),
+                                                  min_available)
+        recorded['peak_parent_commit_bytes'] = max(recorded.get('peak_parent_commit_bytes', 0),
+                                                   parent['peak_commit_bytes'])
+        if min_available < RUNNING_MEMORY_FLOOR_BYTES:
+            self._fail('system_memory_pressure', f'System memory fell below 1024 MiB ({min_available} bytes)')
+            return False
+        if parent['private_bytes'] > MEMORY_LIMIT:
+            self._fail('parent_memory_pressure', 'Python supervisor exceeds 512 MiB in reduced reserve mode')
+            return False
+        return True
 
     def _read_stream(self, pipe, name, limit, events):
         line_limit = self.event_line_limit_bytes if events else MAX_LINE
@@ -365,7 +415,10 @@ class NativeSavedSession:
         from civ6_host.runtime.native.native_official_bundle import LOCALIZATION_HANDOFF_FIELD
         handoff_key = None
         from civ6_host.runtime.capture_admission import configure_prepared_closure
-        compact = configure_prepared_closure(closure, captured)
+        if getattr(self, '_base_execution_image', None) is not None:
+            compact = True  # The installed Base worker revalidates the retained package and its DB copies.
+        else:
+            compact = configure_prepared_closure(closure, captured)
         if captured is not None and (not compact):
             envelope, handoff_key = create_parent_localization_handoff(closure)
             handoff_path = self.run / 'localization-parent-validation.json'
@@ -443,6 +496,12 @@ class NativeSavedSession:
         unchanged = {name: sha(ROOT / name) == digest for name, digest in self.pins.items()}
         self.report = dict(schema='civ6rl.saved_session913.supervisor.v1', pid=process.pid if process else None, exit_code=process.returncode if process else None, reaped=process is not None and process.poll() is not None, job_assigned=job_assigned, elapsed_seconds=time.perf_counter() - self.started, timeout_seconds=self.lifetime_seconds, memory_limit_bytes=MEMORY_LIMIT, stdout_limit_bytes=self.stdout_limit_bytes, stop_reason=self.stop_reason, error=self.error, timed_out=self.stop_reason == 'lifetime_limit', close_context=self.close_context, memory_samples=self.samples, sampled_memory_peaks=self.peak, source_unchanged=unchanged, stdout_native_records=self.stdout_native_records, reset_timings_seconds=dict(self.reset_timings_seconds), reset_resource_samples=copy.deepcopy(self.reset_resource_samples), reset_timing_scopes={'reset_total_seconds': 'parent reset inclusive total', 'parent_preflight_seconds': 'non-overlapping parent validation and resource check', 'fixture_prepare_total_seconds': 'inclusive; contains fixture_prepare_subphases_seconds', 'closure_pin_and_write_seconds': 'non-overlapping parent closure pinning and write', 'child_spawn_to_initial_response_seconds': 'inclusive; child startup through first response', 'initial_response_validation_seconds': 'non-overlapping parent identity/protocol validation'}, episode_id=self.protocol.identity.episode_id if self.protocol else None, last_sequence=self.protocol.sequence if self.protocol else None, game_executable_launched=False, normal_destroy_called=False, termination_inferred_from_process_exit=False, strategic_training_ready=False)
         self.report['pipe_cleanup_errors'] = pipe_cleanup_errors
+        if self.memory_reserve_mib < DEFAULT_MEMORY_RESERVE_MIB:
+            try:
+                self.supervisor_memory['final_parent_memory'] = self.win.memory()
+            except OSError as exc:
+                self.supervisor_memory['final_parent_sample_error'] = repr(exc)
+            self.report['supervisor_memory'] = self.supervisor_memory
         write_json(self.run / 'supervisor.json', self.report)
         self.finished = True
 

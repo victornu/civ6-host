@@ -84,7 +84,7 @@ def dispatch(owner,kind,fields,borrowed_argument):
         registry_token=registry.insert(retained)
         copied=read_event_fields(retained.pointer,backend.core._handle,owner.read,
                                 owner.next_node,core_sha256=XP2_CORE_SHA256)
-        decoded=codec.decode_fields(copied,owner.read)
+        decoded=codec.decode_fields(_statement_fields(token,copied),owner.read)
         record=codec.encode_record(owner._sequence+1,retained.pointer,decoded,padding_bytes=bytes(7))
         owner.deferred._enqueue(record)
         owner.emit('native_xp2_diplomacy_statement_enqueued',dispatch_kind=hex(kind),queue_type='0x84',
@@ -102,6 +102,14 @@ def dispatch(owner,kind,fields,borrowed_argument):
         owner._statement_producing=False;owner._foundation_borrow=None
 
 
+def _statement_fields(continuation, fields, *, reply=None):
+    scope = getattr(continuation, '_xp2_deal_statement_scope', None)
+    if scope is None:
+        return fields
+    from .xp2_deal_draft import project_statement_fields
+    return project_statement_fields(fields, scope, reply=reply)
+
+
 def consume(deferred,record,sequence):
     from .native.native_combat_map_owner import CombatMapRegistry
     from .native.native_diplomacy_statement import StatementReceiver
@@ -116,14 +124,18 @@ def consume(deferred,record,sequence):
         raise ValueError('Statement receiver lost its exact FIFO/map ownership')
     if deferred.statement_consumer is None:deferred.statement_consumer=StatementReceiver()
     if type(deferred.statement_consumer) is not StatementReceiver:raise TypeError('Statement receiver was replaced')
+    deal_reply = {}
     def read_fields(pointer):
-        return read_event_fields(pointer,deferred.base,deferred.read,owner.arguments.reader.next_node,
-                                 core_sha256=XP2_CORE_SHA256)
+        fields = read_event_fields(pointer,deferred.base,deferred.read,owner.arguments.reader.next_node,
+                                   core_sha256=XP2_CORE_SHA256)
+        return _statement_fields(token,fields,reply=deal_reply)
     def deliver(statement):
         ledger=deferred.pending_diplomacy_statements
         if (len(ledger)>=deferred.limit
                 or any(item['event_sequence']==statement['event_sequence'] for item in ledger)):
             raise ValueError('Statement ledger is full or duplicates a sequence')
+        if deal_reply:
+            statement['deal_reply'] = deal_reply
         ledger.append(statement)
     receipt=deferred.statement_consumer.consume(record,registry,owner.empty_receiver_state,
                                                read_fields,deferred.read,deliver=deliver)

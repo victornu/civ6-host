@@ -24,15 +24,25 @@ _CORRELATED_SOURCE = ('work/official-capture/bbg751-world-A-trade-ui-association
 _CORE = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
 _CIVIC_SOURCE = ('work/trade-common-client/xp2-current-trade-civic-hook-source.json',
                  '978c203c768504b9a631bb83224c3c612d418d127c56809d59a2ff31fee9f508')
+_XP1_CIVIC_SOURCE = ('work/trade-common-client/xp1-stock-trade-overview-source.json',
+                     '383f22c3bb3109aed7a1e8fa7351d55ad74d3af020d6aeabe1a2ca7fcbf2e568')
 
 
-def _civic_source():
-    path = resolve_path(resource_root() / _CIVIC_SOURCE[0]).resolve()
-    proof = load_pinned_json(path, _CIVIC_SOURCE[1])
-    if (proof['schema'] != 'civ6-host.xp2-current-trade-civic-hook-source.v1'
-            or proof['image']['sha256'] != _CORE or proof['abi'] != dict(kind=0x87667464,
+def _civic_source(*, rise_and_fall=False):
+    if rise_and_fall:
+        from .execution_images import _XP1_PROFILE
+        source, schema, core = (_XP1_CIVIC_SOURCE,
+            'civ6-host.xp1-stock-trade-overview-source.v1', _XP1_PROFILE.image_sha256)
+    else:
+        source, schema, core = _CIVIC_SOURCE, 'civ6-host.xp2-current-trade-civic-hook-source.v1', _CORE
+    path = resolve_path(resource_root() / source[0]).resolve()
+    proof = load_pinned_json(path, source[1])
+    if (proof['schema'] != schema
+            or proof['image']['sha256'] != core or proof['abi'] != dict(kind=0x87667464,
                 record_type=192, record_size=96, sequence_offset=80, player_offset=84, civic_offset=88)):
         raise ValueError('Trade civic hook source differs')
+    if rise_and_fall and proof['world_congress']['query_required'] is not False:
+        raise ValueError('Unexpected Rise and Fall trade overview screen dependency')
     return path, proof
 
 
@@ -97,9 +107,10 @@ def stock_source_dependencies(reference, *, core_sha256, execution_image=None):
     """Require an exact stock capture and its selected UI source closure."""
     from civ6_host.contracts.trade_overview import STOCK_PROFILE
     from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+    from .execution_images import _XP1_PROFILE
     from .source_verification import file_sha256
 
-    if core_sha256 == XP1_CORE_SHA256 and execution_image is None:
+    if core_sha256 == XP1_CORE_SHA256 and (execution_image is None or execution_image is _XP1_PROFILE):
         from .xp1_saved_load import REFERENCE
         expansion = 'Expansion1'
     elif (core_sha256 == XP2_CORE_SHA256 and type(execution_image) is ExecutionImageProfile
@@ -135,6 +146,14 @@ def stock_source_dependencies(reference, *, core_sha256, execution_image=None):
     if expansion == 'Expansion2':
         path, _ = _civic_source()
         pins[str(path)] = _CIVIC_SOURCE[1]
+    elif execution_image is _XP1_PROFILE:
+        path, civic = _civic_source(rise_and_fall=True)
+        pins[str(path)] = _XP1_CIVIC_SOURCE[1]
+        for row in (civic['capture'], civic['gameplay_database'], civic['existing_codec'],
+                    *civic['ui'].values()):
+            file = resolve_path(root / Path(row['path'])).resolve()
+            if pins.setdefault(str(file), row['sha256']) != row['sha256'] or file_sha256(file) != row['sha256']:
+                raise ValueError('Rise and Fall trade civic source changed: ' + str(file))
     return pins
 
 
@@ -142,15 +161,22 @@ def bind_civic_hook(saved):
     """Bind the local UI capacity check to the verified CivicCompleted FIFO."""
     backend, continuation, prefix = saved.backend, saved.continuation, saved.prefix
     image = getattr(backend.core, '_civ6_host_execution_image', None)
-    if type(image) is not ExecutionImageProfile or image.image_sha256 != _CORE:
+    from .execution_images import _XP1_PROFILE
+    rise_and_fall = image is _XP1_PROFILE and getattr(saved, 'xp1_trade_overview', False) is True
+    if not rise_and_fall and (type(image) is not ExecutionImageProfile or image.image_sha256 != _CORE):
         return
+    if rise_and_fall:
+        from .xp1_trade_source import supports as supports_rise_and_fall
+        if not supports_rise_and_fall(backend.captured_bundle.reference, image):
+            raise ValueError('Rise and Fall trade hook requires the captured stock session')
     continuation.check(active=False)
     owner = prefix.event_arguments.consumer
     events, runtime, child = prefix.deferred_events, prefix.runtime, prefix.ui_child
     if (owner.deferred is not events or events.core is not backend.core or events.pending
             or getattr(owner, 'trade_overview_civic_receiver', None) is not None):
         raise ValueError('Trade civic hook requires one live deferred receiver')
-    _, proof = _civic_source()
+    _, proof = _civic_source(**({'rise_and_fall': True} if rise_and_fall else {}))
+    proof_sha256 = (_XP1_CIVIC_SOURCE if rise_and_fall else _CIVIC_SOURCE)[1]
     for name, span in proof['core_bodies'].items():
         raw = backend.runtime.read(backend.core._handle + span['rva'], span['bytes'])
         if type(raw) is not bytes or sha256(raw).hexdigest() != span['sha256']:
@@ -178,7 +204,7 @@ def bind_civic_hook(saved):
         saved._trade_overview_unlock = (last_turn, capacity > 0)
         saved.emit('native_trade_overview_civic_checked', turn=turn, player_id=player_id,
                    civic_index=civic_index, deferred_sequence=sequence, capacity=capacity,
-                   unlocked=capacity > 0, source_sha256=_CIVIC_SOURCE[1])
+                   unlocked=capacity > 0, source_sha256=proof_sha256)
 
     owner.trade_overview_civic_receiver = completed
 
@@ -199,17 +225,26 @@ def read(saved, observation, decisions):
 
 
 def read_stock(saved, observation, sequence):
-    from .xp2_bundle_inputs import REFERENCE
+    from .configuration_profiles import XP1_CORE_SHA256
+    from .xp1_trade_source import supports as supports_rise_and_fall
+    from .xp2_bundle_inputs import REFERENCE as STOCK_XP2
     owner = _owner(saved, active=False)
     b, c, _, _ = owner
-    if (getattr(saved, 'standard_trade', False) is not True
-            or b.captured_bundle.reference != REFERENCE
+    rise_and_fall = b.load_abi.core_sha256 == XP1_CORE_SHA256
+    ref = b.captured_bundle.reference
+    if rise_and_fall:
+        enabled = (getattr(saved, 'xp1_trade_overview', False) is True
+                   and supports_rise_and_fall(ref, getattr(b.core, '_civ6_host_execution_image', None)))
+    else:
+        enabled = getattr(saved, 'standard_trade', False) is True and ref == STOCK_XP2
+    if (not enabled
             or observation != c.observation or observation['player_id'] != 0):
         raise ValueError('Standard trade overview requires the captured local view')
-    return _read(saved, owner, observation, sequence, trade_overview.STOCK_PROFILE)
+    return _read(saved, owner, observation, sequence, trade_overview.STOCK_PROFILE,
+                 rise_and_fall=rise_and_fall)
 
 
-def _read(saved, owner, observation, sequence, profile):
+def _read(saved, owner, observation, sequence, profile, *, rise_and_fall=False):
     from .native.native_locale_arguments import attach
     b, c, p, identity = owner
     turn = observation['turn']
@@ -223,7 +258,8 @@ def _read(saved, owner, observation, sequence, profile):
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     attach(p)
-    source = native.source(0, turn, sequence, check_capacity=unlock_check, unlocked=unlocked, profile=profile)
+    source = native.source(0, turn, sequence, check_capacity=unlock_check, unlocked=unlocked,
+                           profile=profile, **({'rise_and_fall': True} if rise_and_fall else {}))
     raw = p.runtime.evaluate_text(p.ui_child, source, b'@player_trade_overview', capacity=native.LIMIT + 1)
     panel, status = native.parse(raw, 0, turn, sequence, profile=profile)
     actual = _owner(saved, active=False)

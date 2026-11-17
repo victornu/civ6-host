@@ -10,14 +10,17 @@ ICU_SHA256 = '02cfa347cf8e80e3d9ca925a8c3371db9a125c53234f3e1c03fc0eae4705153f'
 INITIALIZE = '?Initialize@Localization@@YA_NPEB_SPEAVIDatabaseConnection1@Database@@PEBD_NPEAVILocalizationLogger@1@@Z'
 CREATE_CONNECTION = '?CreateConnection@Database@@YAPEAVIDatabaseConnection1@1@PEBDHPEAVIDatabaseLogger@1@@Z'
 
-def validate_localization(manifest):
+def validate_localization(manifest, *, base_capture_bundle=None):
     """Require explicit settings and immutable workspace copies before DLL calls."""
     settings = manifest.get('localization_bootstrap')
     if not isinstance(settings, dict):
         raise ValueError('Prepare requires an explicit localization_bootstrap fixture')
     locale = settings.get('locale')
     explicit = 'official_bundle' in manifest or 'official_export' in settings
-    if explicit:
+    if base_capture_bundle is not None:
+        from civ6_host.runtime.base_capture_inputs import validate_localization_fixture
+        validate_localization_fixture(base_capture_bundle, manifest)
+    elif explicit:
         from civ6_host.runtime import xp2_bbg_inputs
         reference = manifest.get('official_bundle')
         if manifest.get('input_profile') == 'xp2-lan' and xp2_bbg_inputs.is_reference(reference):
@@ -55,8 +58,20 @@ def _localization_library_path(dll_directory, shared_dependency_profile=None):
         raise ValueError('Expected the explicit XP2 shared dependency profile')
     return shared_dependency_profile.verify_library_path('Localization_FinalRelease.dll', path)
 
-def initialize_localization(host, dll_directory, *, shared_dependency_profile=None):
-    settings = validate_localization(host.manifest)
+def initialize_localization(host, dll_directory, *, shared_dependency_profile=None, base_capture_bundle=None):
+    owned_base_capture = getattr(host, '_civ6_host_base_capture_bundle', None)
+    if owned_base_capture is not None:
+        if base_capture_bundle is not None and base_capture_bundle is not owned_base_capture:
+            raise ValueError('Base Localization capture differs from the owned Prepare context')
+        base_capture_bundle = owned_base_capture
+        if shared_dependency_profile is None:
+            shared_dependency_profile = getattr(host, '_civ6_host_shared_dependencies', None)
+    if base_capture_bundle is not None and (
+            shared_dependency_profile is None
+            or shared_dependency_profile.actual_image_sha256 != base_capture_bundle.execution_image.image_sha256):
+        raise ValueError('Installed Base Localization requires its exact shared dependency profile')
+    settings = validate_localization(host.manifest, **({'base_capture_bundle': base_capture_bundle}
+        if base_capture_bundle is not None else {}))
     path = _localization_library_path(dll_directory, shared_dependency_profile)
     library = C.WinDLL(str(path))
     host.localization_library = library

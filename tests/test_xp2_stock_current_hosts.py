@@ -7,7 +7,7 @@ from unittest.mock import patch
 from civ6_host.runtime import capture_admission, xp1_session_inputs, xp2_session_inputs
 from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
 from civ6_host.runtime.paths import resource_root
-from civ6_host.runtime.source_build_identity import CURRENT_STRINGS_HOST_REFERENCE
+from civ6_host.runtime.source_build_identity import CURRENT_UNSIGNED_LOG_HOST_REFERENCE
 from civ6_host.runtime import source_build_identity
 from civ6_host.runtime import xp2_bundle_inputs as xp2
 from civ6_host.runtime.execution_images import known_path, select
@@ -19,8 +19,8 @@ PACKAGE = {
 }
 IMAGE = select("xp2-gamecore-current-092abfbb",
                core_path=known_path("xp2-gamecore-current-092abfbb"))
-CURRENT_HOST = (str((resource_root() / CURRENT_STRINGS_HOST_REFERENCE[0]).resolve()),
-                CURRENT_STRINGS_HOST_REFERENCE[1])
+CURRENT_HOST = (str((resource_root() / CURRENT_UNSIGNED_LOG_HOST_REFERENCE[0]).resolve()),
+                CURRENT_UNSIGNED_LOG_HOST_REFERENCE[1])
 
 
 class XP2StockCurrentHostTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class XP2StockCurrentHostTests(unittest.TestCase):
                 pins, ui=True, core_sha256=XP2_CORE_SHA256,
                 official_bundle=xp2.REFERENCE, execution_image=IMAGE)
 
-        self.assertEqual(executable, resource_root() / CURRENT_STRINGS_HOST_REFERENCE[0])
+        self.assertEqual(executable, Path(CURRENT_HOST[0]))
         self.assertTrue(dependencies)
         self.assertEqual(CURRENT_HOST[1], hashlib.sha256(Path(CURRENT_HOST[0]).read_bytes()).hexdigest())
         self.assertEqual(CURRENT_HOST[1], pins[CURRENT_HOST[0]])

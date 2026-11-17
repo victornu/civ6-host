@@ -1,13 +1,11 @@
 """Grouped cache-facade ABI regressions; all call results use offline fixtures.
 
-The Base cases are retained verbatim with only their import namespace mapped to
-the installed host. XP1 instruction/owner fixtures exercise the actual validators,
+The Base cases are imported from the extracted project fixture with their
+original class bodies and a private static-evidence data path. XP1 instruction/owner fixtures exercise the actual validators,
 but copied source bytes and mock calls are not evidence of native execution.
 """
 from __future__ import annotations
 
-import ast
-from pathlib import Path
 import struct
 from types import SimpleNamespace
 import unittest
@@ -17,21 +15,9 @@ from civ6_host.runtime import cache_facade_profiles as profiles
 from civ6_host.runtime.configuration_profiles import BASE_CORE_SHA256, XP1_CORE_SHA256
 from civ6_host.runtime.native import native_ui_cache_facades as facades_module
 from civ6_host.runtime.native import native_ui_cache_backend as backend_module
-from civ6_host.runtime.paths import resource_root
 
 
-def retained_base_tests():
-    path = resource_root() / 'tests/test_native_ui_cache_facades.py'
-    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == 'civ6rl.native_ui_cache_facades':
-            node.module = 'civ6_host.runtime.native.native_ui_cache_facades'
-    namespace = {'__name__': '_retained_base_cache_facade_tests', '__file__': str(path)}
-    exec(compile(tree, str(path), 'exec'), namespace)
-    return namespace['TestNativeUiCacheFacades']
-
-
-RetainedBaseFacadeTests = retained_base_tests()
+from native_ui_cache_facades_fixture import TestNativeUiCacheFacades as RetainedBaseFacadeTests
 
 
 class XP1FixtureBackend:

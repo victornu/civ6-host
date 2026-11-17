@@ -33,6 +33,7 @@ ENTITY_EVENT_KIND = 3305989846
 UNREGISTERED_PLAYER_CREATED = 595451304
 UNREGISTERED_SCALAR_KINDS = frozenset((UNREGISTERED_PLAYER_CREATED, 990500030))
 ARGUMENT_KEYS = frozenset((2716180809, 3606901732, 2717631346))
+_DIPLOMACY_CONTACT_KINDS = (0x133d411c, 0x08b3bf96, 0x892f171c)
 
 def copy_eight_byte_variant(raw, read, *, expected_tag=0):
     if len(raw) != 24:
@@ -328,7 +329,9 @@ class SharedHostEventDispatch:
                 if type(self._sequence) is not int or not 0 <= self._sequence < 2147483647:
                     raise ValueError('Counter-neutral notification sequence exhausted')
                 neutral_scope = (self.host_notification_counter, self.host_metadata_counter)
-            elif kind not in (2188544486, 2274153042, 424708295, 2599060777, 3241152231, 4086421427, 869823066, 685173694, 58334190, 490036867):
+            elif (kind not in (2188544486, 2274153042, 424708295, 2599060777, 3241152231, 4086421427, 869823066, 685173694, 58334190, 490036867)
+                  and not (kind in _DIPLOMACY_CONTACT_KINDS
+                           and getattr(self, '_active_notification_scope', None) is not None)):
                 raise ValueError('Nonzero native notification metadata scope is not yet modeled')
         if kind in (869823066, 685173694) and (self.host_notification_counter != 0 or self.host_metadata_counter != 0):
             from civ6_host.runtime.native.native_found_city_notification_scope import dispatch_scoped
@@ -1454,7 +1457,7 @@ class SharedHostEventDispatch:
                 self._enqueue(record)
             self.emit('native_deferred_host_event_enqueued', dispatch_kind=hex(kind), queue_type='0xb4', record_hex=record.hex(), plot_x=fields.x, plot_y=fields.y, native_plot_value=value, callback_value=fields.value, retained_sources_live_at_enqueue=True, pending_count=len(self.pending), optional_preprocessing_hook_registered=False, queue_metadata_service_registered=False, unspecified_padding_policy='zero', consumer_validated=False, eligible_for_training=False, native_dispatch_return=0)
             return 0
-        if kind in (322781468, 145997718, 2301564700):
+        if kind in _DIPLOMACY_CONTACT_KINDS:
             if kind == 322781468:
                 from civ6_host.runtime.native import native_event_133d411c as diplomacy_event
             elif kind == 145997718:

@@ -198,12 +198,17 @@ class NativeLoadBackend(configuration._NativeBackend):
         from civ6_host.runtime.saved_load_profiles import profile_for_sha
         from civ6_host.runtime.saved_load_profiles import require_saved_load_admission
         self._saved_load_candidate = candidate_bundle is not None
+        self._base_execution_image = None
         if self._saved_load_candidate:
             from civ6_host.runtime.captured_saved_load import bind_candidate
             self.load_abi = bind_candidate(candidate_bundle, profile, fixture)
             self.captured_bundle = candidate_bundle
         else:
-            self.load_abi = require_saved_load_admission(profile_for_sha(profile.core_sha256))
+            from civ6_host.runtime.execution_images import _BASE_PROFILE
+            if getattr(profile, 'execution_image', None) is _BASE_PROFILE:
+                self._base_execution_image = _BASE_PROFILE
+            source_core = profile.source_core_sha256 if self._base_execution_image is not None else profile.core_sha256
+            self.load_abi = require_saved_load_admission(profile_for_sha(source_core))
         super().__init__(core, context, fixture, dll_directory, profile, proofs['provider'], emit)
         self.proofs = proofs
         self.stage = 'fresh'
@@ -293,6 +298,10 @@ class NativeLoadBackend(configuration._NativeBackend):
             raise ValueError('Official bundle ownership context differs from the loaded input pair')
         install_closed_base_status(self.host, self.owner, self.dll_directory.parents[2], required_mode=required_ownership_mode, captured_bundle=captured_bundle)
         from civ6_host.runtime.native.native_host import prepare_context
+        if getattr(self, '_base_execution_image', None) is not None:
+            if captured_bundle is None:
+                raise ValueError('Installed Base Prepare requires its exact captured bundle')
+            self.host._civ6_host_base_capture_bundle = captured_bundle
         prepare_context(self.core, self.context, self.emit, saved_load_abi=self.load_abi)
         if self.game_flag() != 0:
             raise RuntimeError('Fresh prepared Game is already initialized')
@@ -459,15 +468,20 @@ class NativeLoadBackend(configuration._NativeBackend):
             from civ6_host.runtime.captured_saved_load import make_job_observer
             return make_job_observer(self)
         from civ6_host.runtime.native.native_checkpoint_job_observer import make_job_observer
-        from civ6_host.runtime.native.native_checkpoint_jobs import PROFILE
-        return make_job_observer(self.runtime.read, expected_executable_path=ROOT / 'work/native-script-services-host41/civ6rl-native-python.exe', owner_thread_id=self.thread[1], profile=PROFILE, exclusive_owner_entry=lambda: self.busy and self.snapshot_phase in ('before', 'after') and (self.runtime.thread() == self.thread))
+        from civ6_host.runtime.native.native_checkpoint_jobs import PROFILE, host_reference
+        image = getattr(self, '_base_execution_image', None)
+        executable, _ = host_reference(image)
+        return make_job_observer(self.runtime.read, expected_executable_path=executable,
+            owner_thread_id=self.thread[1], profile=PROFILE, execution_image=image,
+            exclusive_owner_entry=lambda: self.busy and self.snapshot_phase in ('before', 'after') and (self.runtime.thread() == self.thread))
 
     def validate_job_transition(self, before_jobs, after_jobs):
         if getattr(self, '_saved_load_candidate', False):
             from civ6_host.runtime.saved_load_job_observer import validate_transition
             return validate_transition(self, before_jobs, after_jobs)
         from civ6_host.runtime.native.native_checkpoint_postload_jobs import validate_quiescent_snapshot_transition
-        return validate_quiescent_snapshot_transition(before_jobs, after_jobs)
+        return validate_quiescent_snapshot_transition(before_jobs, after_jobs,
+            execution_image=getattr(self, '_base_execution_image', None))
 
     def close_loaded(self, *, completed):
         from civ6_host.runtime.xp1_loaded_lifetime import close_loaded

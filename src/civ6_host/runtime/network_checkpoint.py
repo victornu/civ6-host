@@ -88,6 +88,206 @@ def _checked(row):
     return checked_file(row)
 
 
+def _validate_secondary_boundary(boundary, mode):
+    """Validate the additional native scheduler rows of a multi-human Save."""
+    session = boundary['session']
+    humans = session.get('human_player_ids')
+    if 'secondary_controls' not in boundary and humans == [0] and type(humans[0]) is int:
+        return
+    from civ6_host.contracts.network_turn import validate_turn_controls
+
+    secondary = boundary.get('secondary_controls')
+    if (mode != 'xp2-lan' or type(humans) is not list or not 2 <= len(humans) <= 64
+            or any(type(pid) is not int or not 0 <= pid < 64 for pid in humans)
+            or humans != sorted(set(humans)) or humans[0] != 0
+            or type(session['local_player_id']) is not int or session['local_player_id'] != 0
+            or session['game_mode'] != 'LAN' or session['turn_phase'] != 'TURNPHASE_SIMULTANEOUS'
+            or session['active_human_player_ids'] != humans
+            or any(type(pid) is not int for pid in session['active_human_player_ids'])
+            or type(secondary) is not list or len(secondary) != len(humans) - 1
+            or set(boundary) != {'session', 'controls', 'secondary_controls'}):
+        raise ValueError('LAN checkpoint differs from its simultaneous human roster')
+    for pid, control in zip(humans, (boundary['controls'], *secondary)):
+        validate_turn_controls(control, pid, session['turn'])
+        if (control['active'] is not True or control['active_complete'] is not True
+                or control['can_unready'] is not False or control['timer_elapsed'] is not False):
+            raise ValueError('LAN checkpoint has a human outside the stable untimed boundary')
+
+
+def _checkpoint_view_scope(value):
+    if 'checkpoint_public_views' not in value:
+        return (), ()
+    from civ6_host.contracts.city_buildings import GREAT_WORK_SCHEMAS
+    from civ6_host.contracts.network_turn import SECONDARY_CITY_PANEL_FIELDS, SECONDARY_RELIGION_CONTRACTS
+    from civ6_host.contracts.network_turn import SECONDARY_UNIT_PANEL_KINDS
+    from .player_views import CHECKPOINT_COMBAT_SCHEMA, CHECKPOINT_DECISIONS_SCHEMA, CHECKPOINT_DEVELOPMENT_SCHEMA
+    from .player_views import CHECKPOINT_ADJACENT_WORK_SCHEMA, CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA
+    from .player_views import CHECKPOINT_GOVERNMENT_SCHEMA, CHECKPOINT_OCCUPATION_SCHEMA
+    from .player_views import CHECKPOINT_PURCHASE_SCHEMA, CHECKPOINT_RANGED_SHOTS_SCHEMA
+    from .player_views import CHECKPOINT_SCHEMA, validate_players
+
+    receipt = value['checkpoint_public_views']
+    boundary = value['network_boundary']
+    fields = {'schema', 'players'}
+    if type(receipt) is dict and 'city_panel_groups' in receipt:
+        groups = receipt['city_panel_groups']
+        if (type(groups) is not list or not groups or receipt.get('schema') == CHECKPOINT_SCHEMA
+                or groups != [key for key in SECONDARY_CITY_PANEL_FIELDS if key in groups]):
+            raise ValueError('LAN checkpoint city panel groups are invalid')
+        fields.add('city_panel_groups')
+    if type(receipt) is dict and 'unit_panel_families' in receipt:
+        groups = receipt['unit_panel_families']
+        if (type(groups) is not list or not groups or receipt.get('schema') == CHECKPOINT_SCHEMA
+                or groups != [kind for kind in SECONDARY_UNIT_PANEL_KINDS if kind in groups]):
+            raise ValueError('LAN checkpoint secondary UnitPanel scope is invalid')
+        fields.add('unit_panel_families')
+    if type(receipt) is dict and 'city_state_peace_enabled' in receipt:
+        if (receipt.get('schema') not in (CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA,
+                                          CHECKPOINT_ADJACENT_WORK_SCHEMA)
+                or receipt['city_state_peace_enabled'] is not True):
+            raise ValueError('LAN checkpoint city-state peace scope is invalid')
+        fields.add('city_state_peace_enabled')
+    if type(receipt) is dict and 'world_score_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['world_score_enabled'] is not True:
+            raise ValueError('LAN checkpoint world score scope is invalid')
+        fields.add('world_score_enabled')
+    if type(receipt) is dict and 'archaeology_mode' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['archaeology_mode'] not in ('read', 'commands'):
+            raise ValueError('LAN checkpoint archaeology scope is invalid')
+        fields.add('archaeology_mode')
+    if type(receipt) is dict and 'city_building_version' in receipt:
+        if ('city_buildings' not in receipt.get('city_panel_groups', ())
+                or receipt['city_building_version'] not in GREAT_WORK_SCHEMAS):
+            raise ValueError('LAN checkpoint city building version is invalid')
+        fields.add('city_building_version')
+    if type(receipt) is dict and 'great_people_mode' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['great_people_mode'] not in ('read', 'actions'):
+            raise ValueError('LAN checkpoint Great People scope is invalid')
+        fields.add('great_people_mode')
+    if type(receipt) is dict and 'great_person_activation_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['great_person_activation_enabled'] is not True:
+            raise ValueError('LAN checkpoint Great Person activation scope is invalid')
+        fields.add('great_person_activation_enabled')
+    if type(receipt) is dict and 'pantheon_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['pantheon_enabled'] is not True:
+            raise ValueError('LAN checkpoint pantheon scope is invalid')
+        fields.add('pantheon_enabled')
+    if type(receipt) is dict and 'governors_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['governors_enabled'] is not True:
+            raise ValueError('LAN checkpoint governor scope is invalid')
+        fields.add('governors_enabled')
+    if type(receipt) is dict and 'espionage_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['espionage_enabled'] is not True:
+            raise ValueError('LAN checkpoint espionage scope is invalid')
+        fields.add('espionage_enabled')
+    if type(receipt) is dict and 'spy_completion_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['spy_completion_enabled'] is not True:
+            raise ValueError('LAN checkpoint spy completion scope is invalid')
+        fields.add('spy_completion_enabled')
+    if type(receipt) is dict and 'religion_groups' in receipt:
+        groups = receipt['religion_groups']
+        if (type(groups) is not list or not groups or receipt.get('schema') == CHECKPOINT_SCHEMA
+                or groups != [field for field in SECONDARY_RELIGION_CONTRACTS if field in groups]):
+            raise ValueError('LAN checkpoint religion groups are invalid')
+        fields.add('religion_groups')
+    if type(receipt) is dict and 'trade_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['trade_enabled'] is not True:
+            raise ValueError('LAN checkpoint trade scope is invalid')
+        fields.add('trade_enabled')
+    if type(receipt) is dict and 'formation_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['formation_enabled'] is not True:
+            raise ValueError('LAN checkpoint formation scope is invalid')
+        fields.add('formation_enabled')
+    if type(receipt) is dict and 'dedication_enabled' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['dedication_enabled'] is not True:
+            raise ValueError('LAN checkpoint dedication scope is invalid')
+        fields.add('dedication_enabled')
+    if type(receipt) is dict and 'congress_mode' in receipt:
+        if receipt.get('schema') == CHECKPOINT_SCHEMA or receipt['congress_mode'] not in ('catalogue', 'review'):
+            raise ValueError('LAN checkpoint Congress scope is invalid')
+        fields.add('congress_mode')
+    if type(receipt) is dict and 'congress_actions' in receipt:
+        if receipt.get('congress_mode') != 'review' or receipt['congress_actions'] is not True:
+            raise ValueError('LAN checkpoint Congress action scope is invalid')
+        fields.add('congress_actions')
+    if type(receipt) is dict and receipt.get('schema') in (
+            CHECKPOINT_RANGED_SHOTS_SCHEMA, CHECKPOINT_PURCHASE_SCHEMA, CHECKPOINT_GOVERNMENT_SCHEMA,
+            CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA, CHECKPOINT_ADJACENT_WORK_SCHEMA):
+        if type(receipt.get('occupation_enabled')) is not bool:
+            raise ValueError('Ranged-shot checkpoint requires explicit captured-city scope')
+        fields.add('occupation_enabled')
+    if (type(receipt) is not dict or set(receipt) != fields
+            or receipt['schema'] not in (CHECKPOINT_SCHEMA, CHECKPOINT_DECISIONS_SCHEMA,
+                                         CHECKPOINT_DEVELOPMENT_SCHEMA, CHECKPOINT_COMBAT_SCHEMA,
+                                         CHECKPOINT_OCCUPATION_SCHEMA, CHECKPOINT_RANGED_SHOTS_SCHEMA,
+                                         CHECKPOINT_PURCHASE_SCHEMA, CHECKPOINT_GOVERNMENT_SCHEMA,
+                                         CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA,
+                                         CHECKPOINT_ADJACENT_WORK_SCHEMA)
+            or 'secondary_controls' not in boundary
+            or type(receipt['players']) is not list or not 1 <= len(receipt['players']) <= 64):
+        raise ValueError('LAN checkpoint public view receipt differs')
+    players, decision_players = [], []
+    fields = {'player_id', 'observation_sha256', 'player_map_sha256'}
+    checks_decisions = receipt['schema'] != CHECKPOINT_SCHEMA
+    from civ6_host.contracts import envoys
+
+    for row in receipt['players']:
+        allowed = (fields, fields | {'decisions_sha256'})
+        if receipt['schema'] in (CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA,
+                                 CHECKPOINT_ADJACENT_WORK_SCHEMA):
+            allowed += (fields | {'decisions_sha256', 'envoys'},)
+        if receipt.get('congress_actions') is True and value.get('schema') == SCHEMA_V2:
+            allowed += tuple(keys | {'congress_ballot'} for keys in allowed if 'decisions_sha256' in keys)
+        if type(row) is not dict or set(row) not in allowed:
+            raise ValueError('LAN checkpoint public view row differs')
+        for key, digest in row.items():
+            if key in ('player_id', 'envoys', 'congress_ballot'):
+                continue
+            if type(digest) is not str or len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest):
+                raise ValueError('LAN checkpoint public view digest differs')
+        pid = row['player_id']
+        if 'congress_ballot' in row:
+            ballot = row['congress_ballot']
+            if (type(ballot) is not dict or set(ballot) != {'turn', 'turn_segment', 'stage', 'private_sha256'}
+                    or type(ballot['turn']) is not int or ballot['turn'] != boundary['session']['turn']
+                    or type(ballot['turn_segment']) is not int or not 0 <= ballot['turn_segment'] <= 0xffffffff
+                    or ballot['stage'] not in ('regular', 'special')
+                    or type(ballot['private_sha256']) is not str or len(ballot['private_sha256']) != 64
+                    or any(ch not in '0123456789abcdef' for ch in ballot['private_sha256'])):
+                raise ValueError('LAN checkpoint secondary Congress ballot binding is malformed')
+        if 'envoys' in row:
+            state = envoys.validate_catalogue(row['envoys'], pid, boundary['session']['turn'])
+            if state['considered'] is not False:
+                raise ValueError('Checkpoint envoy view only records pending consideration')
+        players.append(pid)
+        if 'decisions_sha256' in row:
+            decision_players.append(pid)
+    session = boundary['session']
+    if tuple(players) != validate_players(players) or not set(players).issubset(session['human_player_ids']):
+        raise ValueError('LAN checkpoint public view is outside its native roster')
+    if checks_decisions != bool(decision_players) or session['local_player_id'] in decision_players:
+        raise ValueError('LAN checkpoint public decision scope differs from its secondary roster')
+    return tuple(players), tuple(decision_players)
+
+
+def _checkpoint_world_selections(value):
+    selections = {0: value['host_world_selection']}
+    if 'host_secondary_world_selections' not in value:
+        return selections
+    _, actors = _checkpoint_view_scope(value)
+    rows = value['host_secondary_world_selections']
+    if not actors or type(rows) is not list or len(rows) > len(actors):
+        raise ValueError('LAN checkpoint selection requires routed secondary humans')
+    for row in rows:
+        if (type(row) is not dict or set(row) != {'player_id', 'unit_id'}
+                or type(row['player_id']) is not int or row['player_id'] not in actors
+                or row['player_id'] in selections or type(row['unit_id']) is not int
+                or not 0 <= row['unit_id'] <= 0xffffffff):
+            raise ValueError('LAN checkpoint secondary unit selection differs from its routed seat')
+        selections[row['player_id']] = row['unit_id']
+    return selections
+
+
 def _read(reference_pair):
     from .native.native_source_cache import load_pinned_json
     from .native.native_session_resume import plain
@@ -108,7 +308,12 @@ def _read(reference_pair):
             or value['decisions']['turn'] != value['observed_game_turn']
             or value['network_boundary']['session']['turn'] != value['observed_game_turn']):
         raise ValueError('LAN checkpoint public identity differs')
-    if _capture_mode(value['input_profile']) == 'xp2-lan':
+    mode = _capture_mode(value['input_profile'])
+    _validate_secondary_boundary(value['network_boundary'], mode)
+    _checkpoint_view_scope(value)
+    if 'host_secondary_world_selections' in value:
+        _checkpoint_world_selections(value)
+    if mode == 'xp2-lan':
         from .xp1_checkpoint_profile import provider_proof
         receipt=value.get('configuration_receipt',{})
         component=value['components'].get('application_configuration',{})
@@ -357,6 +562,15 @@ def _walk_lineage(ref, *, official_bundle, reviewed_producers, collected_pins, h
                 or closure.get('database_profile') != m['database_profile']
                 or _path(closure['fixture']) != _path(m['fixture']['path'])):
             raise ValueError('LAN checkpoint producer closure differs')
+        if 'checkpoint_public_views' in m:
+            from .player_views import checkpoint_decision_players, checkpoint_view_players
+
+            recorded_views, recorded_decisions = _checkpoint_view_scope(m)
+            if recorded_views != checkpoint_view_players(closure, m['network_boundary']):
+                raise ValueError('LAN checkpoint public view scope differs from its producing session')
+            if recorded_decisions and recorded_decisions != checkpoint_decision_players(
+                    closure, m['network_boundary'], recorded_views):
+                raise ValueError('LAN checkpoint public decision scope differs from its producing session')
         closure_path = _path(m['session_closure']['path'])
         recorded_closure = recorded_path(closure_path)
         supervisor_path = _path(recorded_closure.with_name('supervisor.json'))
@@ -654,9 +868,22 @@ def finalize_manifest(backend, value):
     else:
         origin = _manifest(reference)[1]
         value['origin_official_save_sha256'] = origin['save']['source']['sha256']
+    _validate_secondary_boundary(backend.network_boundary, _capture_mode(value['input_profile']))
     value['network_boundary'] = copy.deepcopy(backend.network_boundary)
+    views = getattr(backend, 'checkpoint_public_views', None)
+    if views is not None:
+        value['checkpoint_public_views'] = copy.deepcopy(views)
+        _checkpoint_view_scope(value)
     state_owner = getattr(backend, 'host_state_owner', backend.owner)
-    value['host_world_selection'] = getattr(state_owner,'world_input_selections',{}).get(0)
+    selections = getattr(state_owner, 'world_input_selections', {})
+    value['host_world_selection'] = selections.get(0)
+    if views is not None and getattr(getattr(backend, 'saved', None), '_xp2_lan_world_input_enabled', False):
+        _, decision_players = _checkpoint_view_scope(value)
+        if decision_players:
+            value['host_secondary_world_selections'] = [
+                dict(player_id=pid, unit_id=selections[pid])
+                for pid in decision_players if selections.get(pid) is not None]
+            _checkpoint_world_selections(value)
     return value
 
 
@@ -761,13 +988,16 @@ def configure_closure(closure, ref, *, validate_fields=False, execution_image=No
 
 
 def prepare_owner(owner, initial):
+    from civ6_host.contracts import network_turn
+
     image=getattr(getattr(owner,'core',None),'_civ6_host_execution_image',None)
     m = manifest(owner.inputs.checkpoint,official_bundle=owner.inputs.official_bundle,
                  **({'execution_image':image} if image is not None else {}))
     if initial != m['observation']:
         raise ValueError('Restored LAN public observation differs from checkpoint')
     from .native.native_session_resume import restore_placement_choice
-    xp1 = _capture_mode(owner.inputs.profile.name) in ('xp1-lan', 'xp2-lan')
+    mode = _capture_mode(owner.inputs.profile.name)
+    xp1 = mode in ('xp1-lan', 'xp2-lan')
     tracking = {}
     rows = m['host_placement_tracking']
     if type(rows) is not list or len(rows) > 256:
@@ -791,16 +1021,134 @@ def prepare_owner(owner, initial):
         current = validate_boundary(owner)
     if current != m['network_boundary']:
         raise ValueError('Restored LAN readiness/session boundary differs')
-    if _capture_mode(owner.inputs.profile.name) == 'xp2-lan':
+    selections = _checkpoint_world_selections(m)
+    players, decision_players = _checkpoint_view_scope(m)
+    verified_ballots = {}
+    if players:
+        from .player_views import CHECKPOINT_COMBAT_SCHEMA, CHECKPOINT_DEVELOPMENT_SCHEMA
+        from .player_views import CHECKPOINT_CITY_STATES_SCHEMA, CHECKPOINT_GOVERNMENT_SCHEMA
+        from .player_views import CHECKPOINT_OCCUPATION_SCHEMA, CHECKPOINT_PURCHASE_SCHEMA
+        from .player_views import CHECKPOINT_RANGED_SHOTS_SCHEMA, CHECKPOINT_UNIT_WORK_SCHEMA, checkpoint_view_digests
+        from .player_views import CHECKPOINT_ADJACENT_WORK_SCHEMA
+
+        if decision_players:
+            # Query the producing catalogue, then publish restored host state
+            # only after every comparison succeeds.
+            original_selections = state_owner.world_input_selections
+            original_world = getattr(owner, '_xp2_lan_world_input_enabled', False)
+            original_development = getattr(owner, '_xp2_lan_unit_development_enabled', False)
+            original_attacks = getattr(owner, '_xp2_lan_unit_attacks_enabled', False)
+            original_occupation = getattr(owner, '_xp2_lan_occupation_enabled', False)
+            original_shots = getattr(owner, '_xp2_lan_ranged_shots_enabled', False)
+            original_purchases = getattr(owner, '_xp2_lan_purchases_enabled', False)
+            original_government = getattr(owner, '_xp2_lan_government_enabled', False)
+            original_city_states = getattr(owner, '_xp2_lan_city_states_enabled', False)
+            original_unit_work = getattr(owner, '_xp2_lan_unit_work_enabled', False)
+            original_adjacent_work = getattr(owner, '_xp2_lan_adjacent_work_enabled', False)
+            saved_views = m['checkpoint_public_views']
+            view_schema = saved_views['schema']
+            restore_adjacent_work = view_schema == CHECKPOINT_ADJACENT_WORK_SCHEMA
+            restore_unit_work = restore_adjacent_work or view_schema == CHECKPOINT_UNIT_WORK_SCHEMA
+            restore_city_states = restore_unit_work or view_schema == CHECKPOINT_CITY_STATES_SCHEMA
+            restore_government = restore_city_states or view_schema == CHECKPOINT_GOVERNMENT_SCHEMA
+            restore_purchases = restore_government or view_schema == CHECKPOINT_PURCHASE_SCHEMA
+            restore_shots = restore_purchases or view_schema == CHECKPOINT_RANGED_SHOTS_SCHEMA
+            restore_occupation = view_schema == CHECKPOINT_OCCUPATION_SCHEMA or saved_views.get('occupation_enabled', False)
+            if restore_occupation and not original_occupation:
+                raise ValueError('Restoring secondary captured-city choices requires their admitted profile')
+            if restore_shots and not original_shots:
+                raise ValueError('Restoring secondary ranged shots requires their admitted profile')
+            if restore_purchases and not original_purchases:
+                raise ValueError('Restoring secondary purchases requires their admitted profile')
+            if restore_government and not original_government:
+                raise ValueError('Restoring secondary government choices requires their admitted profile')
+            if restore_city_states and not original_city_states:
+                raise ValueError('Restoring secondary city-states requires their admitted profile')
+            if restore_unit_work and not original_unit_work:
+                raise ValueError('Restoring secondary unit work requires its admitted profile')
+            if restore_adjacent_work and not original_adjacent_work:
+                raise ValueError('Restoring secondary adjacent work requires its admitted profile')
+            try:
+                state_owner.world_input_selections = selections
+                owner._xp2_lan_world_input_enabled = 'host_secondary_world_selections' in m
+                owner._xp2_lan_unit_development_enabled = (
+                    restore_shots or view_schema in (CHECKPOINT_DEVELOPMENT_SCHEMA, CHECKPOINT_COMBAT_SCHEMA,
+                                                     CHECKPOINT_OCCUPATION_SCHEMA))
+                owner._xp2_lan_unit_attacks_enabled = restore_shots or view_schema in (
+                    CHECKPOINT_COMBAT_SCHEMA, CHECKPOINT_OCCUPATION_SCHEMA)
+                owner._xp2_lan_occupation_enabled = restore_occupation
+                owner._xp2_lan_ranged_shots_enabled = restore_shots
+                owner._xp2_lan_purchases_enabled = restore_purchases
+                owner._xp2_lan_government_enabled = restore_government
+                owner._xp2_lan_city_states_enabled = restore_city_states
+                owner._xp2_lan_unit_work_enabled = restore_unit_work
+                owner._xp2_lan_adjacent_work_enabled = restore_adjacent_work
+                envoy_views = {row['player_id']: row['envoys'] for row in saved_views['players'] if 'envoys' in row}
+                options = {'restored_envoy_views': envoy_views} if envoy_views else {}
+                options['city_panel_groups'] = tuple(saved_views.get('city_panel_groups', ()))
+                options['unit_panel_families'] = tuple(saved_views.get('unit_panel_families', ()))
+                options['city_state_peace_enabled'] = saved_views.get('city_state_peace_enabled', False)
+                options['world_score_enabled'] = saved_views.get('world_score_enabled', False)
+                options['archaeology_mode'] = saved_views.get('archaeology_mode', 'off')
+                if 'city_buildings' in options['city_panel_groups']:
+                    from civ6_host.contracts import city_buildings
+                    options['city_building_version'] = saved_views.get('city_building_version', city_buildings.SCHEMA)
+                options['great_people_mode'] = saved_views.get('great_people_mode', 'off')
+                options['great_person_activation_enabled'] = saved_views.get('great_person_activation_enabled', False)
+                options['pantheon_enabled'] = saved_views.get('pantheon_enabled', False)
+                options['governors_enabled'] = saved_views.get('governors_enabled', False)
+                options['espionage_enabled'] = saved_views.get('espionage_enabled', False)
+                options['spy_completion_enabled'] = saved_views.get('spy_completion_enabled', False)
+                options['religion_groups'] = tuple(saved_views.get('religion_groups', ()))
+                options['trade_enabled'] = saved_views.get('trade_enabled', False)
+                options['formation_enabled'] = saved_views.get('formation_enabled', False)
+                options['dedication_enabled'] = saved_views.get('dedication_enabled', False)
+                options['congress_mode'] = saved_views.get('congress_mode', 'off')
+                options['congress_actions'] = saved_views.get('congress_actions', False)
+                options['restored_congress_ballots'] = {
+                    row['player_id']: row['congress_ballot'] for row in saved_views['players'] if 'congress_ballot' in row}
+                view_digests = checkpoint_view_digests(
+                    owner, current, players, decision_players=decision_players, **options)
+            finally:
+                state_owner.world_input_selections = original_selections
+                owner._xp2_lan_world_input_enabled = original_world
+                owner._xp2_lan_unit_development_enabled = original_development
+                owner._xp2_lan_unit_attacks_enabled = original_attacks
+                owner._xp2_lan_occupation_enabled = original_occupation
+                owner._xp2_lan_ranged_shots_enabled = original_shots
+                owner._xp2_lan_purchases_enabled = original_purchases
+                owner._xp2_lan_government_enabled = original_government
+                owner._xp2_lan_city_states_enabled = original_city_states
+                owner._xp2_lan_unit_work_enabled = original_unit_work
+                owner._xp2_lan_adjacent_work_enabled = original_adjacent_work
+        else:
+            view_digests = checkpoint_view_digests(owner, current, players)
+        comparisons = (('observation_sha256', 'public observation'), ('player_map_sha256', 'revealed map'),
+                       ('decisions_sha256', 'public decision catalogue'))
+        for expected, restored in zip(m['checkpoint_public_views']['players'], view_digests['players'], strict=True):
+            for key, label in comparisons:
+                if restored.get(key) != expected.get(key):
+                    raise ValueError(f"Restored LAN {label} differs for player {expected['player_id']}")
+            if restored.get('congress_ballot') != expected.get('congress_ballot'):
+                raise ValueError('Restored LAN secondary Congress ballot binding differs')
+            if 'congress_ballot' in restored:
+                verified_ballots[restored['player_id']] = restored['congress_ballot']
+        owner.emit('official_lan_checkpoint_public_views_matched',
+                   turn=current['session']['turn'], player_ids=list(players))
+        if decision_players:
+            owner.emit('official_lan_checkpoint_public_decisions_matched',
+                       turn=current['session']['turn'], player_ids=list(decision_players))
+    if (mode == 'xp2-lan' or mode == 'xp1-lan'
+            and m['decisions']['schema'] in network_turn.XP1_ENVOY_CHOICE_SCHEMAS):
         from .xp2_envoys import restore_checkpoint_consideration
         restore_checkpoint_consideration(owner, initial, m['decisions'].get('envoys'))
     # Publish host-only tracking only after every identity and native boundary
     # check succeeds. A refused restore must not leave a partial host state.
     state_owner.explicit_placements=tracking
-    state_owner.world_input_selections={0:m['host_world_selection']}
+    state_owner.world_input_selections=selections
     # The initial reply belongs to this same loaded owner and validated
     # checkpoint. Keep the comparison local to that startup sequence.
-    return partial(_compare_decisions, owner, m)
+    return partial(_compare_decisions, owner, m, verified_ballots=verified_ballots)
 
 
 def compare_decisions(owner, observation, decisions):
@@ -810,8 +1158,25 @@ def compare_decisions(owner, observation, decisions):
     return _compare_decisions(owner, m, observation, decisions)
 
 
+def rebind_congress_candidates(projected):
+    """Normalize only the presentation sequence embedded in Congress choices."""
+    from civ6_host.contracts import network_turn, world_congress
+    rebound = {}
+    for row in projected['candidates']:
+        if row['action']['kind'] not in world_congress.CANDIDATE_FIELDS:
+            continue
+        previous = row['candidate_id']
+        row['action']['sequence'] = 0
+        row['candidate_id'] = network_turn.digest(row['action'])
+        rebound[previous] = row['candidate_id']
+    for kind in world_congress.CANDIDATE_FIELDS:
+        family = projected['families'][kind]
+        if 'candidate_ids' in family:
+            family['candidate_ids'] = [rebound[key] for key in family['candidate_ids']]
+
+
 def _semantic_decisions(value, observation):
-    """Compare v37-v41 observation identities across native Save/Load.
+    """Compare observation identities across native Save/Load.
 
     Only the enclosing observation sequence, the Congress catalogue sequence,
     its candidate templates and their derived family IDs, and the observation
@@ -821,27 +1186,15 @@ def _semantic_decisions(value, observation):
     The existing historical canonicalizer handles earlier protocol revisions.
     """
     from .native.native_session_resume import semantic_decisions as historical
-    from civ6_host.contracts import network_turn, world_congress
-    if (value.get('schema') in network_turn.STOCK_TRADE_CAPABILITY_SCHEMAS
-            and value.get('schema') not in network_turn.STOCK_CONGRESS_SCHEMAS):
+    from civ6_host.contracts import network_turn
+    schema = network_turn.xp2_great_person_base_schema(value.get('schema'))
+    has_congress = schema in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS
+    if schema in network_turn.STOCK_TRADE_OVERVIEW_SCHEMAS and not has_congress:
         projected = historical(value)
         if projected['trade_overview'] is not None:
             projected['trade_overview']['sequence'] = 0
         return projected
-    supported = {network_turn.CAPABILITY_XP2_WORLD_CONGRESS_SCHEMA,
-                 *network_turn.STOCK_CONGRESS_SCHEMAS,
-                 network_turn.CAPABILITY_XP2_TRADE_OVERVIEW_SCHEMA,
-                 network_turn.CAPABILITY_XP2_CAPTURED_CITY_SCHEMA}
-    review_schema = getattr(network_turn, 'CAPABILITY_XP2_WORLD_CONGRESS_REVIEW_SCHEMA', None)
-    permissions_schema = getattr(network_turn, 'CAPABILITY_NATIVE_COMMAND_PERMISSIONS_SCHEMA', None)
-    effects_schema = getattr(network_turn, 'CAPABILITY_XP2_CONGRESS_ACTIVE_EFFECTS_SCHEMA', None)
-    if effects_schema is not None:
-        supported.add(effects_schema)
-    if permissions_schema is not None:
-        supported.add(permissions_schema)
-    if review_schema is not None:
-        supported.add(review_schema)
-    if value.get('schema') not in supported:
+    if not has_congress:
         return historical(value)
     from types import SimpleNamespace
     identity = SimpleNamespace(episode_id=value['episode_id'], game_generation=value['game_generation'])
@@ -859,18 +1212,7 @@ def _semantic_decisions(value, observation):
         projected['world_congress_active_effects']['sequence'] = 0
     if projected.get('trade_overview') is not None:
         projected['trade_overview']['sequence'] = 0
-    rebound = {}
-    for row in projected['candidates']:
-        if row['action']['kind'] not in world_congress.CANDIDATE_FIELDS:
-            continue
-        previous = row['candidate_id']
-        row['action']['sequence'] = 0
-        row['candidate_id'] = network_turn.digest(row['action'])
-        rebound[previous] = row['candidate_id']
-    for kind in world_congress.CANDIDATE_FIELDS:
-        family = projected['families'][kind]
-        if 'candidate_ids' in family:
-            family['candidate_ids'] = [rebound[key] for key in family['candidate_ids']]
+    rebind_congress_candidates(projected)
     projected.pop('decision_id')
     projected['decision_id'] = network_turn.digest(projected)
     network_turn.validate_capability_catalogue(projected, identity, 0, observation['turn'],
@@ -928,14 +1270,14 @@ def _comparison_differences(expected, actual, *, limit=16):
                 full_objects_emitted=False)
 
 
-def _compare_decisions(owner, m, observation, decisions):
+def _compare_decisions(owner, m, observation, decisions, *, verified_ballots=None):
     from civ6_host.contracts import network_turn
     evidence=getattr(owner,'production_administrative_by_player',{}).get(observation['player_id'])
     combat=getattr(owner,'combat_administrative_by_player',{}).get(observation['player_id'])
     from .configuration_profiles import BASE_CORE_SHA256,XP1_CORE_SHA256
     from .xp1_unit_attack_profile import PUBLIC_PRECISION_SOURCE, READINESS_SOURCE, source_reference, precision_reference, verify_source, verify_readiness_source
     core_sha256=None;precision=PUBLIC_PRECISION_SOURCE[1]
-    schema = decisions.get('schema')
+    schema = network_turn.xp2_great_person_base_schema(decisions.get('schema'))
     if schema in network_turn.ATTACK_CAPABILITY_SCHEMAS:
         core_sha256=_profile_engine(owner.inputs.profile.name)
         if core_sha256!=m['core_sha256']:
@@ -946,7 +1288,8 @@ def _compare_decisions(owner, m, observation, decisions):
     readiness_source=None
     if (schema in network_turn.COMBAT_READINESS_CAPABILITY_SCHEMAS
             and schema != network_turn.CAPABILITY_CITY_CONTROLS_SCHEMA
-            and m['decisions'].get('schema') not in network_turn.COMBAT_READINESS_CAPABILITY_SCHEMAS):
+            and network_turn.xp2_great_person_base_schema(m['decisions'].get('schema'))
+                not in network_turn.COMBAT_READINESS_CAPABILITY_SCHEMAS):
         if core_sha256==XP1_CORE_SHA256:
             verify_source();verify_readiness_source()
         else:
@@ -961,12 +1304,35 @@ def _compare_decisions(owner, m, observation, decisions):
         bind_owner(owner)
     queried,query_transition=network_turn.checkpoint_city_query_projection(
         decisions,m['decisions'],observation,requested=query_flags)
+    if getattr(owner, '_xp1_unit_work_core', None) is not None:
+        from .xp1_unit_work_profile import require_owner
+        require_owner(owner)
+        queried, work_transition = network_turn.checkpoint_xp1_unit_work_projection(
+            queried, m['decisions'], observation)
+        if work_transition:
+            if query_transition:
+                query_transition['explicit_xp1_unit_work_query'] = True
+                for key in ('added_public_fields', 'added_action_families'):
+                    query_transition[key].extend(work_transition[key])
+            else:
+                query_transition = work_transition
+    if getattr(owner, '_world_score_core', None) is not None:
+        from .world_score import require_owner
+        require_owner(owner)
+        queried, score_transition = network_turn.checkpoint_world_score_projection(
+            queried, m['decisions'], observation)
+        if score_transition:
+            if query_transition:
+                query_transition['explicit_world_score_query'] = True
+                query_transition['added_public_fields'].append('world_score')
+            else:
+                query_transition = score_transition
     comparable, transition = network_turn.checkpoint_catalogue(queried,m['decisions'],observation,production_evidence=evidence,
         combat_evidence=combat,combat_source_sha256=precision,
         combat_readiness_source_sha256=readiness_source,core_sha256=core_sha256)
     if query_transition is not None:
         if transition is not None:
-            raise ValueError('City-query admission cannot mask another catalogue transition')
+            raise ValueError('Optional-query admission cannot mask another catalogue transition')
         transition=query_transition
     expected_semantics = _semantic_decisions(m['decisions'], m['observation'])
     restored_semantics = _semantic_decisions(comparable, observation)
@@ -980,6 +1346,24 @@ def _compare_decisions(owner, m, observation, decisions):
             comparison_identity_projection='congress_observation_sequence.v1',
             strict_comparison_retained=True, full_objects_emitted=False)
         raise ValueError('Restored LAN public decision catalogue differs')
+    congress = decisions.get('world_congress')
+    # The strict comparison above authenticates the saved form. An unrelated
+    # catalogue upgrade can coexist with it if the comparison projection kept
+    # the complete live Congress form.
+    if (m['schema'] == SCHEMA_V2
+            and getattr(owner, 'world_congress_review_diagnostic', False) is True
+            and congress is not None and comparable.get('world_congress') == congress
+            and congress['stage'] == 'regular'
+            and congress['offers']['confirm_ballot'] is True):
+        from .xp2_congress_cycle import bind_restored_regular_ballot
+        bind_restored_regular_ballot(owner, congress)
+    ballots = {row['player_id']: row['congress_ballot']
+               for row in m.get('checkpoint_public_views', {}).get('players', ()) if 'congress_ballot' in row}
+    if ballots:
+        if verified_ballots != ballots or transition is not None or m['schema'] != SCHEMA_V2:
+            raise ValueError('Secondary Congress ballot admission requires the exact initial checkpoint')
+        from .xp2_lan_congress import bind_checkpoint
+        bind_checkpoint(owner, ballots)
     owner.emit('official_lan_checkpoint_reloaded',checkpoint=owner.inputs.checkpoint,
         turn=observation['turn'],public_observation_equal=True,public_decisions_equal=transition is None,
         saved_decision_fields_equal=True,catalogue_transition=transition,

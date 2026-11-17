@@ -25,14 +25,10 @@ def verify_runtime_images(runtime, proof):
     shared = getattr(runtime, 'shared_dependency_profile', None)
     if shared is not None:
         from .native_shared_dependency_profiles import NativeSharedDependencyProfile
-        from civ6_host.runtime.execution_images import known_path, select
+        from civ6_host.runtime.execution_images import select_pair
         if type(shared) is not NativeSharedDependencyProfile:
             raise ValueError('Locale requires the explicit shared dependency profile')
-        image = select('xp2-gamecore-current-092abfbb',
-                       core_path=known_path('xp2-gamecore-current-092abfbb'))
-        if (shared.actual_image_sha256, shared.interface_reference_sha256) != (
-                image.image_sha256, image.reference_core_sha256):
-            raise ValueError('Locale shared dependency image/reference pair differs')
+        image = select_pair(shared.actual_image_sha256, shared.interface_reference_sha256)
         identities = {row.name: row for row in image.shared_dependencies}
         for loaded, reference, name in pairs:
             row = identities[name]

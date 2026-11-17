@@ -26,7 +26,11 @@ _TRANSITIONS_PROOF = _ROOT / 'evidence/native-policy-transitions' / f'{TRANSITIO
 def verify_source(core_sha256=_CORE_SHA256) -> None:
     """Verify both native wrapper proof and installed free-policy UI guards."""
     if core_sha256 != _CORE_SHA256:
-        from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
+        from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+        if core_sha256 == XP1_CORE_SHA256:
+            from civ6_host.runtime.xp1_government_policy_source import verify_source as verify_xp1
+            verify_xp1()
+            return
         if core_sha256 != XP2_CORE_SHA256:
             raise ValueError('Unknown policy source engine')
         from civ6_host.runtime.xp2_policy_source import verify_source as verify_xp2
@@ -233,6 +237,25 @@ def request_source(player_id: int, candidate: dict, *, core_sha256=_CORE_SHA256)
     assignment_literals = b','.join((b'{' + str(slot).encode('ascii') + b',' + h + b'}' for slot, h in normalized))
     prior_literals = b','.join((str(index).encode('ascii') for index in prior_indices))
     return prefix + b'local c,n=context()\n    assert(n==' + str(slot_count).encode('ascii') + b",\n       'policy slot count changed since candidate selection')\nlocal rows=policyRows()\nlocal known={}\nfor _,row in ipairs(rows) do known[row.bits]=row end\nlocal prior,active=slotSnapshot(c,n,rows)\nlocal expectedPrior={" + prior_literals + b"}\nfor slot=0,n-1 do\n  assert(prior[slot]==expectedPrior[slot+1],'policy slot occupants changed since candidate selection')\nend\nlocal clearList={}\nlocal addList={}\nlocal seenSlots={}\nlocal seenHashes={}\nlocal different=false\nlocal assignments={" + assignment_literals + b"}\nfor _,item in ipairs(assignments) do\n  local slot,hash=item[1],item[2]\n  local bits=hash<0 and hash+4294967296 or hash\n  assert(slot>=0 and slot<n and not seenSlots[slot] and not seenHashes[bits],\n         'invalid or duplicate candidate assignment')\n  local row=known[bits]\n  assert(row and c:IsPolicyUnlocked(hash)==true and c:IsPolicyObsolete(hash)==false,\n         'native policy legality changed since candidate selection')\n  if prior[slot]~=row.index then\n    assert(active[bits]==nil and c:CanSlotPolicy(hash,slot)==true,\n           'new policy is active elsewhere or native slot legality rejected it')\n    different=true\n  end\n  seenSlots[slot]=true\n  seenHashes[bits]=true\n  clearList[#clearList+1]=slot\n  addList[slot]=hash\nend\nassert(#clearList==n,'candidate does not cover every policy slot')\nassert(different,'unchanged policy assignments must not submit a request')\nfor slot=0,n-1 do\n  assert(c:GetSlotPolicy(slot)==expectedPrior[slot+1],'policy slots changed during validation')\nend\nlocal accepted=c:RequestPolicyChanges(clearList,addList)\nassert(accepted==true,'native RequestPolicyChanges rejected assignment')\nreturn table.concat({'accepted',string.format('%d',pid),\n                     string.format('%d',Game.GetCurrentGameTurn()),\n                     string.format('%d',n)},',')\n"
+
+def validate_assignment_archive(payload, choice):
+    """Check the variable-length request GameCore produced before delivery."""
+    from struct import unpack
+    from civ6_host.contracts.capability_policies import validate_explicit_action
+
+    validate_explicit_action(dict(kind='policies', candidate=choice))
+    count = choice['slot_count']
+    if type(payload) is not bytes or len(payload) != 4 * (7 + 3 * count):
+        raise ValueError('Policy archive size differs from its assignment')
+    fields = unpack(f'<{7 + 3 * count}I', payload)
+    if fields[:6] != (0xe57882af, choice['player_id'], 3, 0xffffffff, 0xffffffff, count):
+        raise ValueError('Policy archive header changed')
+    clear, added, entries = fields[6:6 + count], fields[6 + count], fields[7 + count:]
+    expected = {(policy_hash & 0xffffffff, slot) for slot, policy_hash in choice['assignments']}
+    if (set(clear) != set(range(count)) or added != count
+            or set(zip(entries[::2], entries[1::2])) != expected):
+        raise ValueError('Policy archive differs from selected slots')
+
 
 def parse_request_result(payload: bytes, expected_player: int, expected_turn: int, expected_slots: int) -> dict:
     pid = int(_player_id(expected_player))

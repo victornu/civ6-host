@@ -1,4 +1,4 @@
-"""Native public player-operation request with owned scalar parameter storage.
+"""Native public player-operation request with owned typed parameter storage.
 
 This constructs native vector parameters; it never fabricates an archive or
 treats a request return as evidence of a committed gameplay operation.
@@ -36,19 +36,28 @@ class _GuardedStorage:
         if C.string_at(self.address - 16, 16) != b'\xa5' * 16 or C.string_at(self.address + self.size, 16) != b'\xa5' * 16:
             raise RuntimeError(f'Native {self.name} exceeded source-sized storage')
 
-def request_player_operation(core, context, player, operation, parameters, *, read=None, native_api=None, submit=True, core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3', allow_empty=False, congress_permit=None, dedication_permit=None):
-    """Run native CanStart and, when true, submit the identical scalar map.
+def request_player_operation(core, context, player, operation, parameters, *,
+                             read=None, native_api=None, submit=True,
+                             core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3',
+                             allow_empty=False, congress_permit=None, dedication_permit=None, levy_permit=None,
+                             religion_permit=None, great_work_permit=None, archaeology_permit=None,
+                             allow_religion_name=False):
+    """Run native CanStart and, when true, submit the identical native map.
 
     ``allow_empty`` is restricted to the source-qualified XP2 UNLOCK_POLICIES
     operation, whose official UI submits an empty table. An internal sealed
     Congress permit additionally admits its exact source-described empty maps.
-    Sealed Congress and dedication permits admit their exact direct requests
-    without CanStart. Other callers retain their contract.
+    Sealed Congress, dedication, levy, religion, Great Work and archaeology permits admit their exact direct UI
+    requests. Other callers retain the native CanStart check.
 
     ``parameters`` is an insertion-ordered dictionary of one to eight uint32
     keys and values obtained by the caller from the intended native Lua API.
     Values must be DWORD bit patterns of actual signed32 Lua integers; other
     Lua numeric representations can take the source floating-point branch.
+    ``allow_religion_name`` selects only the exact installed XP1
+    FOUND_RELIGION three-key map. Its native-owned name value is ``bytes``
+    before the C terminator. The calling action must qualify its UI name.
+
     This helper does not infer operation/key meanings. It admits the source
     player-index domain 0..63, passes test_visible=False, and supplies an owned native
     reason map. The returned request_invoked flag means only the void public
@@ -66,8 +75,18 @@ def request_player_operation(core, context, player, operation, parameters, *, re
         raise ValueError('Player operation must be a uint32 native value')
     if type(allow_empty) is not bool:
         raise ValueError('Empty player-operation parameters require explicit qualification')
-    if congress_permit is not None and dedication_permit is not None:
+    if type(allow_religion_name) is not bool:
+        raise ValueError('Religion name transport requires an explicit mode')
+    permits = (congress_permit, dedication_permit, levy_permit, religion_permit, great_work_permit, archaeology_permit)
+    if sum(permit is not None for permit in permits) > 1:
         raise ValueError('One exact player-operation request permit is required')
+    text_profile = None
+    if allow_religion_name:
+        from civ6_host.runtime import xp1_religion_name_transport as text_profile
+        if (core_sha256 != text_profile.XP1_CORE_SHA256 or operation != text_profile.FOUND_RELIGION
+                or allow_empty or any(p is not None for p in permits)):
+            raise ValueError('Unqualified religion name player-operation map')
+        name = text_profile.validate_parameters(parameters)
     direct_name = None
     if congress_permit is not None:
         from civ6_host.runtime.xp2_world_congress_source import authorize_request
@@ -77,13 +96,29 @@ def request_player_operation(core, context, player, operation, parameters, *, re
         from civ6_host.runtime.xp2_dedications import authorize_request
         direct_name = authorize_request(dedication_permit, core, context, player, operation,
             parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
+    elif levy_permit is not None:
+        from civ6_host.runtime.xp2_city_state_levies import authorize_request
+        direct_name = authorize_request(levy_permit, core, context, player, operation,
+            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
+    elif religion_permit is not None:
+        from civ6_host.runtime.xp2_direct_religion_source import authorize_request
+        direct_name = authorize_request(religion_permit, core, context, player, operation,
+            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
+    elif great_work_permit is not None:
+        from civ6_host.runtime.xp2_great_work_commands import authorize_request
+        direct_name = authorize_request(great_work_permit, core, context, player, operation,
+            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
+    elif archaeology_permit is not None:
+        from civ6_host.runtime.xp2_archaeology import authorize_request
+        direct_name = authorize_request(archaeology_permit, core, context, player, operation,
+            parameters, core_sha256=core_sha256, submit=submit, allow_empty=allow_empty)
     elif allow_empty:
         from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
         from civ6_host.runtime.xp2_policy_controls_source import UNLOCK_POLICIES, source
         if core_sha256 != XP2_CORE_SHA256 or operation != UNLOCK_POLICIES:
             raise ValueError('Unqualified empty player-operation map')
         source()
-    if not isinstance(parameters, dict) or not (0 if allow_empty else 1) <= len(parameters) <= 8 or any((type(k) is not int or type(v) is not int or (not 0 <= k <= 4294967295) or (not 0 <= v <= 4294967295) for k, v in parameters.items())):
+    if text_profile is None and (not isinstance(parameters, dict) or not (0 if allow_empty else 1) <= len(parameters) <= 8 or any((type(k) is not int or type(v) is not int or (not 0 <= k <= 4294967295) or (not 0 <= v <= 4294967295) for k, v in parameters.items()))):
         raise ValueError('Player-operation parameters require one to eight uint32 pairs')
     parameters = dict(parameters)
     base = getattr(core, '_handle', None)
@@ -106,17 +141,32 @@ def request_player_operation(core, context, player, operation, parameters, *, re
     for vt, offset, target in abi.slots:
         if u64(base + vt + offset) != base + target:
             raise ValueError('Unexpected public player-operation/parameter method')
+    methods = abi.methods
+    if text_profile is not None:
+        text_profile.verify_live(core, read, abi)
+        methods = {**methods, 'set_cstring': (text_profile.SET_CSTRING, C.c_void_p,
+                   (C.c_void_p, C.c_uint32, C.c_void_p))}
     if native_api is None:
-        native_api = {name: C.WINFUNCTYPE(restype, *args)(base + rva) for name, (rva, restype, args) in abi.methods.items()}
-    elif not isinstance(native_api, dict) or set(native_api) != set(abi.methods) or (not all((callable(value) for value in native_api.values()))):
+        native_api = {key: C.WINFUNCTYPE(restype, *args)(base + rva)
+                      for key, (rva, restype, args) in methods.items()}
+    elif not isinstance(native_api, dict) or set(native_api) != set(methods) or (not all((callable(value) for value in native_api.values()))):
         raise ValueError('Player-operation test API must supply the complete source contract')
     params = _GuardedStorage(72, 'vector parameter map')
     reasons = _GuardedStorage(96, 'reason map')
     params_live = reasons_live = False
+    text_buffer = None
+    if text_profile is not None:
+        text_input = name + b'\0'
+        text_buffer = _GuardedStorage(len(text_input), 'religion name byte input')
+        C.memmove(text_buffer.address, text_input, len(text_input))
 
     def check():
         params.check()
         reasons.check()
+        if text_buffer is not None:
+            text_buffer.check()
+            if C.string_at(text_buffer.address, len(text_input)) != text_input:
+                raise RuntimeError('Native operation changed the religion name input buffer')
 
     def verify_values():
         for key, expected in parameters.items():
@@ -125,6 +175,9 @@ def request_player_operation(core, context, player, operation, parameters, *, re
             if not pointer:
                 raise RuntimeError('Native vector parameter was not stored')
             raw = read(pointer, 24)
+            if type(expected) is bytes:
+                text_profile.verify_stored(raw, read, text_buffer.address, expected)
+                continue
             if not isinstance(raw, (bytes, bytearray, memoryview)) or len(raw) != 24 or struct.unpack_from('<H', raw)[0] != 2 or (struct.unpack_from('<I', raw, 8)[0] != expected) or (struct.unpack_from('<Q', raw, 16)[0] != 0):
                 raise RuntimeError('Native vector parameter differs from its DWORD input')
     try:
@@ -139,10 +192,15 @@ def request_player_operation(core, context, player, operation, parameters, *, re
             if native_api['lookup'](params.address, key):
                 raise RuntimeError('New native vector parameter key already exists')
             check()
-            pointer = native_api['set_u32'](params.address, key, value)
+            if type(value) is bytes:
+                pointer = native_api['set_cstring'](params.address, key, text_buffer.address)
+                missing = 'Native vector religion name setter returned null'
+            else:
+                pointer = native_api['set_u32'](params.address, key, value)
+                missing = 'Native vector DWORD setter returned null'
             check()
             if not pointer:
-                raise RuntimeError('Native vector DWORD setter returned null')
+                raise RuntimeError(missing)
         verify_values()
         result = native_api['reason_ctor'](reasons.address)
         reasons_live = True
@@ -160,7 +218,12 @@ def request_player_operation(core, context, player, operation, parameters, *, re
         if allowed and submit:
             native_api['request'](context, player, operation, params.address)
             check()
+            if text_profile is not None:
+                verify_values()
         receipt = {'player_id': player, 'operation': operation, 'can_start': bool(allowed), 'request_invoked': bool(allowed and submit), 'request_return_interpreted': False, 'parameter_count': len(parameters), 'native_parameter_vtable_rva': hex(abi.parameters), 'test_visible': False, 'native_reason_map': True, 'archive_fabricated': False, 'gameplay_outcome_verified': False, 'eligible_for_training': False, 'source_sha256': abi.source_sha256}
+        if text_profile is not None:
+            receipt.update(text_parameter_owned_copy_verified=True, text_byte_count=len(name),
+                           text_source_sha256=text_profile.SOURCE[1])
         if direct_name is not None:
             receipt.update(can_start=None, native_can_start_called=False,
                            source_qualified_request_only=direct_name)

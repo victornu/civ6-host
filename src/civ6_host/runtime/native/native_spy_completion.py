@@ -42,15 +42,18 @@ def _decode(raw, limit=LIMIT):
     return json.loads(raw, object_pairs_hook=unique)
 
 
-def display_source(player_id, mission_id, event_sequence):
+def display_source(player_id, mission_id, event_sequence, *, event_seat=False):
     """Admission happens on opening, not while adding a pending occurrence."""
     uint(player_id, 'player', 63)
     _occurrence({'event_sequence': event_sequence, 'mission_id': mission_id})
     verify_source()
+    check = ("assert(player:IsHuman()==true and player:GetID()==pid,'foreign completion event seat')"
+             if event_seat else "assert(Game.GetLocalPlayer()==pid,'completion event perspective changed')")
     return f'''
 local pid,missionID,eventSequence={player_id},{mission_id},{event_sequence}
-assert(Game.GetLocalPlayer()==pid,'completion event perspective changed')
+{check if not event_seat else ''}
 local player=Players[pid];assert(player,'completion event player absent')
+{check if event_seat else ''}
 local diplomacy=player:GetDiplomacy();assert(diplomacy,'completion diplomacy absent')
 local mission=diplomacy:GetMission(pid,missionID)
 if mission==0 then return 'missing' end
@@ -61,14 +64,14 @@ if operation.Hash==UnitOperationTypes.SPY_COUNTERSPY then
  local active=player:IsTurnActive();assert(type(active)=='boolean','completion turn-active predicate malformed')
  if not active then return 'suppressed' end
 end
-assert(Game.GetLocalPlayer()==pid,'completion event perspective changed')
+{check}
 return 'shown'
 '''.encode()
 
 
-def display_state(prefix, player_id, mission_id, event_sequence):
+def display_state(prefix, player_id, mission_id, event_sequence, *, event_seat=False):
     raw = prefix.runtime.evaluate_text(
-        prefix.ui_child, display_source(player_id, mission_id, event_sequence),
+        prefix.ui_child, display_source(player_id, mission_id, event_sequence, event_seat=event_seat),
         b'@spy_completion_display', capacity=32,
     )
     if raw not in (b'shown', b'missing', b'suppressed'):
@@ -212,6 +215,47 @@ ready()
 UnitManager.RequestOperation(selected.unit,selected.operation,selected.params)
 return 'submitted'
 '''.encode()
+
+
+def renewal_unit_state(prefix, action, player_id, turn):
+    """Read only the renewed spy, including while the strategic panel is closed."""
+    spy_completion.validate_action(action)
+    if action['kind'] != 'spy_renew':
+        raise ValueError('Only renewal has a native order state')
+    unit_id = action['unit_id']
+    query = source(turn, player_id, None) + f'''
+assert(Game.GetLocalObserver()==pid,'foreign renewal observation')
+local selected={literal(action)}
+local def=GameInfo.UnitOperations[selected.operation_type]
+assert(def and hash(def.Hash)==selected.operation_hash,'renew operation identity changed')
+local unit=player:GetUnits():FindID(selected.unit_id)
+local out={{player_id=pid,turn=turn,unit_id=selected.unit_id,expected_operation=def.Index,
+  operation=json_null,turns_remaining=json_null}}
+if unit then
+ assert(unit:GetOwner()==pid and GameInfo.Units[unit:GetUnitType()].Spy,'renew target is not an own spy')
+ local operation=int(unit:GetSpyOperation(),'renew operation',-1,2147483647)
+ out.operation=operation
+ out.turns_remaining=operation==-1 and 0 or
+  math.max(0,int(unit:GetSpyOperationEndTurn(),'renew end',-2147483648,2147483647)-turn)
+end
+ready();return encode(out)
+'''.encode()
+    value = _decode(prefix.runtime.evaluate_text(prefix.ui_child, query,
+        b'@spy_completion_order_state', capacity=4097), 4096)
+    identity = dict(player_id=player_id, turn=turn, unit_id=unit_id)
+    if (type(value) is not dict or set(value) != set(identity) | {
+            'expected_operation', 'operation', 'turns_remaining'}
+            or any(type(value[key]) is not int or value[key] != expected for key, expected in identity.items())):
+        raise ValueError('Malformed native spy renewal unit state')
+    uint(value['expected_operation'], 'renew operation index', 0x7fffffff)
+    operation, remaining = value['operation'], value['turns_remaining']
+    if operation is None and remaining is None:
+        return value
+    if (type(operation) is not int or not -1 <= operation <= 0x7fffffff
+            or type(remaining) is not int or not 0 <= remaining <= 0x7fffffff
+            or operation == -1 and remaining != 0):
+        raise ValueError('Malformed native spy renewal order')
+    return value
 
 
 def effect_source(action, before, after):

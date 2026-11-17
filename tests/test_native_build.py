@@ -55,6 +55,40 @@ class NativeBuildTests(unittest.TestCase):
                 inputs=builder.source_inputs(ROOT,manifest)
                 self.assertEqual(len(inputs),len(manifest['sources']))
 
+    def test_current_base_only_replaces_the_havok_export_addresses(self):
+        manifest_path = ROOT / builder.PROFILE_MANIFESTS['base-current-havok']
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        retained = json.loads((ROOT / builder.PROFILE_MANIFESTS['base']).read_text(encoding='utf-8'))
+        original = builder.source_inputs(ROOT, retained)
+        current = builder.source_inputs(ROOT, manifest)
+        main = ROOT / 'native/gamecore_python_host.c'
+        old_number = ROOT / 'native/script_game_event_aggregators.inc'
+        new_number = ROOT / 'native/profiles/xp2-current-havok/script_game_event_aggregators.inc'
+        self.assertEqual(set(current) - set(original), {new_number})
+        self.assertEqual(set(original) - set(current), {old_number})
+        unchanged = (set(original) & set(current)) - {main}
+        self.assertTrue(all(original[path] == current[path] for path in unchanged))
+        self.assertEqual(original[old_number].replace(b'0x3d5f0', b'0x3ae00'), current[new_number])
+        pattern = builder._HAVOK_THREAD_IMPORT
+        self.assertEqual(pattern.sub(rb'\g<1>\g<5>', original[main]), pattern.sub(rb'\g<1>\g<5>', current[main]))
+        old_rvas = [row[4] for row in pattern.finditer(original[main])]
+        new_rvas = [row[4] for row in pattern.finditer(current[main])]
+        self.assertEqual(len(old_rvas), 48)
+        self.assertEqual(len(new_rvas), 48)
+        self.assertTrue(all(old != new for old, new in zip(old_rvas, new_rvas)))
+
+    def test_current_base_refuses_unpinned_or_reused_reference_overlay(self):
+        manifest_path = ROOT / builder.PROFILE_MANIFESTS['base-current-havok']
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        recipe = manifest['havok_thread_rvas']
+        with self.assertRaisesRegex(ValueError, 'Havok export source changed'):
+            builder.source_inputs(ROOT, {**manifest, 'havok_thread_rvas': {**recipe, 'sha256': '0' * 64}})
+        with self.assertRaisesRegex(ValueError, 'Staged Havok export addresses differ'):
+            changed = {**recipe, 'staged_sha256': '0' * 64}
+            builder.source_inputs(ROOT, {**manifest, 'havok_thread_rvas': changed})
+        with self.assertRaisesRegex(ValueError, 'Retained executable sources cannot use a Havok overlay'):
+            builder.source_inputs(ROOT, {**manifest, 'reference_executable': {}})
+
     def source_fixture(self,root):
         rows=[]
         for name,target,data in (

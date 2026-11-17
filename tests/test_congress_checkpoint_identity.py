@@ -10,8 +10,9 @@ import os
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
+from unittest.mock import patch
 
-from civ6_host.contracts import network_turn, world_congress
+from civ6_host.contracts import diplomacy_overview, network_turn, world_congress
 from civ6_host.runtime import network_checkpoint as checkpoint
 from civ6_host.runtime.native.native_session_resume import semantic_decisions as historical
 import test_world_congress_client as previous
@@ -35,8 +36,10 @@ def reset_identity(value,sequence=0):
     result=deepcopy(value)
     result.update(episode_id='1a19889c-456f-422d-b95a-b28f5a452b93',
         game_generation='native-1a19889c-456f-422d-b95a-b28f5a452b93',sequence=sequence)
-    if result['world_congress'] is not None:result['world_congress']['sequence']=sequence
-    if result.get('world_congress_review') is not None:result['world_congress_review']['sequence']=sequence
+    for name in ('world_congress', 'world_congress_review', 'native_command_permissions',
+                 'world_congress_active_effects', 'trade_overview'):
+        if result.get(name) is not None:
+            result[name]['sequence'] = sequence
     for row in result['candidates']:
         if row['action']['kind'] in world_congress.CANDIDATE_FIELDS:
             old=row['candidate_id'];row['action']['sequence']=sequence
@@ -109,6 +112,31 @@ class CongressCheckpointIdentityTests(unittest.TestCase):
         self.assertTrue(data['strict_comparison_retained'])
         self.assertFalse(data['full_objects_emitted'])
 
+    def test_bbg_pantheon_checkpoint_rebinds_congress_with_religion_extensions(self):
+        root = Path(os.environ['CIV6_HOST_RESOURCE_ROOT'])
+        evidence = json.loads((root/'evidence/host-xp2-bbg-pantheon-t67-save-native.json').read_bytes())
+        ref = evidence['native_checkpoint']
+        raw = (root/ref['path']).read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), ref['sha256'])
+        m = json.loads(raw)
+        saved = m['decisions']
+        restored = reset_identity(saved)
+        self.assertEqual(saved['sequence'], 16)
+        self.assertEqual(saved['pantheon']['pantheon_index'], 0)
+        for name in ('world_congress', 'world_congress_review', 'native_command_permissions',
+                     'world_congress_active_effects', 'trade_overview'):
+            self.assertEqual(saved[name]['sequence'], 16)
+            self.assertEqual(restored[name]['sequence'], 0)
+        semantic = checkpoint._semantic_decisions(saved, m['observation'])
+        self.assertEqual(semantic, checkpoint._semantic_decisions(restored, m['observation']))
+        restored['native_command_permissions']['allow_tactical'] ^= True
+        seal(restored)
+        self.assertNotEqual(semantic, checkpoint._semantic_decisions(restored, m['observation']))
+        restored['trade_overview']['sequence'] = 16
+        seal(restored)
+        with self.assertRaises(ValueError):
+            checkpoint._semantic_decisions(restored, m['observation'])
+
     def test_active_ballot_candidate_sequence_and_family_digest_are_rebound_together(self):
         previous.WorldCongressClientTests.setUpClass();fixture=previous.WorldCongressClientTests()
         saved,observation=fixture._v37();reset=reset_identity(saved,17)
@@ -121,6 +149,42 @@ class CongressCheckpointIdentityTests(unittest.TestCase):
         forged=deepcopy(reset);forged['families']['congress_confirm_ballot']['candidate_ids']=[row['candidate_id']];seal(forged)
         with self.assertRaises(ValueError):checkpoint._semantic_decisions(forged,observation)
         self.assertEqual(saved['candidates'][saved['candidates'].index(row)],row)
+
+    def test_initial_ballot_survives_a_diplomacy_upgrade_only_with_its_entire_form(self):
+        root = Path(os.environ['CIV6_HOST_RESOURCE_ROOT'])
+        ref = root / 'work/xp2-client-sessions/run-99c258a006fd4099a5c079304f3729bc/checkpoint/checkpoint.json'
+        raw = ref.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         '810095a9ddce344d3de5b21545e7fe401e0ed8d91d50cb8cae435b4334b2b9a2')
+        m = json.loads(raw)
+        restored = reset_identity(m['decisions'])
+        restored['diplomacy_overview'].update(schema=diplomacy_overview.CITY_STATE_PEACE_SCHEMA,
+            city_state_peace=dict(military_enabled=True, targets=[]))
+        seal(restored)
+        owner, events = self.owner(m)
+        owner.world_congress_review_diagnostic = True
+        binder = 'civ6_host.runtime.xp2_congress_cycle.bind_restored_regular_ballot'
+        with patch(binder) as bind:
+            checkpoint._compare_decisions(owner, m, m['observation'], restored)
+            bind.assert_called_once_with(owner, restored['world_congress'])
+        self.assertTrue(events[-1][1]['saved_decision_fields_equal'])
+        self.assertFalse(events[-1][1]['public_decisions_equal'])
+
+        changed = deepcopy(restored)
+        changed['world_congress']['resolutions'][0]['effect_a'] = 'Different native form'
+        seal(changed)
+        with patch(binder) as bind, self.assertRaisesRegex(ValueError, 'decision catalogue differs'):
+            checkpoint._compare_decisions(owner, m, m['observation'], changed)
+        bind.assert_not_called()
+
+        # A comparison projection may explicitly transform some fields. Even
+        # an approved projection cannot qualify an altered live ballot.
+        compared, transition = network_turn.checkpoint_catalogue(
+            restored, m['decisions'], m['observation'], core_sha256=m['core_sha256'])
+        with (patch.object(network_turn, 'checkpoint_catalogue', return_value=(compared, transition)),
+              patch(binder) as bind):
+            checkpoint._compare_decisions(owner, m, m['observation'], changed)
+            bind.assert_not_called()
 
     def test_v38_review_observation_sequence_rebounds_but_history_and_spy_event_do_not(self):
         m=saved_checkpoint();old=m['decisions']

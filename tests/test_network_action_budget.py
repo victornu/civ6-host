@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from civ6_host.contracts import action_budget, network_turn
 from civ6_host.runtime.native import native_world_input as world
 from civ6_host.runtime.native.native_saved_session import NativeSavedSession
+from civ6_host.runtime.native.native_stdout_transport import CORE_SHA256, HOST_SHA256
 from civ6_host.runtime.native.network_session import NativeNetworkSession
 
 
@@ -100,6 +101,8 @@ class NetworkActionBudgetTests(unittest.TestCase):
         errors = []
         session._fail = lambda reason, error: errors.append((reason, error))
         session.responses = queue.Queue()
+        session.stdout_identity = dict(core_sha256=CORE_SHA256, host_sha256=HOST_SHA256)
+        session.stdout_native_records = []
         if line_limit is not None:
             session.event_line_limit_bytes = line_limit
         with tempfile.TemporaryDirectory() as directory:

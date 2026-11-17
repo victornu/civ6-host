@@ -36,9 +36,11 @@ def captured_inputs():
 class QueueSourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        from civ6_host.runtime.execution_images import _PROFILE, known_path, select
         cls.proof = profile.verify_source()
-        raw = Path(cls.proof['image']['path']).read_bytes()
-        if hashlib.sha256(raw).hexdigest() != XP2:
+        cls.execution_image = select(_PROFILE.id, core_path=known_path(_PROFILE.id))
+        raw = Path(cls.execution_image.path).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != cls.execution_image.image_sha256:
             raise AssertionError('Independent PE oracle differs')
         image = pefile.PE(data=raw)
         cls.base = image.OPTIONAL_HEADER.ImageBase
@@ -54,13 +56,17 @@ class QueueSourceTests(unittest.TestCase):
         # owner guards. Only native memory and native-effect fixtures are reused.
         import test_xp2_continuation_lifetime as fixture
         from test_xp2_initial_choices import populate
-        from civ6_host.runtime.xp2_initial_choice_source import source
+        from civ6_host.runtime.xp2_initial_choice_source import _execution_literal_spans, source
         from civ6_host.runtime.native.native_official_bundle import PreparedBundle
         from civ6_host.runtime.xp2_bundle_inputs import REFERENCE
         setup = fixture.ContinuationLifetimeTests()
         self.addCleanup(setup.doCleanups)
         f, b, services, lease, continuation, transport = setup.graph()
-        populate(f.put, f.core_base, source('production'))
+        production = source('production')
+        populate(f.put, f.core_base, production)
+        for rva, data in _execution_literal_spans(production, self.execution_image).items():
+            self.assertEqual(self.read(self.base+rva,len(data)), data)
+            f.put(f.core_base+rva,data)
         for body in self.proof['functions'].values():
             for frag in body['fragments']:
                 f.put(f.core_base+int(frag['start_rva'], 16), bytes.fromhex(frag['raw_hex']))
@@ -187,7 +193,7 @@ class QueueSourceTests(unittest.TestCase):
         self.assertFalse(hasattr(b, '_xp2_production_queue_source_receipt'))
 
     def test_full_pin_closure_keeps_partial_catalogue_limit_explicit(self):
-        deps = profile.source_dependencies()
+        deps = profile.source_dependencies(execution_image=self.execution_image)
         self.assertIn(profile.SOURCE[1], deps.values())
         for path, sha in deps.items():
             self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(), sha)

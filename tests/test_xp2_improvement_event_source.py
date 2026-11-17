@@ -3,7 +3,6 @@ import ctypes as C
 import json
 from pathlib import Path
 import struct
-import sys
 import unittest
 from unittest.mock import patch
 
@@ -46,8 +45,7 @@ class ImprovementSourceTests(unittest.TestCase):
         self.assertIn(source.SOURCE[1],source.source_dependencies().values())
         # Independent image read confirms every Core byte, including all unwind
         # fragments and the second return after the builder's first RET.
-        sys.path.insert(0,str(resource_root()/'tools'))
-        from extract_phase31_next_export import pefile
+        import pefile
         pe = pefile.PE(p['images']['core']['path'],fast_load=True)
         self.addCleanup(pe.close)
         calls=[]
@@ -129,8 +127,7 @@ class ImprovementQueriesTests(unittest.TestCase):
             if 'table' in op:g.memory.q(g.memory.core_base+abi.table(op['table'])+op['slot'],g.memory.core_base+op['rva'])
         # Read-only installed PE fallback fills complete source code, while
         # fixture memory owns relocation-adjusted vtables/cache/objects.
-        sys.path.insert(0,str(resource_root()/'tools'))
-        from extract_phase31_next_export import pefile
+        import pefile
         pe=pefile.PE(source.source()['images']['core']['path'],fast_load=True)
         self.addCleanup(pe.close)
         old=g.memory.read

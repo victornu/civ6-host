@@ -77,6 +77,98 @@ class GameHistoryTests(unittest.TestCase):
                 if mode=='metadata':args['queue_metadata_service']=object()
                 with self.assertRaises(ValueError):events.encode(source.HISTORY_KIND,raw,1,**args)
 
+    def test_installed_governor_establishment_preserves_descriptor_and_scalar_order(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.xp1_governors_source import ESTABLISHED
+
+        ptr = 0x1234000
+        copied = struct.pack('<HHI', 4, 2, 65536)
+        reads = []
+
+        def read(address, size):
+            reads.append((address, size))
+            return copied
+
+        raw = fields(7, 9)
+        raw[0x23739f42] = struct.pack('<H6xQII', 1024, ptr, 8, 0x21000001)
+        record = events.encode(ESTABLISHED, raw, 2,
+            normalizer_transform_present=False, optional_callback_present=False,
+            queue_metadata_service=None, core_sha256=XP1_CORE_SHA256, read=read)
+        self.assertEqual(reads, [(ptr, 8)])
+        self.assertEqual(struct.unpack_from('<4I', record), (112, 0xe3, 2, 0))
+        self.assertEqual(struct.unpack_from('<HHIII', record, 88), (4, 2, 65536, 7, 9))
+        self.assertEqual(record[104:], bytes(8))
+        state = dict(observer_registered=False, state_pointer_nonnull=True, pre_hook=None,
+                     post_hook=None, subscriber_count=0, state_flags=0, execution_image=_XP1_PROFILE)
+        self.assertEqual(validate_empty_profile_record(record, **state)['event_name'],
+                         'GameCoreEvent::GovernorEstablished')
+
+    def test_installed_turn_history_scalar_record_uses_selected_empty_receiver(self):
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        from civ6_host.runtime.xp1_turn_history_source import KIND
+
+        record = events.encode(KIND, fields(0, 10), 3, normalizer_transform_present=False,
+                               optional_callback_present=False, queue_metadata_service=None)
+        self.assertEqual(struct.unpack_from('<4I', record), (96, 0x10b, 3, 0))
+        self.assertEqual(struct.unpack_from('<I', record, 72), (6,))
+        self.assertEqual(struct.unpack_from('<3I', record, 80), (3, 0, 10))
+        state = dict(observer_registered=False, state_pointer_nonnull=True, pre_hook=None,
+                     post_hook=None, subscriber_count=0, state_flags=0, execution_image=_XP1_PROFILE)
+        row = validate_empty_profile_record(record, **state)
+        self.assertEqual(row['handler_va'], '0x1400d4670')
+        with self.assertRaises(ValueError):
+            validate_empty_profile_record(record, **dict(state, subscriber_count=1))
+
+    def test_installed_age_family_uses_exact_public_session_fifo(self):
+        from civ6_host.runtime import xp1_player_age_source as age
+        from civ6_host.runtime.a0_family_source import A0FamilyProfile
+        from civ6_host.runtime.execution_images import _XP1_PROFILE
+        import pefile
+
+        f = self.fixture()
+        core = f.backend.core
+        core._civ6_host_execution_image = _XP1_PROFILE
+        pe = pefile.PE(_XP1_PROFILE.path, fast_load=True)
+        self.addCleanup(pe.close)
+        age.verify_live(core, lambda address, size: pe.get_data(address - core._handle, size))
+        with self.assertRaisesRegex(ValueError, 'Live Rise and Fall player-age source differs'):
+            age.verify_live(core, lambda address, size: bytes(size))
+        self.assertIn(age.SOURCE[1], age.source_dependencies(_XP1_PROFILE).values())
+
+        records = {kind: frozenset((record,)) for kind, (record, _) in age.EVENTS.items()}
+        sizes = {record: age.SIZE for record, _ in age.EVENTS.values()}
+        profile = A0FamilyProfile(records, sizes, age.SOURCE[1])
+        f.owner.history_event_profile = f.owner._history_event_profile = profile
+        f.deferred.host_notification_counter = 2
+        f.deferred.host_metadata_counter = 3
+        args = dict(normalizer_transform_present=False, optional_callback_present=False,
+                    queue_metadata_service=None)
+        short = {0xa1e5a149: scalar(3, 0), 0xd6fcf3e4: scalar(2, 0xffffffff)}
+        for sequence, (kind, (record_type, flag)) in enumerate(age.EVENTS.items(), 1):
+            with self.subTest(kind=hex(kind)):
+                with self.assertRaisesRegex(ValueError, 'exact installed Rise and Fall'):
+                    events.encode(kind, short, sequence, **args)
+                with self.assertRaisesRegex(ValueError, 'argument keys'):
+                    events.encode(kind, fields(), sequence, execution_image=_XP1_PROFILE, **args)
+                with self.assertRaisesRegex(ValueError, 'selector-zero'):
+                    events.encode(kind, {**short, 0xa1e5a149: scalar(3, 1)}, sequence,
+                                  execution_image=_XP1_PROFILE, **args)
+                self.assertEqual(f.owner.dispatch(kind, short, 0), 0)
+                record, = f.deferred.pending
+                self.assertEqual(struct.unpack_from('<IIQ', record), (96, record_type, sequence))
+                self.assertEqual(struct.unpack_from('<I', record, 72), (flag,))
+                self.assertEqual(struct.unpack_from('<3I', record, 80), (sequence, 0xffffffff, 0))
+                state = dict(f.owner.empty_receiver_state, execution_image=_XP1_PROFILE)
+                self.assertEqual(validate_empty_profile_record(record, **state)['handler_va'],
+                                 age.receiver_row(record_type)['handler_va'])
+                with self.assertRaisesRegex(ValueError, 'subscriber'):
+                    validate_empty_profile_record(record, **dict(state, subscriber_count=1))
+                self.assertEqual(f.deferred.drain(), 1)
+        self.assertEqual((f.owner.host_notification_counter, f.owner.host_metadata_counter), (2, 3))
+        self.assertEqual(f.deferred.consumed_count, len(age.EVENTS))
+        self.assertIsNone(f.owner._foundation_borrow)
+        self.assertEqual(f.calls, [])
+
     def test_live_source_foreign_owner_and_receiver_listeners_are_refused(self):
         f=self.fixture()
         self.assertEqual(f.saved._engine_sha256,XP1_CORE_SHA256)

@@ -1,5 +1,9 @@
 import unittest
+from collections import OrderedDict
 from collections.abc import Mapping
+from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -32,6 +36,7 @@ class CommandProfileSourceMemoizationTests(unittest.TestCase):
         cls.filter_profile = notifications._source(notifications.FILTER_SOURCE)
 
     def setUp(self):
+        choices._RETAINED_SOURCE = None
         choices._VALIDATED_BODY_PROFILE = None
         notifications._VALIDATED_BODY_PROFILES = None
 
@@ -54,6 +59,28 @@ class CommandProfileSourceMemoizationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'fragment changed|body changed'):
                 choices.source('research')
         self.assertIs(choices._VALIDATED_BODY_PROFILE, self.choice_profile)
+
+    def test_initial_choice_proof_stays_bound_after_general_cache_eviction(self):
+        from civ6_host.runtime.native import native_source_cache as cache
+
+        proof = choices.source('status')
+        selected = OrderedDict((key, value) for key, value in cache._CACHE.items() if value is proof)
+        self.assertEqual(len(selected), 1)
+        with patch.object(cache, '_CACHE', selected), patch.object(cache, '_MAX_ENTRIES', 1):
+            choices._source(choices.CURRENT_LITERAL_SOURCE)
+            self.assertFalse(any(key[1] == choices.SOURCE[1] for key in cache._CACHE))
+            with patch.object(choices, '_source', side_effect=AssertionError('duplicate proof allocation')):
+                for family in ('status', 'research', 'production'):
+                    self.assertIs(choices.source(family), proof)
+
+    def test_initial_choice_retained_proof_rechecks_file_identity(self):
+        choices.source('status')
+        original = choices._file_identity
+        with (patch.object(choices, '_file_identity', side_effect=lambda path: (*original(path), 1)),
+              patch.object(choices, '_source', side_effect=RuntimeError('contents changed')) as load):
+            with self.assertRaisesRegex(RuntimeError, 'contents changed'):
+                choices.source('status')
+        load.assert_called_once_with(choices.SOURCE)
 
     def test_mutable_initial_choice_fixture_is_never_trusted_or_cached(self):
         mutable = _mutable(self.choice_profile)
@@ -182,6 +209,38 @@ class CommandProfileSourceMemoizationTests(unittest.TestCase):
                 choices.verify_live(0x10000000, reader, 'status')
         self.assertEqual(len(reads), 1)
         self.assertGreater(reads[0][1], 0)
+
+
+class SupervisorProofCacheTests(unittest.TestCase):
+    def test_supervisor_bounds_retention_without_skipping_pins_or_changing_worker_policy(self):
+        from civ6_host.runtime.native import native_source_cache as cache, network_session
+
+        def write(directory, name, raw):
+            path = Path(directory) / name
+            path.write_bytes(raw)
+            return path, sha256(raw).hexdigest()
+
+        with TemporaryDirectory() as directory, patch.object(cache, '_CACHE', OrderedDict()):
+            first = write(directory, 'first.json', b'{"value":"first"}')
+            second = write(directory, 'second.json', b'{"value":"second"}')
+            large = write(directory, 'large.json', b'{"value":"' + b'x' * 40 + b'"}')
+            worker_cached = cache.load_pinned_json(*large)
+            with patch.object(network_session, '_SUPERVISOR_PROOF_BYTES', 22):
+                network_session._configure_supervisor_proof_cache()
+                self.assertEqual(cache._cache_size_for_tests(), 0)
+                first_value = cache.load_pinned_json(*first)
+                parsed = cache.load_pinned_json(*large)
+                self.assertEqual(parsed, worker_cached)
+                self.assertIsNot(parsed, worker_cached)
+                self.assertIs(cache.load_pinned_json(*first), first_value)
+                second_value = cache.load_pinned_json(*second)
+                self.assertEqual(cache._cache_size_for_tests(), 1)
+                first[0].write_bytes(b'{}')
+                with self.assertRaisesRegex(RuntimeError, 'SHA-256 mismatch'):
+                    cache.load_pinned_json(*first)
+                self.assertIs(cache.load_pinned_json(*second), second_value)
+                network_session._configure_supervisor_proof_cache()
+                self.assertIs(cache.load_pinned_json(*second), second_value)
 
 
 if __name__ == '__main__':

@@ -69,6 +69,75 @@ Detailed target identities stay administrative. Native proposal effects remain
 unqualified. The completed ballot and its post-result Save/reload are recorded
 in the private lab evidence `evidence/host-xp2-congress-ballot-cycle-native.json`.
 
+On the current stock XP2 capture, the client also restored the same regular
+T81 voting form from an authenticated checkpoint. Its ballot sent two
+resolution votes. The native Finished callback and exact Review matched
+in the resumed process, permitting a clean Save at the ordinary T86 boundary.
+The checkpoint records the completed Temple and the native 200-faith
+Apostle quote. An independent process restored the exact T86 observations
+and choices before the Holy Site defense interval.
+Private evidence `evidence/host-xp2-stock-t81-congress-midphase-t86-temple-save-native.json`.
+Independent reload evidence `evidence/host-xp2-stock-t86-holy-site-defense-t89-save-native.json`.
+
+In the next stock XP2 processes, the client reloaded T89, fired four offered
+Slinger attacks and saved the vacated but pillaged Holy Site at T93. It
+reloaded T93, resumed the district repair and used the offered forced turn
+command. GameCore reported the district repaired at T94 and saved that
+state. The Apostle quote was absent. Private evidence
+`evidence/host-xp2-stock-holy-site-ranged-combat-t93-save-native.json` and
+`evidence/host-xp2-stock-holy-site-repair-t94-save-native.json`.
+
+On that stock Gathering Storm capture, the client saved the repaired
+Shrine and the Temple in production at T95. An independent process
+restored the previous observations and choices, then replayed the retained
+commands through T106. The host received and drained the same
+`GameCoreEvent::CultureChanged` notification that previously stopped it.
+GameCore published T107, saved it and destroyed its native context normally.
+A fresh process restored the T107 observations and choices exactly. The
+enemy-flag and world-plot gestures both submitted `MOVE_TO` for a Great
+General on the turn-107 state. In both cases the public command receipt
+reported a refusal. The world-plot request produced neither a visible change
+nor a queued destination. The unit selection preceding it completed. Both
+processes saved and closed normally. The Holy Site was still occupied.
+Private evidence `evidence/host-xp2-stock-culture-changed-turn-crossing-native.json`,
+`evidence/host-xp2-stock-holy-site-enemy-flag-refusal-t107-native.json` and
+`evidence/host-xp2-stock-t107-holy-site-world-click-native.json`.
+
+The subsequent stock continuation used an armored unit's offered movement
+and a Slinger shot that increased the occupier's damage from 8 to 15.
+The Holy Site was clear at T109 and repaired at T110. The T110–T111
+transition enqueued and consumed two `GreatWorkMoved` notifications on
+the existing empty-subscriber FIFO using the pinned current XP2 images.
+The host saved normally at T111 with the armored unit on the Holy Site
+and a Shrine repair underway. Independent reload and the Temple/Apostle
+continuation followed. Private evidence
+`evidence/host-xp2-stock-great-work-moved-turn-crossing-native.json`.
+
+The fresh T111 session restored the same observations and legal choices.
+The Shrine was repaired at T112 and the Temple at T113. The native
+200-faith Apostle quote returned. Team 1 won at T116 with the local player
+on team 0. The ordinary `poll()` reply carried `official_native_victory`
+with null observation and decisions. The history writer and platform
+achievement sink use their source-qualified nullable native branches.
+The diagnostic driver aborted after receiving that reply because it
+tried to read the null observation. A subsequent replay closed the terminal
+session normally and reset the same Python client from the T111 checkpoint
+with a fresh episode identity.
+Private evidence
+`evidence/host-xp2-stock-native-terminal-response-t116.json` and
+`evidence/host-xp2-stock-terminal-close-reset-native.json`.
+
+An alternative stock continuation from T95 exercised a forced end-turn
+after which GameCore reactivated the player at T98. The public receipt
+reported submission and the saved boundary retained the armored unit's
+melee offer. A fresh process restored that offer, executed the attack and
+observed the armored unit occupying the Holy Site. After the repairs the
+T108 purchase spent exactly 200 faith and produced an Apostle with three
+charges. The T109 save preserves the native `spread_religion`,
+`evangelize_belief` and `launch_inquisition` offers. Two independent
+processes restored this boundary and exercised the two Apostle operations.
+Private evidence `evidence/host-xp2-stock-armor-and-apostle-t109-save-native.json`.
+
 The current Review opt-in also publishes v39 `native_command_permissions`.
 Native strategic/tactical permissions remain distinct from player activity and
 turn completion. When a reader requires strategic permission, its group is
@@ -94,6 +163,27 @@ two documented fields. Save and normal Destroy succeed. Nonempty proposal cards
 remain source/software qualified only. Private lab evidence:
 `evidence/host-xp2-congress-active-effects-native.json`.
 
+On a captured simultaneous XP2 LAN game, the same groups can be read for an
+authorized secondary human with `secondary_unit_commands=True` and that
+player in `public_view_players`. The host reads the secondary player's own
+form during their perspective interval. The Review opt-in also enables their
+last results and current effects in the official display phase. A secondary
+ballot can be selected when the host observed the native start of its cycle.
+The command remains pending after delivery. Observing the same player's
+finished results lets the host compare the native votes before admitting Save.
+Ordinary Congress proposals use a player-owned popup and the native proposals
+currently offered to that player. Closing or confirming the popup sends the
+official consultation acknowledgement. Confirmation checks that player's
+proposal state and consultation marker before reporting completion.
+Save/Load can preserve an unsubmitted secondary ballot when its native cycle
+and borrowed view were captured. The two public views and the actor's native
+choice mapping are compared before that ballot becomes actionable again.
+During a session the Congress phase also removes government, policy and governor
+edits from that player's choices. Those public panels remain readable.
+The public catalogue comparison after Load retains the scope recorded at Save.
+Secondary routing and checkpoint comparison have software coverage. Native
+Congress evidence covers the primary player.
+
 The repaired Steam installation has an explicit trial selection on
 `NativeNetworkSession`: `execution_image_profile="xp2-gamecore-current-092abfbb"`.
 It verifies the actual Core and three shared libraries and selects the derived
@@ -115,12 +205,11 @@ published as `civ6-host.network-world-war-decisions.v1`, with the two explicit
 `world_war_response` choices (`accept=False` or `True`). Forced end-turn cannot
 bypass it. On the selected current Core, the GS + BBG 7.5.1 witness cancels and
 then declares war against Hattusa, reads the native war-state change, saves and
-closes. This qualifies that city-state interval; major-player dialogue remains
-separately pending native qualification. Missing receiver profiles refuse before
-RequestSession. No diplomatic answer is chosen automatically. Private evidence:
+closes. Missing receiver profiles refuse before RequestSession. The client
+selects each diplomatic response explicitly. Private evidence:
 `evidence/host-xp2-war-confirmation-native.json` in the local lab.
 
-The prepared major-player response API uses a separate public modal,
+The major-player response API uses a separate public modal,
 `civ6-host.network-diplomacy-decisions.v1`, rather than exporting the private
 legacy statement catalogue. `dialogue` carries session/statement identifiers
 needed by the command interface and public participant IDs. `choices` preserves
@@ -133,18 +222,25 @@ own features; these identifiers and text are not a model architecture decision.
 
 Public modal replies, including inactive-player responses, are validated by the
 common client without importing the native backend or requiring local game
-resources. This is a client dependency check, not a Mac throughput measurement.
-The reader and response route have grouped source/software validation; their
-native major-war effects must still be demonstrated on the selected content.
+resources. At T57 on the current GS + BBG 7.5.1 profile, the client accepts a
+major-player surprise-war prompt, reads the native public dialogue and selects
+`CHOICE_EXIT`. The continued session reports the native war state and saves
+before teardown. This witness covers an explicit world-input declaration from
+one human against an AI. Private evidence:
+`evidence/host-xp2-major-war-t57-native-continuation.json` in the local lab.
+An independent process restores the observation, selection, war relationship
+and legal choices. The previously blocked `world_plot_click` then moves the
+unit across the border without reopening the war prompt. Save records the new
+position on the same turn. Private reload evidence:
+`evidence/host-xp2-major-war-t57-native-reload.json`.
 
-The prepared surprise-war route also verifies the selected native factory
+The surprise-war route also verifies the selected native factory
 registry entry, constructor bytes and virtual targets before RequestSession.
-Unknown names, a foreign factory or corrupt registry are refused. Its current
-source/software checks read the installed PE with substituted registry memory;
-they do not qualify a live major-player exchange. The 21 registration keys found
-for the shared native war class are not 21 delivered API actions. The existing
+Unknown names, a foreign factory or corrupt registry are refused. The T57
+witness exercises the selected surprise-war factory on the live registry.
+The remaining registry entries still require their own native witnesses. The
 local qualifier's `--world-war-target-major` requires a verified saved major
-roster and a public target before starting any native worker.
+roster and a public target before starting a native worker.
 
 The existing `world_select_unit` / `world_plot_click` route now admits the
 source-qualified XP2 `SWAP_UNITS` branch. In the retained BBG 7.5.1 session,
@@ -178,6 +274,121 @@ destroys normally. The new turn-50 pair is not reopened. Other governors,
 foreign assignments, neutralization and broader lifecycle interactions remain
 unqualified. Private evidence: `evidence/host-bbg751-governor-establishment-native.json`.
 Sessions without this explicit option preserve the v31 interface.
+
+The installed Rise and Fall LAN profile exposes the same governor fields and
+four action kinds in `v11.captured-city.v4`. Its assignment chooser uses the
+native current-governor identity and offers own cities and eligible met
+city-states. At turn 17 the client appointed the Defender, assigned him to
+the player's city, selected an offered promotion and marked the titles considered.
+A separate ordinary process restored the governor, assignment, promotion,
+title state and all 3,448 public choices. Both workers closed normally.
+The validation scenario granted two titles through the native tuner operation.
+The appointment cleared the consideration marker in a separate native witness.
+The same public session resumed the turn-17 checkpoint and submitted three
+offered forced ends of turn. GameCore advanced `turns_on_site` from 0 to 3 and
+reported the Defender established at turn 20. The session saved and closed.
+A fresh process restored the established governor in the same city with the
+same promotions, public observation and all 36 public choices.
+
+In a separate turn-17 branch the client appointed Amani and assigned her to
+an already-met city-state. The native target and an owned city shared the
+same numeric city ID. The command retained the destination owner and the
+native readback confirmed the assignment. A fresh process restored her
+destination, the public observation and all 3,458 public choices. The fixture
+granted two governor titles and used the existing contact. The client then
+submitted five offered forced ends of turn. At turn 22 the GameCore reported
+Amani established and raised the player's envoy count in her assigned city-state
+from one to three. A fresh process restored her assignment, the envoy count,
+the same public observation and all 39 public choices. Reassignment and
+neutralization effects still require qualification on this profile. The lab
+retains separate receipts for
+`host-xp1-installed-governor-save-reload-native.json` and
+`host-xp1-installed-governor-establishment-save-reload-native.json`,
+`host-xp1-installed-governor-city-state-save-reload-native.json` and
+`host-xp1-installed-amani-influence-save-reload-native.json`.
+
+The installed Rise and Fall LAN profile adds
+`information("city_state_envoys", player_id=pid)` in catalogue
+`v11.captured-city.v5`. Each row identifies a met, living city-state that can
+receive influence and gives the observing player's own envoy count. The count
+comes from the same native getter used by the City States panel. The group is
+read-only and belongs to the cached player, turn and decision sequence.
+Waiting boundaries return `InformationUnavailable`. A v4 checkpoint can
+reopen through v5 when its historical observation and choices match exactly.
+
+The same installed Rise and Fall LAN profile adds `decisions.envoys` in
+`v11.captured-city.v6`, with the player's reserve, consideration state, and
+the known city-states eligible to receive influence. It offers `retain_envoys`
+when the native consideration blocker is pending and `send_envoy` for each
+target approved by the engine. The T22 witness started with two tokens granted
+through the official test command. Retaining kept both and cleared the blocker.
+Sending spent one and raised the player's count in the selected city-state
+from three to four. An ordinary independent reload restored the reserve,
+counts, public observation and all 41 choices. A separate checkpoint saved
+before consideration restored the reserve, both send choices, the pending
+retention choice and all 42 public choices. On this image the native archive
+omits the consideration flag. The host restores it with the native setter
+only when the remaining envoy catalogue matches the authenticated checkpoint.
+The restored retention choice cleared the blocker and kept both tokens.
+Private lab receipts are `host-xp1-installed-envoy-choices-save-reload-native.json`
+and `host-xp1-envoy-pending-checkpoint-save-reload-native.json`.
+
+The installed Rise and Fall LAN profile adds
+`information("city_state_levies", player_id=pid)` in `v11.captured-city.v7`.
+It exposes the official cost and duration for met city-states, the active
+levy status for the observing player, and the engine-approved
+`levy_city_state_military` choices. On the T22 witness, the host quoted
+100 gold for 15 turns, charged exactly 100 gold, and transferred control
+of five units. A fresh ordinary process restored the observation and all
+46 public choices. The private test setup used the official treasury
+command to make the levy affordable. Per-unit time remaining and return of
+control at expiry have separate lifecycle evidence. Private lab receipt:
+`host-xp1-city-state-levy-save-reload-native.json`.
+
+The subsequent `v11.captured-city.v8` catalogue adds
+`information("unit_levies", player_id=pid)`. It returns the unit's current
+owner, unit ID, the original owner when the official flag identifies it, and
+the number of turns remaining. The rows are limited to the current own and
+visible unit roster. Both the official unit-property path and the native
+city-state counter path feed the same flag calculation. A waiting boundary
+has no unit levy information. A v7 checkpoint can reopen with v8 when its
+existing observation and choices compare exactly. On the retained LAN
+lineage, the five units counted down from 15 turns at T22 to two at T35.
+An independent process restored the same observation and choices at T33.
+After the T35 save, the units had one turn of control remaining at T36.
+GameCore returned all five to their original city-state at T37. The client
+observed all five as foreign units and the levy flags cleared. GameCore
+saved the T37 state and completed Unload and Destroy. A fresh process
+restored the exact public observation and all 46 choices, including the
+five visible returned units. Private lab receipts
+`host-xp1-unit-levy-t35-save-native.json` and
+`host-xp1-unit-levy-expiry-reload-native.json`.
+
+On the installed Gathering Storm LAN image, pass `city_state_levies=True`
+to `NetworkBackend` to expose both levy information groups and the same
+`levy_city_state_military` action. The catalogue appends
+`.military-levies.v1` to the underlying Gathering Storm schema. The
+city-state panel reports the official eligibility, cost, duration and
+active status. Unit flags follow the current public roster.
+
+In the BBG 7.5.1 T52 witness, the client selected a native offer for
+70 gold. GameCore charged the quoted amount and transferred three units
+from city-state 2 for 15 turns. A new process reopened the save and
+restored the exact public observation, choices and three unit flags.
+Both processes closed normally. Expiry and gameplay with other mods
+remain open. Private lab receipt
+`host-xp2-bbg-military-levy-save-reload-native.json`.
+
+In stock Gathering Storm, a T69 client chose Mysticism and sent an envoy
+to city-state 4. At T70 it sent the envoy earned from that civic and the
+native levy became available. GameCore charged the quoted 202 gold and
+transferred three units for 15 turns. A new process restored the exact
+observation, choices and three unit flags. The native archive omits the
+envoy consideration bit. The host restores it with the official setter
+when an authenticated checkpoint has an empty reserve and the other
+influence fields match. Both workers closed normally. Natural expiry
+remains open. Private lab receipt
+`host-xp2-stock-military-levy-save-reload-native.json`.
 
 The current-image v34 route with `governors_diagnostic=True` and
 `trade_diagnostic=True` also supports Amani's BBG 7.5.1 city-state bonus in a
@@ -261,10 +472,39 @@ must not become an invented rule for the future simultaneous protocol.
 With `public_view_players=[0, 1]` configured on the backend, a live client also
 offers `client.player_view(1)`: the selected human's public observation, revealed
 map and own native activity flags at the latest accepted boundary. These views
-were qualified for players 0 and 1 on Capture09. They contain no action catalogue
+were qualified for all four players at the first turn of Capture09 on the
+installed Base profile. They contain no action catalogue
 or privileged critic data, and do not authorize commands for an inactive player.
 Refresh with `client.observe()`; see [perspective scope](backend.md#additional-human-perspectives).
 Each player's controller must receive only its own view.
+
+In the installed Gathering Storm LAN profile, enable `public_view_players`
+and the existing `diplomacy_overview_diagnostic` setting to receive
+`diplomatic_wars` in the `civ6-host.player-view.v2` view. Each row contains
+`player_id` and `at_war` for a living major civilization the selected player
+has met. The GameCore reads the flag in the selected player's perspective,
+including for a human opponent. Other profiles retain the v1 view. To refresh
+the defending player's state after a command, read `player_view(defender_id)`
+at the new boundary. The relation contains no notifications or diplomatic
+choices.
+
+On the exact installed Base Capture09 profile, configure `LocalHotseatBackend`
+with `checkpoint_on_close=True` and call `client.close()`. The administrative
+`backend.checkpoint` reference becomes available after supervised close. It
+identifies the private manifest for the native GameCore and configuration
+streams. The player view carries neither the reference nor the raw streams.
+Create another backend with the same capture, execution image and UI options
+and pass `resume_from=backend.checkpoint`. Then
+`HotseatClient(new_backend).reset()` returns the resumed public view with a new
+episode identity. Set `checkpoint_on_close=True` on the new backend to write a
+child checkpoint linked to the pair it resumed.
+
+The native test restored player 0, passed control to player 1 and wrote a child
+checkpoint. A fresh backend returned player 1's same observation and 21 choices.
+Player 0's city remained visible in their own view, and player 1 founded a city
+after the reload. This test covers the first handoff at turn one and one
+checkpoint link. Resuming with players 2 or 3 active remains untested.
+
 
 Returned views contain the player observation, offered choices, applied action,
 episode/sequence identity and public termination/truncation classification.
@@ -378,6 +618,14 @@ selection, then confirms the new owned unit or building possession after native
 delivery. Separate turn-56 resumes confirmed a Scout for 60 gold and a Barracks
 for 180 gold. District, faith, corps, army and placement-filtered purchases
 remain explicitly unqualified in this catalogue.
+
+Use `SessionClient.information("purchase_quotes", player_id=pid)` to read the
+current player's exact tile and city quotes together with their decision ID.
+Tile quotes use gold. Unit and building quotes use the currencies the current
+profile supports, with separate native legality and affordability flags. Older
+tile-only profiles omit `city_purchases`. A queried city with no offers has an
+empty `offers` list. The read uses the cached observation and raises
+`InformationUnavailable` if the current boundary has no purchase catalogue.
 
 The development v22 Gathering Storm catalogue adds `unit_promotions`. It
 reports native experience points and acquired promotion indices for each
@@ -678,6 +926,10 @@ Version 9 is retained as a diagnostic format: its city defense strength includes
 native fractional precision. Version 10 applies the official displayed rounding,
 `floor(raw + 0.5)`, and preserves raw values separately. The portable
 `client.information('combat')` projection uses the displayed precision.
+Base hotseat uses the same public `combat` group on its supported decision
+catalogues. The group retains the current player's queued orders, visible
+city defenses and exact offered attacks. Its decision ID is the same one
+returned by the player view. Select the exact candidate with `act()`.
 On an explicitly enabled XP1 or XP2 administrative backend,
 `SessionClient(backend, allow_administrative=True)` followed by
 `client.information('combat', channel='administrative')` can additionally return the
@@ -747,6 +999,67 @@ removed the Warrior from the own-unit roster. The private native
 defending district. City ownership stayed unchanged in both attacks.
 Evidence: `evidence/host-xp2-bbg-city-melee-retaliation-native.json`.
 
+The installed Rise and Fall LAN profile offers occupation under
+`civ6-host.network-capability-decisions.v11.captured-city.v1`. At turn 16,
+the ordinary client submitted an offered `MOVE_TO` assault via
+`world_plot` against an unwalled city. GameCore transferred the city,
+offered `KEEP` and `RAZE`, and executed the selected `KEEP` through
+`resolve_captured_city`. A separate ordinary worker reloaded the native
+save and restored the owned city, empty occupation menu and all 3,451
+choices under a fresh session identity. The private fixture placed the
+assailants through GameCore. The witness is retained in
+`evidence/host-xp1-installed-city-keep-save-reload-native.json`.
+
+An independent assault from the same turn-16 starting checkpoint used the
+offered `RAZE` directive. GameCore confirmed that the visible city tile
+was empty. A separate ordinary worker restored the empty tile, the empty
+occupation menu and all 3,438 choices under a fresh session identity.
+The witness is retained in
+`evidence/host-xp1-installed-city-raze-save-reload-native.json`.
+
+The same Rise and Fall LAN profile also offered `LIBERATE_FOUNDER` after
+the client captured a Free City while at peace with its founder. GameCore
+returned the city to player 1. A separate ordinary worker restored the
+returned city, empty occupation menu and all 3,437 public choices. The
+private test fixture created the city, transferred it to Free Cities and
+placed the assailants. Evidence is retained in
+`evidence/host-xp1-installed-city-liberate-founder-save-reload-native.json`.
+
+At turn 17 the same profile offered `LIBERATE_PREVIOUS_OWNER` after the
+Python client recaptured a city from player 1. GameCore returned the city to
+player 2 and cleared the pending choice. An ordinary worker reloaded the
+returned city and all 3,442 public choices under a fresh session identity.
+The private fixture prepared the first conquest and placed the assailants.
+The four occupation directives now have native save-and-reload evidence on
+distinct prepared scenarios in this profile. Evidence is retained in
+`evidence/host-xp1-installed-city-liberate-previous-owner-save-reload-native.json`.
+The pending occupation choice also has a native persistence witness. An
+ordinary worker reloaded the menu at turn 17, offered the same previous owner,
+accepted the explicit selection for player 2 and wrote a distinct child
+checkpoint. That witness is
+`evidence/host-xp1-installed-previous-owner-pending-save-load-native.json`.
+A third ordinary worker reloaded that child at turn 17. It returned the city
+in player 2's ownership, the empty occupation menu, the same public
+observation and all 3,443 choices under a fresh identity. It closed the native
+context normally. The run exercised the installed Rise and Fall LAN profile
+with one controllable human and a prepared conquest scenario.
+Evidence is retained in
+`evidence/host-xp1-installed-previous-owner-liberation-chain-public-reload-native.json`.
+
+For both expansions, the host checks the captured command archive against
+the acting player, selected city and exact directive before delivering it
+to GameCore. The same check applies to the secondary LAN seat.
+
+Use `information("captured_city")` on an observed hotseat or LAN player
+to read the current occupation choice. The response identifies the cached
+player, turn, sequence and decision. It includes the city coordinates and
+the recipients of the offered liberation choices. An available query with
+no pending city returns `city: null` and an empty list of directives.
+A boundary without this information raises `InformationUnavailable`.
+Use the decision and candidate IDs from the player view when calling
+`act()`. The hotseat client keeps native occupation history inside the
+transport and uses a decision ID derived from the public catalogue.
+
 The current GS + BBG 7.5.1 v42 catalogue adds `captured_city` and the
 `resolve_captured_city` family. An available query can report no pending
 city. An unavailable query returns null. Choose an offered directive with
@@ -809,9 +1122,16 @@ The stock founder branch used the official Free Cities test operation
 to prepare the city history. The client captured the city and selected
 LIBERATE_FOUNDER with player 3 as the offered recipient. GameCore
 confirmed the transfer and a fresh worker restored the same visible
-city, observation, and 133 choices. Stock LIBERATE_PREVIOUS_OWNER
-execution remains to be verified.
+city, observation, and 133 choices.
 Evidence: `evidence/host-xp2-stock-city-founder-save-reload-native.json`.
+
+The stock previous-owner scenario prepared a private support city and
+occupation history. At turn 73 the public client recaptured the city
+and selected LIBERATE_PREVIOUS_OWNER. GameCore transferred the city to
+player 3. An independent worker reloaded the resulting checkpoint without
+the test setup and returned the same visible city, observation and 1,295
+choices. Both workers closed their native contexts normally.
+Evidence: `evidence/host-xp2-stock-city-previous-owner-save-reload-native.json`.
 Local evidence:
 
 - evidence/host-xp2-bbg-city-keep-save-reload-native.json
@@ -820,9 +1140,10 @@ Local evidence:
 - evidence/host-xp2-bbg-liberation-founder-save-reload-native.json
 - evidence/host-xp2-bbg-liberation-previous-owner-save-reload-native.json
 
-The Rise and Fall backend selects v12 when explicitly configured with
+Rise and Fall includes optional city queries in its existing v11-based
+decision catalogues when explicitly configured with
 `city_focus_diagnostic=True` and `city_management_diagnostic=True`.
-Gathering Storm retains those options in v14. The client exposes
+Gathering Storm supports those options from v14. The client exposes
 `city_focus_catalogs` and `citizen_catalogs` when these options are selected. Select a
 `city_focus` or `city_citizen` candidate with the usual `act()` call.
 The Gathering Storm witness founded a city, cycled its production priority
@@ -830,6 +1151,16 @@ through favored, disfavored and neutral, locked and unlocked one worked plot,
 and closed normally. The witness starts from the original capture. Native
 specialist clicks, v12 Save and reset, and Rise and Fall execution remain
 pending. Historical v11 checkpoints retain their original catalogue contract.
+When enabling these city queries on a saved v11-based session, the restore
+comparison still requires the saved observation and all previously available
+decisions to match. The returned catalogue includes the newly queried groups.
+
+On the installed Rise and Fall image `xp1-gamecore-current-63c17d9`, these
+options now prepare the same city decision and command adapters. The parent
+and worker require the exact current DLL and its city-control source pins.
+The installed DLL's 42 function fragments and five registered bindings have
+been checked against the retained sources. Native city-control execution and
+Save on this image remain to be verified.
 
 The exact BBG 7.5.1 Gathering Storm bundle also accepts these city query options
 in the v30 catalogue and public display-v2 view. Enabling a previously unqueried
@@ -975,9 +1306,9 @@ Supported direct requests are offered as `diplomacy_initiate` candidates with
 `SessionClient.act` method. Availability is refreshed before the original UI
 dispatcher emits its native RequestSession command. A completed request means
 delivery; it does not mean friendship, delegation or other terms were accepted.
-Any received statement still requires a separate explicit response. Deal and
-demand screen options remain visible with `supported: false`, with no executable
-candidate. The overview and complete diplomacy action space remain distinct.
+Any received statement still requires a separate explicit response. The v2
+overview lists deal and demand screen options with `supported: false`. Later
+versions of the overview expose the qualified candidates described below.
 
 The client still reads historical v1 catalogues, but refuses an overview or
 initial-request extension under that old schema. Existing v1 receipts are not
@@ -1027,10 +1358,28 @@ if view["outcome"]["terminated"]:
 
 The result is bound to the requested player, episode, generation and current
 turn. Losing to another team's official victory does not require the player to
-be dead. Neither truncation nor absence of a winner fabricates a defeat; an
-eliminated player before a global winner is a separate, unqualified lifecycle.
-No new final board is fabricated when the native reply lacks one. Other cached
-human catalogues are removed rather than returned as still playable.
+be dead. Official global results clear cached human catalogues. A terminal view
+can have a null board.
+
+Before an official winner is present, a formerly alive actor whose native
+`IsAlive` flag is false receives `outcome["player_status"]` with schema
+`civ6-host.player-status.v1`, the actor and turn, and flags `is_alive` and
+`was_ever_alive`. The reply has null observation and decisions, and only this
+actor's catalogue is invalidated. Other living actors can continue. A later
+native view of the actor restored to play replaces the status with a fresh
+catalogue. This transport lifecycle is exercised with software fixtures.
+Native elimination and revival in a simultaneous match still require a witness.
+An eliminated actor can close the session even with `checkpoint_on_close=True`.
+The worker records the reason for skipping the checkpoint and uses the normal
+native teardown. The backend returns no checkpoint for that close.
+
+For Rise and Fall and Gathering Storm LAN, the status reader can use the
+native neutral observer context when the captured local player still matches
+and GameCore reports that player as formerly alive and now inactive. This
+context reads the player's result facts and the roster's turn-activity flags.
+The client still receives a null board and catalogue. A different local
+player or another player's observer perspective is refused. Native mode
+switch and the resulting game update remain to be qualified.
 
 A global result and a local command receipt are independent. A refused or still
 pending command can accompany a newly observed winner; its status is preserved
@@ -1039,26 +1388,42 @@ extra private fields remain excluded from the actor view. Non-terminal public
 payloads retain their existing shape. The session wire remains v1; the added
 terminal result has its own versioned schema.
 
-This client boundary is validated on terminal fixtures and by projection of the
-retained native turn-142 cultural-loss facts. Twenty-six recorded LAN responses
-also replayed through the client/runtime validators without changed public
-payloads. These are offline checks, not a newly played LAN victory. Actual LAN
-terminal-to-reset qualification remains pending. The historical native victory
-and reset proofs are retained with their original profiles.
+The terminal client fixtures retain their original Base and LAN coverage.
+A stock Gathering Storm LAN run with one human also reaches an official loss
+at T116. `close()` returns the same result and tears down the native worker.
+With `checkpoint_on_close=True`, the terminal boundary emits
+`native_checkpoint_skipped` with reason `official_native_victory` and
+`backend.checkpoint` is `None`.
 
-For terminal close, open the session with `checkpoint_on_close=False`.
-Checkpoint-on-close at a terminal boundary remains explicitly refused; the host
-does not silently skip a requested Save. An explicit `abort()` releases a
-session without attempting to save it.
+Calling `reset()` on the same client starts a new worker from the configured
+T111 checkpoint. The initial public observation and current choices match
+the earlier reset. The new episode starts without a previous result or command
+receipt. Closing this live session produces a checkpoint. The native witness
+covers one local human seat. See
+`evidence/host-xp2-stock-terminal-close-reset-native.json` in the local lab.
 
 ### Administrative LAN save and resume
 
 The source runtime supports `checkpoint_on_close=True` on the retained Base LAN
-and exact XP1/XP2 LAN captures at a quiescent, active player0 boundary. Closing invokes the existing
-native Save and configuration serializer; it does not replay the game from the
-beginning. The completed process must be reaped successfully before the backend
+and exact XP1/XP2 LAN captures at a quiescent, active player 0 boundary. Closing
+invokes the existing native Save and configuration serializer. The completed
+process must be reaped successfully before the backend
 exposes its checkpoint reference. This is a control-plane operation, outside the
 actor's action catalogue.
+
+The Gathering Storm route can admit multiple registered humans at an untimed,
+quiescent boundary with every human active and fully initialized. A pending turn
+or another active nonhuman seat blocks the Save. The checkpoint records the
+secondary seats' native turn controls, and loading checks them against the
+restored roster before accepting the session. Checkpoints with explicit
+`public_view_players` also record private digests of the selected seats' public
+observations and revealed maps. Resume re-reads those views
+and refuses a mismatch in either. With `secondary_unit_commands=True`, it
+also compares the public decision catalogue of each routed secondary seat.
+This comparison keeps the producing run's action options and refreshes the
+episode, sequence and decision identifiers for the new session. This path has
+software coverage.
+The native Save and Load of an official two-human LAN world remain unverified.
 
 ```python
 backend = NetworkBackend(**dict(config, checkpoint_on_close=True))
@@ -1125,6 +1490,51 @@ reopening and full hidden-state equality are not claimed. Single's historical
 checkpoint admission remains separate. Each expansion witness qualifies only its
 captured checkpoint group; arbitrary-state, other DLC/mod and training
 qualification do not follow from these cycles.
+
+### Rise and Fall city assault
+
+On the installed Rise and Fall LAN profile, an offered `unit_attack` with
+`operation="MOVE_TO"` and `input_route="world_plot"` can target a visible
+enemy city. Select its candidate using the current decision identifier.
+The next response exposes the city damage in `decisions["unit_attacks"]`.
+
+At turn 16, the client completed one such attack against an unwalled city
+prepared in a private scenario. GameCore applied 45 damage to the city and
+24 retaliation damage to the warrior. A fresh worker reloaded the native
+checkpoint without the scenario setup and restored the same observation
+and all 3,433 choices. Both workers completed native Unload and Destroy.
+The local receipt is
+`evidence/host-xp1-installed-city-melee-assault-save-reload-native.json`.
+
+The same Rise and Fall LAN profile also offered `unit_attack` with
+`operation="RANGE_ATTACK"` and `input_route="dedicated_ranged"` against that
+unwalled city. The private scenario placed a Slinger through the native
+`UnitManager.InitUnit` method. The ordinary Python client selected the offered
+candidate. GameCore increased visible city damage from 45 to 70 and consumed
+the Slinger’s movement. A fresh ordinary worker restored the 70 damage, the
+exact public observation and all 3,437 choices from the saved state. Both
+workers completed native Unload and Destroy. The local receipt is
+`evidence/host-xp1-installed-ranged-city-attack-save-reload-native.json`.
+
+The installed Rise and Fall LAN profile adds `city_shots` in
+`civ6-host.network-capability-decisions.v11.captured-city.v2`. Select an
+offered `city_range_attack` candidate with the usual decision and candidate IDs.
+The engine chooses the defender on the target plot. At turn 17, a fortified
+city applied 1 damage to a visible enemy unit and the shot disappeared from the
+catalogue. An ordinary worker restored the damage, the spent shot and all
+3,445 public choices from the native checkpoint. Both workers closed normally.
+The private validation scenario prepared the walls and target through GameCore.
+The receipt is `evidence/host-xp1-installed-fortified-city-shot-save-reload-native.json`.
+
+Version `v11.captured-city.v3` adds `district_shots` for eligible non-center
+districts. Select an offered `district_range_attack` using the current decision
+and candidate IDs. At turn 17 a completed Encampment applied 1 damage to a
+visible enemy unit. A fresh ordinary worker restored the damage, the spent
+district shot, the public observation and all 3,448 public choices. Both
+workers closed normally. The validation scenario prepared the Encampment
+and target through GameCore. Older Rise and Fall checkpoints compare their
+recorded fields before exposing the new catalogue.
+The receipt is `evidence/host-xp1-installed-fortified-district-shot-save-reload-native.json`.
 
 ### City controls on the retained Base LAN profile
 
@@ -1202,7 +1612,67 @@ native receipts are not reclassified as v3. A fixture with all 16,384 map cells
 passes through the actual stream reader. This verifies capacity and compatibility,
 not native gameplay on a map of that size or an unlimited late-game action space.
 
+### National parks on the revealed map
+
+Enable `expansion_national_parks=True` on a pinned Rise and Fall, Gathering
+Storm or Boston BBG 7.5.1 LAN capture. `information("national_parks")` reads
+park tiles through the same native reveal gate and name getters as the
+official tooltip. Each row carries the plot ID, the already-localized park
+name when present, and its current visibility. Revealed tiles in fog can
+carry their tooltip labels. Unrevealed tiles are excluded before the park
+getters run. This read uses the current player perspective and the same
+episode and decision boundary as the rest of the public observation. The
+bindings and visibility contract are verified offline. Live readback and
+native switching between simultaneous human players are pending.
+
+Enable `xp2_designate_park=True` on the admitted stock Gathering Storm or
+BBG 7.5.1 LAN profile to receive `designate_national_park` candidates through
+the current decision catalogue. Each candidate names the owned unit and
+its current tile. The host reruns the official UnitPanel legality checks
+and sends the native operation without extra parameters. Completion requires
+a new park at the unit's original location. Delivery without that readback
+is `submitted`. The option also applies to authorized secondary LAN seats
+when their command routing is enabled. Source and software checks cover the
+new path. A live park creation and restart still require a native witness.
+
+### World Rankings score
+
+Enable `world_score=True` on an exact installed expansion LAN profile and
+read `client.information('world_score')` from its current public view. The
+group contains team and player totals, the categories displayed by the score
+tab, and the native turn limit. Player IDs appear for the local player and
+met civilizations. Other rows keep their visible scores and an anonymous ID.
+Team IDs and individual identities behind anonymous rows are not returned.
+
+With secondary LAN routing enabled on an admitted Gathering Storm capture,
+call `observe(pid)` and `information('world_score', player_id=pid)` for that
+seat. The same native score tab uses the selected seat's known civilizations,
+including at a waiting boundary. A simultaneous checkpoint records whether it
+compared the secondary score view. Earlier checkpoints retain their original
+comparison scope.
+
+Source and software checks cover installed Rise and Fall, Gathering Storm,
+and the exact BBG 7.5.1 score-panel replacement. The BBG-specific domination
+panel and other victory tabs are separate, and live score reads on these
+profiles still require native acceptance.
+
 ### Own-unit work state and native builder effects
+
+The installed stock Rise and Fall LAN profile accepts `xp1_unit_work=True`.
+The existing decision catalogue then includes the work choices for the
+unit's current tile. Use `information('unit_work')` for own-unit charges,
+movement, visible tile state and the official offer details. Submit an
+available `build_improvement` or `terrain_operation` through `act()`.
+Reopening an older checkpoint with this option requires all previously
+recorded observations and choices to match. Local source and client tests
+cover this addition. Native execution and Save/Load of these actions on
+Rise and Fall remain to be verified.
+
+For a retained Rise and Fall checkpoint with a charged builder, the existing
+acceptance driver accepts `--unit-work --restored-builder UNIT_ID PLOT_ID`.
+It uses an openly visible owned tile, checks the native improvement and
+charge change, saves, and requires the same public state and choices in a
+second headless process. Both processes must close cleanly.
 
 Network schema v4 introduced the additive
 `decisions.unit_work_state` field has schema `civ6-host.unit-work-state.v1` and
@@ -1375,6 +1845,24 @@ worker bounds. The worker was reaped; all 1,142 source pins were unchanged.
 No builder production or unrelated terrain work was repeated. The local receipt
 is `evidence/host-lan-city-growth.json`; this measurement is not production
 throughput or training admission.
+
+With `expansion_city_growth=True`, the same public `information("growth")`
+call is wired for the pinned Rise and Fall, Gathering Storm and Boston
+Gathering Storm + BBG 7.5.1 LAN captures. The expansion panel returns
+`civ6-host.city-growth.v2` and adds `display.OccupationLabel`. Its
+`display.OccupationMultiplier` shows the loyalty-related penalty from the
+official panel. The housing, amenities, food display and countdown remain
+scoped to the player's own cities. The expansion adapter exposes only that
+public projection. The installed bindings and panel behavior are checked
+offline. Live readback on these captures is pending.
+
+The separate option `expansion_city_loyalty=True` exposes the public
+`information("city_loyalty")` group on the same three pinned captures. The
+group reads the player's own cities and reports current and maximum loyalty,
+change per turn, loyalty level, displayed conversion countdown, potential new
+owner and the visible pressure breakdown. The panel's decimal precision and
+order of pressure rows are preserved. Its source bindings and client contract
+are checked offline. Live readback is pending.
 
 ### Production inputs and diagnostic separation (v7)
 
@@ -1588,13 +2076,88 @@ call or a new gameplay interaction.
 
 ### XP2 initial diplomacy
 
-The opt-in `civ6-host.network-capability-decisions.v33` adds
+On BBG 7.5.1, the opt-in `civ6-host.network-capability-decisions.v33` adds
 `decisions.diplomacy_overview` and `diplomacy_initiate` candidates. It preserves
 the preceding v32 governor fields. The current scope is the explicit
 `xp2-gamecore-current-092abfbb` execution image and exact recovered GS + BBG 7.5.1
 bundle; launch requires `governors_diagnostic=True`,
 `diplomacy_overview_diagnostic=True` and the selected war receiver source pin.
-Other profiles are refused rather than silently selecting another engine.
+
+The exact unmodded Gathering Storm LAN capture also supports
+`diplomacy_overview_diagnostic=True` with `standard_trade=True` and the same
+current image and war receiver source pin. This opt-in keeps the stock decision
+schema and its trade, Congress and other enabled groups. The public overview
+includes met major targets, visible AI relationships, grievances and the
+official selection rows. The stock mapping includes `CHOICE_DENOUNCE`
+and `CHOICE_MAKE_PEACE` when enabled by the engine. Major peace uses the
+same explicit draft and confirmation API as BBG. On the native T89
+checkpoint, Python opened the draft with two locked treaty terms,
+confirmed the AI's acceptance, read the end of the war and saved the
+result. A separate GameCore process reopened that checkpoint with the same
+public observation and choices. On the same stock lineage, Python then
+selected the offered denunciation, closed its native dialogue explicitly
+and observed the new relationship with 21 turns remaining at T89. A separate
+process recovered the same observation and choices, advanced to T90 and saved
+the relationship with 20 turns remaining. Full expiry on this stock lineage
+has yet to be observed.
+
+The stock overview also exposes major agreements, demands and current
+open-borders rights. The client opens an offered negotiation with
+`CHOICE_MAKE_DEAL` or `CHOICE_MAKE_DEMAND` and operates the existing public
+draft and confirmation choices. At T90, the stock witness adds tobacco
+to a native draft and receives an unfavorable inspection. The engine
+offers no submission for that draft. In the demand screen, the client
+requests one horse, submits the demand, receives the native refusal and
+closes the dialogue. An independent process restores the same state and
+choices with no outstanding deal. A continuation starts the offered route
+to Kabul and switches both cities to gold focus. The treasury reaches 15
+gold at T96 across native saves and independent reloads. The AI's inspection
+rejects the tested gold and horse terms, and the client submits the offered
+equalization command on the gold-only draft. GameCore returns an empty
+adjusted draft without a confirmation choice. The native save retains all
+15 gold.
+
+A separate stock branch starts from the post-peace save before the
+denunciation. At T93 the AI rejects a request for a horse against nine gold.
+The client removes that term, confirms the accepted gift, and verifies the
+nine-gold debit and the native deal-enacted event before saving. A fresh process
+restores the same public observations and choices, with zero gold and no
+replayed transfer.
+
+The stock negotiation overview v2 also offers
+`CHOICE_DECLARE_FRIENDSHIP` for a met AI when the official menu enables it.
+The common client submits the request and presents the native dialogue.
+At T93 Barbarossa refused the request. The client selected `CHOICE_EXIT` and
+saved with the same relationship and the friendship request still offered.
+Existing v1 negotiation checkpoints preserve their earlier catalogue during
+comparison. Acceptance and human-to-human requests await native qualification.
+The AI's public answer is also available as `decisions["friendship_response"]`
+in the v12 diplomacy modal. The values are `accepted` and `rejected`.
+This field is present for an AI reply shown to the requesting player. The
+client can read the outcome directly and select the same `CHOICE_EXIT` candidate.
+
+Stock negotiation overview v3 adds initial promise requests for spying,
+nearby settlement, religious conversion, and artifact excavation. The API
+offers these choices for a met AI only when the official menu enables them.
+The native warning uses the ordinary diplomacy response modal, with an explicit
+choice to close it. Earlier negotiation overview versions remain readable.
+On the unmodded T96 witness, Barbarossa rejects the conversion request.
+The displayed grievance balance changes from -33 to -8, favor remains 224, and
+the conversion request is removed from the menu. The host saves this state.
+The other three requests have source and fixture coverage.
+
+Stock negotiation overview v4 adds `active_promises` to met AI targets. This
+list contains the active promise types read through the same getter as the
+official relationship panel. An empty list means the panel reports no active
+promise. The field is null for human counterparts, whose promise readback is
+outside this profile's current scope.
+
+The v13 diplomacy modal publishes the type of an incoming warning as
+`promise_request`. For the four promise types above, its `choices` retain the
+official order and disabled flags. The client selects an enabled
+`CHOICE_POSITIVE`, `CHOICE_NEGATIVE`, or `CHOICE_IGNORE` through the standard
+`act` method. Each sends its own official response. The incoming path has
+source and fixture verification. A native incoming witness remains pending.
 
 After the normal reset/observation call, the public query uses the accepted
 boundary without another RPC:
@@ -1626,12 +2189,239 @@ separate explicit-response contract; the host does not select its response.
 The selected official golden-war literal is preserved even though it differs
 from the Core's registration. No corrective alias is inserted.
 
-Native qualification currently covers the T25 public query, matching input
-observation, Save v2 and Unload/Destroy. That witness has no living already-met
-major targets. Positive initial requests, major dialogue display/responses and
-the live request-registry guard have software/source checks, without a native
-positive witness in this delivery. The twenty compiled mappings do not mean
-twenty qualified native actions. No learner changes or training occurred.
+Native qualification of direct initial diplomacy covers the T25 public query,
+matching input observation, Save v2 and Unload/Destroy. The catalogue was empty.
+A separate T57 witness sends the offered `CHOICE_DIPLOMATIC_DELEGATION` through
+`diplomacy_initiate`. The command's completion records delivery to GameCore.
+The resulting public dialogue reports the AI's refusal and offers
+`CHOICE_EXIT`. The client selects it explicitly and can see that gold and
+delegation availability are preserved when the session saves. A fresh process
+reopens that checkpoint with the same observation and catalogue. The client
+then selects `CHOICE_DENOUNCE` as the confirmed denunciation, closes the native
+dialogue explicitly and saves. GameCore withdraws denunciation, friendship and
+delegation for that target and reports peace. Delegation acceptance, the expiry
+of denunciation and other direct requests still need native qualification.
+Private evidence is recorded in
+`evidence/host-xp2-direct-diplomatic-delegation-t57-native.json` and
+`evidence/host-xp2-direct-denounce-t57-native.json`.
+
+In `civ6-host.diplomacy-overview.v2` and later,
+`information("diplomacy")` includes the public state of met majors. Each met major target has a
+`relationship` field. For an AI target it contains the public state key,
+signed grievances and the countdown shown in the selected official panel.
+`expiration` is null when the panel has no countdown. A denunciation
+countdown also identifies the displayed denouncer. Human targets use a null
+`relationship` in this profile. The v2 field adds no choices. The checkpoint
+comparator verifies all stored v1 observation and choice fields when loading
+a prior save. A T57 native run reads denunciation, −25 grievances and 21 turns
+remaining, then saves. Friendship and alliance countdowns have fixture coverage.
+Private evidence is recorded in
+`evidence/host-xp2-public-diplomatic-relationships-t57-native.json`.
+
+Two native continuations restore the v2 catalogue exactly and read the
+denunciation countdown on each turn from T57 through T69, including the
+compulsory Congress ballot at T61. The observed countdown decreases from 21
+to 9 and the formal-war choice becomes available at T62. GameCore reports an
+official loss for the observed player at T70. This witness leaves expiration
+and clean terminal teardown unverified. Private evidence is recorded in
+`evidence/host-xp2-public-diplomatic-countdown-after-congress-native.json`.
+
+On the selected Gathering Storm and BBG 7.5.1 profile, the v3 overview adds
+`city_state_peace`. When military commands are enabled, it reports whether
+each met city-state is at war with the observing player and whether the native
+city-state panel permits making peace. The client can submit the offered
+`diplomacy_initiate` candidate with choice `CHOICE_MAKE_PEACE` using its
+current decision and candidate IDs. The host rechecks the offer at submission
+and confirms completion by reading the target's native war state. Negotiated
+peace with a major civilization uses the separate deal screen.
+
+The T57 native witness reads a met city-state at war whose peace button is
+disabled, confirms that the action catalogue omits the command, and saves the
+new overview. A later continuation offers the command at T63. The same
+Python client delivers it to GameCore, observes peace and reads the catalogue
+again with the choice withdrawn. This qualifies the city-state command and
+its observed effect on the retained BBG capture. The T63 native Save succeeds
+after matching the result of the resumed Congress ballot. A fresh GameCore
+process restores the saved consideration flag for the unblocked two-envoy
+reserve without refreshing notifications. The public observation and decision
+catalogue match exactly after identity rebinding. The resumed client then sends
+one envoy to the same city-state, observes the reserve drop from two to one and
+the city-state count rise from zero to one, and saves again with peace intact.
+Private evidence is recorded in
+`evidence/host-xp2-bbg-city-state-peace-exact-resume-and-envoy-native.json`.
+
+The v4 overview adds `major_deals`, in the same order as the met major targets.
+Each row reports the native pending-deal flag and the player's recurring gold
+and resource terms shown in the official report. Terms include direction,
+amount and remaining turns. Resource terms carry the native resource index.
+Older checkpoints retain their saved observations and choices on comparison.
+A native T63 witness observes one met counterpart with no pending deal and
+no recurring terms. Nonempty terms and pending offers have software coverage.
+Private evidence is recorded in
+`evidence/host-xp2-public-major-deals-readback-native.json`.
+
+The v5 overview adds `major_deals[].counterparty_is_human` and offers
+`CHOICE_MAKE_DEAL` for a met, living AI major when the official choice is
+enabled and the pair has no pending deal. Use that candidate through `act`.
+The reply's `decisions.deal_draft` reports the counterparty, the native item
+count (zero in this supported path), and the native pending flag. The modal
+offers `CHOICE_EXIT` when the session can close. The T63 witness on the installed
+Gathering Storm with BBG 7.5.1 creates and cancels this draft through the native
+session, then saves successfully. Private evidence is recorded in
+`evidence/host-xp2-major-deal-draft-open-close-native.json`.
+
+The v3 deal modal adds `decisions.deal_gold` for the local player's lump-sum
+gold. It reports the amount in the draft, the available maximum, and the AI
+response to the latest inspection or proposal. Select `CHOICE_SET_DEAL_GOLD`
+through `act` with `parameters={"amount": 17}` to request 17 gold. Zero requests
+removal when a gold item exists. A nonempty valid edit invokes the official
+inspection. The edit receipt and the AI response describe different steps.
+
+The native T63 witness changes an empty draft to 17 gold, receives the AI's
+negative inspection response, and cancels the draft. The player's treasury is
+unchanged and the successor saves successfully. At T57, the client observes a
+positive inspection of 90 gold. When `deal_gold.finalize` is `"accept"`, select
+`CHOICE_FINALIZE_DEAL` through `act`. GameCore debits the selected amount before
+the API returns a completed command. A settled draft offers its native exit.
+The T57 witness closes the negotiation and saves the new balance. An independent
+reload restores the same public state and choices. The client then adds and
+removes 3 gold in a new draft, closes it, and saves with the same treasury.
+Private evidence is recorded in
+`evidence/host-xp2-deal-gold-draft-rejection-native.json`,
+`evidence/host-xp2-deal-gold-transfer-native.json` and
+`evidence/host-xp2-deal-gold-transfer-reload-native.json`.
+
+The v4 modal keeps `deal_gold` and adds `decisions.deal_recurring_gold` with
+`amount`, `max_amount` and the native `duration` in turns. Select
+`CHOICE_SET_DEAL_GOLD_PER_TURN` through `act` with `parameters={"amount": 5}`
+to request 5 gold per turn. Zero removes the selected recurring term.
+Both outgoing gold terms can coexist in the same draft, and the finalization
+choice applies to the whole draft. After confirmation and exit, read the
+active recurring transfer in `information("diplomacy")` under
+`major_deals[].terms`. The immediate treasury debit is the lump-sum term.
+On the installed Gathering Storm + BBG 7.5.1 LAN build, a fresh process
+restored the turn-57 deal and advanced through the native scheduler until the
+local player became active on turn 58. At that boundary the deal reported 29
+remaining turns and player gold rose by 5 less than on the pre-deal control
+branch. Both branches saved at turn 58.
+The v5 modal adds `deal_requested_gold` and `deal_requested_recurring_gold`
+to a draft the local player opens with a met AI major. These fields quote the
+gold the counterpart can give. Select `CHOICE_SET_REQUESTED_DEAL_GOLD` for a
+one-time request or `CHOICE_SET_REQUESTED_DEAL_GOLD_PER_TURN` for a recurring
+request, with the same `parameters={"amount": n}` binding. Both inventories
+remain available in one draft. An amount of zero removes just the selected
+request. Confirmation checks the net one-time treasury
+change and the exact outgoing and incoming recurring terms in the public report.
+The installed Gathering Storm + BBG 7.5.1 LAN witness received 8 gold against
+7 gold per turn and then paid 90 gold for 1 gold per turn. Each agreement was
+confirmed by GameCore, and both active recurring terms appear in the saved
+public catalogue. An independent process restored both terms, removed each
+kind of requested gold in a new draft, and closed that draft with both active
+terms intact. At player activation on turn 58, both terms had 29 turns left
+and the treasury had gained 6 less gold than the pre-deal control branch.
+Other deal terms, received offers and human counterparties remain explicit
+coverage gaps.
+
+The v6 deal modal also exposes `deal_resources`, with the resource index and
+type, inventory direction, native quantity limit, availability and any draft
+quantity and duration. Select `CHOICE_SET_DEAL_RESOURCE` or
+`CHOICE_SET_REQUESTED_DEAL_RESOURCE` through `act` with
+`parameters={"resource_index": 31, "amount": 1}`. Quantity zero removes the
+matching draft item. Resource edits use the pinned `SetValueType` companion
+for each new resource item. The catalogue reports
+`native_deal_resource_type_write_unavailable` on hosts missing that companion.
+The installed Gathering Storm + BBG 7.5.1 LAN witness confirmed one unit of
+Truffles for 30 turns in exchange for 14 gold and 3 gold per turn. The public
+diplomacy report contains both recurring terms. Horses and Iron quotes were
+also observed. Their transfers and the opposite resource direction have
+separate qualification remaining.
+
+Resource duration follows `DiplomacyDealView_Expansion2.lua` and the loaded
+`Resource_Consumption.Accumulate` flag. Accumulating resources use duration
+zero and settle against the native stockpile. Other resources use a 30-turn
+term in the diplomacy report. The installed LAN witness edited and removed
+one-time Iron and Horses drafts after the AI refused both offers. Their
+accepted stock transfer still requires a native witness.
+
+The v7 deal modal adds `deal_equalize` and offers
+`CHOICE_EQUALIZE_DEAL` when the qualified AI deal is eligible for negotiation.
+Pass the candidate ID to `act` without parameters. An `adjusted` response
+replaces the displayed terms with GameCore's adjusted draft. An adjusted draft
+can be empty or lack a confirmation candidate. Confirm it through
+`CHOICE_FINALIZE_DEAL` when the new revision offers that candidate.
+An `equalize_failed` response makes negotiation unavailable until
+the draft changes. For an outgoing gift it also removes the confirmation
+choice, as the installed deal panel does. The host checks the exact reply
+and supports counteroffers composed of the admitted gold and resource terms.
+
+In the installed Gathering Storm + BBG 7.5.1 LAN witness, the client requested
+one unit of Truffles, obtained native terms of 22 gold and 2 gold per turn for
+30 turns, and confirmed them explicitly. An independent process restored both
+active terms and the treasury. It also observed an empty adjusted draft and a
+native negotiation failure, then observed negotiation become available after
+editing the failed draft. At turn 59 the original agreement had 29 turns left.
+
+On this installed Gathering Storm profile, `information("diplomacy")`
+uses the v6 overview. Each met major player's `major_deals` row exposes
+`open_borders.outgoing` for passage you grant and `open_borders.incoming`
+for passage you receive. The v8 deal modal adds `deal_open_borders`, with
+GameCore's available duration and current draft duration for each direction.
+Use `CHOICE_OFFER_OPEN_BORDERS`, `CHOICE_REQUEST_OPEN_BORDERS`,
+`CHOICE_REMOVE_OFFERED_OPEN_BORDERS`, or
+`CHOICE_REMOVE_REQUESTED_OPEN_BORDERS` when offered. These choices take no
+parameters. Review the resulting terms before selecting `CHOICE_FINALIZE_DEAL`.
+
+The Gathering Storm + BBG 7.5.1 LAN witness added and removed both draft terms,
+then confirmed one reciprocal agreement. GameCore quoted both terms at
+20 turns, and both passage rights appeared in the public report and checkpoint.
+An independent process restored the agreement and moved the selected unit
+from (20, 11) to the neighboring player's tile at (21, 11). The same click
+from the save before the agreement opened the war confirmation. The client
+declined it, and the unit remained on its original tile. Both paths saved
+and closed normally.
+
+The v7 overview offers `CHOICE_MAKE_DEMAND` for a met AI major when
+GameCore shows the choice and there is no pending deal. The v9 demand modal
+exposes `deal_demand` and the requested gold, gold per turn, and supported
+resource terms. Edit those terms using the requested-side choices. Select
+`CHOICE_FINALIZE_DEAL` to submit when `deal_gold.finalize` is `"demand"`.
+For a rejected demand, read `deal_gold.response` and select `CHOICE_EXIT`.
+City, great-work and captive terms remain outside this API profile.
+
+The Gathering Storm + BBG 7.5.1 witness opened the demand, added and removed
+Truffles, then requested one gold. GameCore refused the demand. The client
+showed the refusal, kept the treasury and active trade terms, and saved and
+closed normally. A second witness requested one gold per turn after moving
+two units through the open border. GameCore accepted and applied one agreement
+for 30 turns when the host delivered the accepted transaction. The client read
+29 turns remaining at T60 and saved that state. A fresh GameCore process
+restored the same player observation and choices. After the client advanced
+to T61, the same agreement appeared once with 28 turns remaining. That state
+was saved before normal teardown. The host verifies the terms after delivery
+before returning a completed result.
+
+The v8 overview can expose `CHOICE_MAKE_PEACE` for a met AI major with no
+pending deal when the official greeting menu enables it. This opens the
+official deal draft. The modal reports the two locked treaty terms as
+`deal_peace`, including their durations. The v11 route requests the official
+opening inspection and reports the native reply. It reuses the deal choices
+for supported gold, resource, and open-borders terms. Confirmation through
+`CHOICE_FINALIZE_DEAL` requires accepted or adjusted terms that match both
+working deals. `CHOICE_EXIT` cancels an unsigned draft when the native
+session can close. Historical v10 replies carry the opening-only schema.
+
+The Gathering Storm + BBG 7.5.1 LAN witness kept the peace choice disabled
+from T57 through T64. GameCore enabled it at T65. The client opened a native
+draft, read two locked agreement items, cancelled it, and confirmed the same
+war state before saving and closing. Both items reported a native draft
+duration of zero. The witness covers opening and cancellation.
+
+A second T65 session received the AI's positive inspection with no payment.
+The client selected `CHOICE_FINALIZE_DEAL`, read the settled dialogue with
+zero live draft items, and closed it. GameCore reported the end of war and
+saved the resulting state. A fresh process restored identical public
+observations and decisions. After advancing to T66, it reported the AI's
+denunciation and the two civilizations were still at peace.
 
 ## Trade information
 
@@ -1725,6 +2515,196 @@ from the player's Python frame. The reciprocal outgoing route had expired
 separately. The session saves at T65 and verifies Unload and Destroy.
 Private lab receipt: `evidence/host-xp2-bbg-incoming-trade-expiry-native.json`.
 
+### Rise and Fall trade
+
+On the exact installed Rise and Fall LAN capture, `xp1_trade=True` adds
+`information("trade", player_id=pid)` and the native route and origin
+choices under `v11.captured-city.v10`. The public catalogue uses the same
+stock TradeSupport logic as the official chooser. A waiting player has
+neither trade catalogue.
+
+The native witness selected Foreign Trade at T22 and ordered a Trader at
+T23. At T25 the chooser offered four destinations with their paths and
+yields. The client selected `make_trade_route` for Saragossa, and the
+GameCore returned the new active route and saved it. A fresh process
+restored the route, the player observation and the same native choices.
+On a separate two-city checkpoint, the T19 chooser offered the other
+owned city. The client submitted `change_trade_origin`, the same Trader
+arrived in that city with zero movement remaining, and GameCore saved.
+A fresh process restored the exact observation and decision catalogue.
+Private lab receipts `host-xp1-stock-trade-route-save-reload-native.json`
+and `host-xp1-stock-trade-origin-save-reload-native.json`.
+
+Selecting `xp1_trade_overview=True` also exposes the stock panel through
+`information("trade_overview", player_id=pid)` under `v11.captured-city.v11`.
+A retained T25 save restores the old observation and decision fields and
+publishes capacity 1, one active route and the route yield of three gold.
+The incoming tab returned an empty list in this save. The native receipt
+is `host-xp1-stock-trade-overview-active-native.json`.
+From the retained T22 save, the panel is unavailable before the player
+selects Foreign Trade. At T23 the owned CivicCompleted notification
+enables the panel before the first playable view, with capacity 1 and
+one Trader production slot. The native receipt is
+`host-xp1-stock-trade-overview-unlock-native.json`.
+
+### Rise and Fall government and policy choices
+
+On the same stock Rise and Fall LAN capture, `xp1_government=True` adds
+`decisions["government"]` and `decisions["policies"]`. The flag can be used
+with or without the trade groups. The policy candidate takes one unsigned
+policy hash per slot in `parameters={"assignments": [...]}`.
+
+At T22 the official Core returned two empty slots and three options per
+slot. The Python client submitted Discipline and God King. Core applied
+both, reduced the open slot count to zero, saved, and restored the exact
+observation and decisions in a fresh process. The native receipt is
+`host-xp1-stock-free-policy-save-reload-native.json`. Government options
+were read at T22. An actual change or retention needs a separate native
+witness. Paid unlocks, active card relocation, unchanged confirmation and
+anarchy remain outside the qualified scope.
+
+### Rise and Fall tile purchases
+
+On the stock Rise and Fall LAN capture, `xp1_plot_purchase=True` adds
+`decisions["plot_purchases"]` and the legal, affordable ordinary gold
+purchase choices. It composes with the trade and government flags. The
+caller submits the candidate for its city and tile at the quoted price.
+
+The native T22 witness bought tile (43, 26) for Paris after the free
+policy assignment. The treasury decreased from 938.25 to 898.25, the
+tile gained the requested owner and city, and the acquired tile left
+the offers. A new process restored the exact observation and decisions,
+including the policies already in place. The native receipt is
+`host-xp1-stock-plot-purchase-save-reload-native.json`. Purchases of city
+items, faith and placement-filtered acquisition remain separate.
+
+### Rise and Fall gold unit and building purchases
+
+With `xp1_plot_purchase=True` and `xp1_city_purchase=True`, the same client
+also reads `decisions["city_purchases"]` and can select an ordinary gold
+unit or building. Each offer retains the quoted price, the native command
+legality flag and the affordability flag. A request must match the
+fresh offer, native archive, effect and treasury debit.
+
+In the retained game the client bought a Scout for 60 gold at T22. The
+player selected Pottery and advanced the turn. At T23 the client bought
+a Granary for 130 gold and the engine confirmed possession in Paris.
+An independent process restored the public observation and all previously
+saved decisions exactly. The native receipt is
+`host-xp1-stock-building-unit-purchase-save-reload-native.json`.
+
+The opt-in `xp1_city_buildings=True` adds the read-only player group
+`information("city_buildings", player_id=pid)` and the corresponding
+decision field. Each entry carries its owned city, visible owned plot,
+building index and hash, completion and pillage status. Several buildings
+can share a plot. At T23, a fresh GameCore process restored Paris with the
+Granary complete and intact, the purchased Scout, and 706.59765625 gold.
+The native receipt is `host-xp1-owned-city-buildings-after-purchase-native.json`.
+
+On the same Rise and Fall profile, `city_buildings` includes the player's
+Great Work slots, compatible destinations, theme progress, displayed yields,
+and combined tourism. The reader follows the inherited base overview selected
+by Rise and Fall. The local human seat can select `move_great_work` from its
+active choices. The host validates the archive, consumes the move notification,
+and checks both slots before returning completion. At T43, the client activated
+Bhasa and moved his work from the Amphitheater to an empty Palace slot. An
+independent GameCore process restored that slot, the public observation and
+the saved decision catalogue. At T44, the client activated Bhasa again and
+swapped his two works between the Amphitheater and the Palace. An independent
+GameCore process restored both works in their exchanged slots with the same
+public observation and choices. The private receipts are
+`evidence/host-xp1-great-work-empty-slot-save-reload-native.json` and
+`evidence/host-xp1-great-work-occupied-slot-swap-save-reload-native.json`.
+Earlier building checkpoints compare their original choices.
+
+The exact stock Gathering Storm LAN profile on the current installed image
+accepts `xp2_city_buildings=True` and exposes the same public information
+group. A new process restored T94 with the same prior observations and
+choices, and read six building rows. Both the Shrine and the Temple were
+complete and pillaged while their Holy Site had already been repaired.
+The native choice list offered production of the Shrine. Private receipt
+`evidence/host-xp2-stock-city-buildings-t94-native.json`.
+
+On the pinned stock and BBG 7.5.1 profiles, `information("city_buildings")` includes
+`great_work_slots` for completed buildings in the player's own cities.
+Each row identifies the building, slot type and Great Work, or carries a null
+work for an empty slot. For occupied slots, `move_unlocked` reports the
+official artwork age and artifact museum checks. The same response lists
+the permitted slot pairs in `great_work_move_targets`, with a `source` and a
+`destination` identified by city, building and slot. The installed game
+rules check slot compatibility, both sides of a swap and museum restrictions.
+The rules also check whether the official Great Works view is enabled.
+The captured game databases set the artwork lock to 10 turns in stock
+Gathering Storm and 2 turns in BBG 7.5.1. The host reads the active game's rule.
+The current decision catalogue includes `move_great_work` when the acting
+player can issue those orders. Each choice binds the two slots, the source
+work index and the destination work index when occupied. Pass its candidate
+ID and decision ID to `act`. The host authenticates the emitted GameCore
+archive and checks the resulting work placements before returning completion.
+Source and fixture checks cover moves and exchanges on both profiles.
+At T111, the stock profile returned an empty Palace slot and an empty Temple
+relic slot, with zero move choices. The GameCore saved this state and closed
+normally. The private receipt is
+`evidence/host-xp2-stock-great-work-slots-empty-t111-native.json`.
+At T111, a stock witness activated Karel Čapek, moved his first work into
+an empty Palace slot and restored it in a new GameCore process. The same
+saved continuation reached T112, activated him again and exchanged his
+two works between occupied Palace and Amphitheater slots. The new save
+restored both exchanged works, the public observation and the saved
+decision catalogue in a separate process. The private receipts are
+`evidence/host-xp2-stock-great-writer-work-move-reload-native.json` and
+`evidence/host-xp2-stock-occupied-great-work-swap-save-reload-native.json`.
+Native move/save/reload qualification remains pending on BBG 7.5.1.
+
+The same panel reports `great_work_building_bonuses` for each building with
+slots. The theme is `null` when the game shows no label, `progress` with the
+displayed matching and total slot counts, or `themed` when the building has
+the bonus. Each row includes the positive yields from those works and the
+combined tourism shown by the official panel. Older checkpoints compare
+their original observations and action choices. The native bonus readback
+remains to be qualified.
+
+The same option is available on the pinned Boston Gathering Storm + BBG 7.5.1
+LAN capture and current installed image. It uses the same official city panel
+bindings and remains player-scoped. Older checkpoints remain comparable with
+the option enabled, including checkpoints with Great Person commands. Native
+BBG readback is pending.
+
+### Rise and Fall unit promotions
+
+The stock Rise and Fall LAN capture accepts `xp1_promotions=True`. The
+`unit_promotions` decision field contains the own-unit experience, acquired
+promotion indices and current native offers. Call `act` with the selected
+`promote_unit` candidate ID.
+
+At T19 the local Warrior had two offers. The client selected Battlecry
+and GameCore acquired it, reduced damage from 56 to 6 and left zero
+movement. Save and a new process restored the exact unit, experience,
+promotion and decision catalogue. The native receipt is
+`host-xp1-stock-unit-promotion-save-reload-native.json`.
+
+The cached player group `information("unit_promotions", player_id=pid)`
+returns the same roster and offers with the observed decision identity.
+On a session that publishes upgrade quotes, `information("unit_upgrades", player_id=pid)`
+also returns visible quotes the engine has marked illegal. Only offered
+candidates can be submitted through `act`.
+
+### Rise and Fall unit upgrades
+
+The stock Rise and Fall LAN capture accepts `xp1_unit_upgrades=True`.
+The client exposes the owned unit, target unit type, gold quote and
+legality through `unit_upgrades`. Rise and Fall's resource-access
+prerequisites stay in the native eligibility check. The stockpile-cost
+fields are null for this profile.
+
+At T26 GameCore offered the Slinger-to-Archer upgrade for 20 gold. The
+Python client selected it, the engine replaced the unit on the same
+tile and the treasury fell from 636.640625 to 616.640625. An independent
+process restored the Archer, balance, public observation and choices.
+This verifies the Slinger upgrade on this capture. Resource-gated
+upgrade variants still require native evidence. Private lab receipt
+`host-xp1-stock-unit-upgrade-save-reload-native.json`.
+
 ### Gathering Storm without BBG
 
 The exact retained stock Gathering Storm LAN profile accepts
@@ -1795,7 +2775,17 @@ The recorded primary blocker at that checkpoint was a dedication.
 Private lab receipt
 `evidence/host-xp2-stock-ostia-kabul-continuation-native.json`.
 
-### Era dedications in the stock XP2 session
+### Era dedications
+
+The installed Rise and Fall LAN capture exposes the same public
+`dedications` group and `confirm_dedications` candidate under
+`v11.captured-city.v9`. A v8 checkpoint can reopen with v9 when the
+historical public state and choices match. At T31 the client read four
+choices, confirmed the scientific dedication and observed it active
+with zero selections remaining. GameCore saved the state and closed
+normally. A fresh process restored the same observation and choices,
+including the active dedication. Multi-selection ages remain to be
+qualified. Private lab receipt `host-xp1-dedications-save-reload-native.json`.
 
 The opt-in `stock_dedications=True` extends the existing stock formation
 profile with a public `dedications` group. The group contains the acting
@@ -1976,4 +2966,759 @@ local restriction. The grouped promotion/trade correction passed 67 software
 checks after that run; the run does not qualify those corrected foreign cases.
 No checkpoint or route expiry was observed in this interval. Private lab proof:
 `evidence/host-xp2-bbg-listener-authority-native.json`.
+
+## Rise and Fall faith purchases
+
+The installed stock `xp1-lan` backend accepts `xp1_faith_purchase=True`
+together with `xp1_city_purchase=True` and `xp1_plot_purchase=True`.
+The existing `city_purchases` catalogue then retains gold and faith offers
+as separate choices, including visible but unaffordable offers. Command
+candidates require the native legality and affordability checks. Select the
+returned candidate through `SessionClient.act()`; its `purchase` action carries
+the currency and exact quoted price. The host rechecks the quote immediately
+before requesting the official command and verifies the item and wallet change.
+
+This adds `.faith.v1` after the stock city-purchase schema. Older checkpoints
+retain their original comparison fields through an explicit projection; their
+contents are not rewritten. Tile purchases still use gold. Unit formations,
+district purchases and other listed catalogue gaps remain separate.
+
+The XP1 adapter is source-checked and integrated. A native T37–T40 continuation
+completed the Holy Site, bought the offered Shrine for exactly 140 gold, and
+saved the resulting state. Its faith catalogue remained empty, including after
+the Shrine purchase. No positive faith purchase or faith debit is qualified by
+that interval. The city has majority-religion index -1; that observation alone
+does not establish which prerequisite is missing or require founding a religion.
+Do not infer support for other rulesets or mods from this integration.
+
+## Rise and Fall production information
+
+The installed stock XP1 modern catalogue branches include an additive
+`.production-info.v1` schema. `SessionClient.information('production')`
+returns `civ6-host.production-inputs.v3` with `current`, `queues` and `quotes`
+from the same accepted player observation and decision revision. Current items
+carry their official progress, cost, name and remaining turns; quotes follow
+the shipped production-panel visibility rules for the offered production items.
+Raw verification getter values remain in the private diagnostic trace.
+
+The reader uses the existing native XP1 production bindings. It adds no cost
+or completion-time formula. Waiting boundaries explicitly leave these fields
+unavailable. Older checkpoint comparisons remove only the added fields through
+a versioned projection; they preserve previous choices, including faith purchases.
+The native T37–T40 interval now verifies these public values through the Python
+client: the resumed Holy Site advances from 0 to 18 to 28 invested production
+against its native cost of 29, then becomes explicitly `completed`. Native
+remaining turns are retained even for a completed item; consume the `state`
+field as well as its item fields. The final native checkpoint is saved and the
+engine closes normally. A separate ordinary process reloads the final state
+with exactly the same public observation, semantic catalogue and new production
+and city-religion fields, then closes normally. The two processes remain below
+512 MiB (375 MiB maximum peak commit), with every monitored source unchanged.
+
+The same exact installed XP1 profile also publishes
+`SessionClient.information('city_religion')` as `civ6-host.city-religion.v1`.
+It contains the native signed majority-religion index for each owned city,
+joined to the observation's complete own-city set and revision. The official
+city UI excludes `-1` from its dominant-religion entry. Other indices are
+preserved without inferring names, beliefs, followers or pressure. Those fields
+and religious choices remain separate work. The same native interval returns
+index -1 for the owned city through the public client at each decision boundary.
+It qualifies that readback, not a positive religious conversion. Historical
+engine profiles keep their previous schema and do not call these new readers.
+
+Private lab evidence:
+`evidence/host-xp1-public-production-religion-save-reload-native.json`.
+This is stock XP1 on a retained fixture-derived state: an earlier levy diagnostic
+granted gold to an ancestor. This interval adds no grant and is not a witness of
+an entirely unassisted game history or strategic training readiness.
+
+## Rise and Fall explicit pantheon choice
+
+On the exact installed stock XP1 LAN profile, `xp1_pantheon=True` enables the
+versioned `pantheon` family and `SessionClient.information('pantheon')` at the
+same decision revision. The native query supplies all currently offered belief
+indices and hashes, or its explicit `already_has_pantheon` / `cannot_create`
+state. Select a normal catalogue candidate with `SessionClient.act`; the host
+requeries the choice, requests the native operation, and confirms the acquired
+belief from the published native view. A native CanStart refusal remains a
+refusal, without submitting an archive. Waiting or closed boundaries are
+unqueried, not empty catalogues. Older checkpoints compare their previous fields
+through the explicit additive `.pantheon.v1` projection.
+
+The retained stock XP1 T40 interval now qualifies this client path: 20 native
+offers were exposed, belief index 0/hash 1202591333 was selected explicitly,
+the native readback confirmed acquisition, and faith fell from 71.3203125 to
+59.3203125. The final state was saved and closed normally. An independent
+process reloaded exactly the observation, semantic catalogue and pantheon query,
+with `not_due/already_has_pantheon`, then closed normally without a gameplay
+order. Both qualified processes stayed below 512 MiB; peak commit was 380 MiB.
+
+Closing preserves the existing reduced terminal v11 catalogue; it does not
+append optional active-choice groups after their preceding fields disappear.
+Private evidence: `evidence/host-xp1-pantheon-save-reload-native.json`.
+This qualifies one selected belief on the exact installed stock XP1 profile,
+not all belief effects, religion founding or faith purchases. The retained
+ancestor includes the earlier diagnostic gold grant described above. These
+instrumented acceptance runs are not a production-throughput benchmark.
+
+## Rise and Fall belief addition
+
+The exact installed XP1 LAN profile now has an explicit
+`xp1_religion_beliefs=True` group. It can be selected independently of
+`xp1_pantheon`. `SessionClient.information('religion_beliefs')` contains the
+player's own founded-religion state and the native `ADD_BELIEF` choices;
+candidate actions keep their native index, hash and class. Actor-facing data
+omits diagnostic/proof metadata. A founded religion with no unspent belief is
+distinct from no founded religion, and from an unqueried waiting/closed state.
+The native founding-unit flag is retained even when it remains true after
+consumption; it is not reinterpreted as a unit-count estimate.
+
+Public contracts, the shared saved-owner adapters and the session route are
+integrated. The native T40 readback now returns the same public boundary as the
+client: no founded religion, no holy city, zero earned beliefs and no offered
+ADD_BELIEF choice. Its additive checkpoint projection preserves the previous
+observation and choices, and Save/close complete normally. This is a readback
+witness; no gameplay order was sent in that initial readback interval.
+Private evidence: `evidence/host-xp1-religion-beliefs-readback-native.json`.
+The subsequent T40–41 client interval selected follower belief 24 and worship
+belief 33 through native `ADD_BELIEF`. Both appeared in the founded religion,
+and an independent process recovered the exact final public state and choices.
+Evidence: `evidence/host-xp1-religious-chain-save-reload-native.json`.
+The current reader supports an absent holy city or
+one still owned by the acting player, and refuses other ownership states.
+Prophet activation, religion founding, custom names and the displayed pantheon
+faith threshold are outside this delivered group. No numeric faith threshold
+is substituted for the official getter.
+
+## Rise and Fall predefined religion foundation
+
+`xp1_religion_founding=True` adds
+`SessionClient.information('religion_founding')` and explicit `found_religion`
+candidate actions on the exact installed XP1 LAN profile. The option works
+independently of the pantheon and belief-addition groups. Each candidate keeps
+the native religion index and hash; availability comes from the native state
+and the official screen filters. Applying an offered choice rechecks that state,
+submits the official operation, then verifies the founded religion and holy
+city. A native refusal is returned without an action archive or a fake success.
+
+The family remains `queried_partial`: custom religion names are not yet
+qualified. Selecting a predefined religion does not silently allocate beliefs.
+Waiting/closed boundaries remain unqueried, and the previous terminal catalogue
+is preserved. The integrated runtime, public contract and composed session pass
+19 offline checks. Native foundation of predefined religion 1/hash 35560851
+and its independent Save/Reload are now verified in the T40–41 religious
+chain. This does not qualify custom names or all religion effects.
+Private evidence: `evidence/host-xp1-religion-founding-api-integration.json`.
+Native evidence: `evidence/host-xp1-religious-chain-save-reload-native.json`.
+
+## Rise and Fall current Great People information
+
+`xp1_great_people=True` enables `SessionClient.information('great_people')`
+on the exact installed stock XP1 LAN profile. It returns the current native
+timeline, the acting player's points by class, current recruitment/rejection
+flags and gold/faith patronage quotes. Native fixed-point precision is retained.
+The identity of an unmet claimant is masked according to the official popup;
+no other player's point balance is queried. This group covers the current
+timeline and own points, not the past timeline or every field of the screen.
+
+The information option preserves all previously exposed actions. Recruitment,
+rejection and patronage commands are not enabled merely by enabling this reader.
+An unavailable waiting/closed read is distinct from a queried empty timeline.
+The shared client, native owner reader and session routes pass 17 offline
+checks. The native T40–41 chain and independent reload now verify the public
+readback at each command boundary and exact persistence of its final state.
+Private evidence: `evidence/host-xp1-great-people-information-api-integration.json`.
+Native evidence: `evidence/host-xp1-religious-chain-save-reload-native.json`.
+
+## Rise and Fall Great Prophet activation
+
+`xp1_prophet_activation=True` exposes `information('prophet_activation')` and
+`activate_prophet` candidates carrying the own unit ID and its current native
+coordinates. This uses the official `UNITOPERATION_FOUND_RELIGION` operation;
+it does not invent a Great Person identifier or choose a founding city in Python.
+The adapter requires the selected unit's removal and the native owned founding
+site, then republishes the player's observation. A native CanStart refusal
+submits no archive. Stale identities and inconsistent effects are errors.
+
+Activation does not choose a religion or beliefs automatically. It composes
+with the optional foundation, belief and Great People groups and preserves
+their earlier checkpoints and terminal behavior. The runtime/public/session
+checks pass. The T41 client interval activated own Prophet 917513 on the
+owned Holy Site at (43,28); GameCore consumed the unit, set founding city
+65536 and earned two beliefs. The resulting founded religion and selected
+beliefs survived independent Save/Reload.
+Private evidence: `evidence/host-xp1-prophet-activation-api-integration.json`.
+Native evidence: `evidence/host-xp1-religious-chain-save-reload-native.json`.
+
+## Rise and Fall recruitment and patronage
+
+With the Great People reader enabled, `xp1_great_people_actions=True` adds the
+explicit `recruit_great_person` and `patronize_great_person` candidates. They
+carry the native individual index and current quoted cost; patronage also
+selects `YIELD_GOLD` or `YIELD_FAITH`. Every offer exposed by the native reader
+is retained. This option adds commands to the existing `great_people` data,
+without duplicating that information or introducing a model-specific filter.
+
+Execution rechecks the published offer, submits and verifies the exact native
+operation archive, then requires attribution of that individual to the actor,
+the own class-count increment, the newly created own unit and the patronage
+debit when applicable. Only action/status/reason crosses the command-response
+boundary; the internal attribution receipt stays outside actor data. The
+reader, commands, Prophet activation and religion choices can share a session.
+The command/runtime/public/session checks pass. Native gold patronage of
+individual 117 debited exactly 650 gold and created the player's Prophet;
+the subsequent activation/foundation/beliefs state survived Save/Reload.
+Normal recruitment of Boudica (individual 56) now costs the quoted 30 points,
+changes the own balance from 37 to 7 and creates the owned General. An
+independent reload preserves the result and its public activation availability.
+Faith patronage still needs its positive native witness. Rejection and
+activation of other classes are separate commands.
+Private evidence: `evidence/host-xp1-great-people-actions-api-integration.json`.
+Native evidence: `evidence/host-xp1-religious-chain-save-reload-native.json`.
+Recruitment evidence: `evidence/host-xp1-great-person-recruitment-save-reload-native.json`.
+This chain descends from the earlier diagnostic gold grant; it adds no grant
+and is not an unassisted-history or strategic-training qualification.
+
+## Rise and Fall Great Person rejection
+
+`xp1_great_people_reject=True`, together with the Great People reader and
+commands, adds `reject_great_person` to the explicit native choices. The
+candidate carries the current individual index and exact rejection cost.
+The native quote remains signed; the host does not clamp or replace it with
+a strategic rule. The existing two-command schema remains unchanged when
+this option is disabled. `information('great_people')` supplies the same data.
+
+The request revalidates the reservation and quote, submits the official
+rejection operation and verifies the actor's point balance and reservation
+loss. GameCore handles reassignment and its notifications. A native refusal
+produces no archive and returns an explicit refused result. Internal effect
+receipts remain outside player observations. Waiting and closed views stay
+unqueried, and the additional schema has an explicit checkpoint projection.
+
+The installed runtime, public interface and composed session pass 33 grouped
+checks. In the T41–42 native client interval, an offered Encampment project
+made Boudica (individual 56) available. Explicit rejection cost 6 points,
+changed the own balance from 37 to 31 and removed the actor's reservation.
+The state was saved and closed normally; an independent process recovered
+the exact observation, semantic choices and public information without sending
+a gameplay command. This qualifies that selected stock XP1 rejection.
+Private evidence: `evidence/host-xp1-great-people-rejection-save-reload-native.json`.
+
+## Rise and Fall custom religion names
+
+On the retained installed stock XP1 French profile,
+`xp1_religion_custom_names=True` additionally requires
+`xp1_religion_founding=True`. The group
+`SessionClient.information('religion_custom_names')` exposes the offered custom
+icons, native naming capability, localized default and placeholder, and the
+actor's `own_custom_name`. A missing name and an empty name remain distinct.
+
+Choose an offered `found_custom_religion` template through `SessionClient.act`
+with `parameters={'name': text}` when renaming is enabled. The text is kept
+exactly; the host neither trims nor normalizes it. The source-qualified input
+path permits 1–32 Unicode scalar values, excluding NUL and all-ASCII-space
+names. The official native Localization formatter supplies the uppercase
+comparison used by the official screen. Without renaming, the server chooses
+the offered localized default and accepts no caller override; the manual
+32-character limit is not imposed on that programmatic default.
+
+An invalid placeholder produces `religion_custom_name_invalid` before any
+GameCore request. This is distinguished from a native CanStart refusal.
+Successful execution must read back the exact selected religion and name from
+GameCore. Older predefined choices and checkpoints retain their own schema.
+The 43 installed grouped checks pass. A native client interval rejected the
+official placeholder before submitting an operation, then founded custom icon
+13 with the exact name `RL Économie 🧭` and selected beliefs 24 and 33.
+The saved T41 state was reloaded independently with the same player observation,
+semantic choices, name and beliefs, without another gameplay command. Both
+processes closed normally below 512 MiB. This qualifies that stock XP1 French
+case, not other locales, every string or unverified long programmatic defaults.
+
+Private integration evidence: `evidence/host-xp1-custom-religion-api-integration.json`.
+Native evidence: `evidence/host-xp1-custom-religion-save-reload-native.json`.
+
+## Expansion Great Person activation
+
+Use `xp1_great_person_activation=True` for Rise and Fall or
+`xp2_great_person_activation=True` for the supported stock and BBG 7.5.1
+Gathering Storm captures. The option adds the public
+`information('great_person_activation')` group and explicit
+`activate_great_person` choices. This option is independent of recruitment,
+patronage and Prophet activation. The group exposes owned Great Person IDs,
+individual/class indices, native charges, positions, and the native visible
+and available flags. Every choice with both flags is retained.
+
+In Gathering Storm, the activation group can share a decision catalogue with
+Congress or Dedication choices. These choices retain their original parameter
+validation and use the current decision ID. Congress read-only gates also
+apply to the combined catalogue.
+
+With Gathering Storm's secondary LAN commands enabled, each admitted human
+seat gets its own activation catalogue. The host revalidates the selected
+unit and command while that player's perspective is active, then restores
+the original perspective. The saved public-view receipt records this scope
+for reload comparison. This route is covered by software fixtures and
+awaits a native two-human capture.
+
+The operation uses the official UnitCommand for Great Person activation, with
+an empty parameter archive. Candidate coordinates identify the offered state;
+they are not invented command parameters. The request revalidates the offer
+and preserves a real native refusal without submitting an archive.
+
+A processed command is not automatically a confirmed effect. `completed`
+requires the unit's disappearance, consumed charges, or a newly created Great
+Work event attributed to that exact unit and command interval, with the city
+coordinates checked against the receiving owned city. No strategic
+benefit is required. A processed command without these confirmations returns
+`submitted` with reason
+`native_great_person_activation_processed_effect_unconfirmed` and no applied
+action. The FIFO is drained, the current observation remains readable and the
+client may choose another action; the host neither fabricates pending work
+nor automatically retries. Detailed source/event receipts remain private.
+
+The installed runtime, public interface, composed owner/client and preceding
+custom-name contracts passed 47 grouped checks. A native reset identified an
+extra assertion against an enum alias absent from the official table. The
+corrected catalogue uses the official row hash directly, like UnitPanel;
+its targeted test uses the pinned official database and rejects a wrong hash.
+The Rise and Fall T42 recruitment exposed Boudica (unit 983049, one charge)
+with visible=true and available=false. Exact Save/Reload preserves that state.
+Later Rise and Fall commands activated Bhasa and created works that could be
+moved to an empty slot or swapped with another work. Both moves were saved and
+reopened independently. The native checks use specific characters and captures.
+In the stock Gathering Storm turn-111 witness, the client activated Karel
+Čapek, moved the resulting work from the Amphitheater to an empty Palace
+slot, and saved the resulting inventory. A separate ordinary host process
+reopened the save and verified the same public player state and work inventory.
+The T112 continuation activated Čapek again, exchanged his two works between
+occupied slots and restored their exchanged positions in another process.
+BBG 7.5.1 has an installed-source check for this interface with native effect
+qualification pending.
+Private evidence: `evidence/host-xp1-great-person-activation-api-integration.json`.
+Correction: `evidence/host-xp1-great-person-command-hash-repair.json`.
+Native evidence: `evidence/host-xp1-great-person-recruitment-save-reload-native.json`.
+Great Work moves: `evidence/host-xp1-great-work-empty-slot-save-reload-native.json`
+and `evidence/host-xp1-great-work-occupied-slot-swap-save-reload-native.json`.
+Gathering Storm integration: `evidence/host-xp2-great-person-activation-api-integration.json`.
+Gathering Storm witness: `evidence/host-xp2-stock-great-writer-activation-work-move-native.json`.
+Independent reopen: `evidence/host-xp2-stock-great-writer-work-move-reload-native.json`.
+Occupied-slot exchange and reopen are recorded in
+`evidence/host-xp2-stock-occupied-great-work-swap-save-reload-native.json`.
+
+## Gathering Storm alert and automatic exploration
+
+The opt-in `xp2_extra_unit_orders=True` adds `UNITOPERATION_ALERT` and
+`UNITOPERATION_AUTOMATE_EXPLORE` to the existing `unit_order` family on the
+admitted current stock and BBG 7.5.1 LAN captures. Select the offered candidate
+with `SessionClient.act(player, decision_id, candidate_id)`, as for rest/wake.
+The native UnitPanel visibility and legality checks determine each offer.
+Exploration stays inside GameCore; the host supplies no route or exploration rule.
+
+`decisions["unit_orders"]["extensions"]` explicitly identifies these additions.
+The existing own-unit activity, fortification and readiness fields remain in
+`unit_orders["units"]`. The comparison against a checkpoint without the
+extension removes only the declared new offers and metadata; every historical
+observation and choice must still match. Secondary human seats use the same
+shared reader and native command transport before restoring the original view.
+Delivery alone does not establish completion of these additional orders:
+an unchanged own-unit state reports `submitted`.
+
+The exact installed descriptors and captured operation definitions are retained
+in `evidence/host-xp2-extra-unit-orders-source.json`. Native execution,
+subsequent alert/exploration behaviour and Save/Load remain to be qualified.
+
+## Gathering Storm rock bands
+
+The option `xp2_rock_bands=True` enables the current stock and BBG 7.5.1
+Gathering Storm LAN captures. The primary player and authorized secondary
+human players share the same reader and concert command.
+
+`SessionClient.information("rock_bands", player_id=player)` returns the
+player's rock bands with their unit IDs, current coordinates, level and
+album sales. The `visible` and `available` flags follow the official
+UnitPanel checks for a concert on the band's current plot. Levels and
+album sales retain their native signed integer values.
+
+Select the offered `perform_rock_concert` candidate and submit it with
+`SessionClient.act(player, decision_id, candidate_id)`. The host rechecks
+the unit, position, turn, readiness and native legality, then verifies the
+parameterless operation archive before delivery. A completed command
+includes `command_result["concert"]`, with the acting player, turn, unit,
+position, result ID and tourism produced. These are the fields used by
+the official multiplayer result popup for the owning player.
+
+Completion requires the corresponding native `PostTourismBomb` callback.
+A delivered archive awaiting that callback has status `submitted`. The
+presentation adapter checks its owned empty receivers and hooks while
+retaining the callback arguments in administrative diagnostics. The
+public concert result is bound to the exact requesting actor, unit and
+pre-command turn in both the worker protocol and the Python client. These
+checks use the prior decision observation, so a band's disappearance during
+the concert does not remove the identity needed to validate its own result.
+
+The installed binary bindings, both captured databases, Lua 5.1 calls,
+Python client, complete network-response validation, secondary-seat transport
+and source-qualified callback composition have software coverage. The grouped
+acceptance runs 40 checks, including existing simultaneous-turn, park and
+Great Person paths. Native concert execution and its
+Save/Reload cycle remain to be qualified. The private source and delivery
+receipts are `evidence/host-xp2-rock-bands-source-v2.json` and
+`evidence/host-xp2-rock-bands-software.json`.
+
+## Gathering Storm archaeology
+
+With `xp2_archaeology=True` on the admitted stock or BBG 7.5.1 LAN capture,
+`SessionClient.information('archaeology')` reads the active player's
+Choose Artifact popup state. `pending` is null when the native popup has
+no artifact. Otherwise the result identifies the owned archaeologist, the
+native artifact type, the displayed era and the displayed origins in button
+order. A single origin still requires confirmation in the game.
+
+Set `xp2_archaeology_commands=True` alongside the reader to use the offered
+archaeology commands through `SessionClient.act()`. The `excavate_artifact`
+candidate identifies an owned archaeologist and its current tile. The host
+uses the official Unit Panel's visibility and availability checks and confirms
+completion when the unit has a newly pending artifact.
+
+The `choose_artifact_origin` candidate selects an origin from the current
+popup. The host checks that the same artifact is pending and verifies the native
+request archive. Completion requires the pending state to clear and the engine
+to produce a matching Great Work creation event for the selected archaeologist,
+artifact, and receiving city. Both commands report `submitted` when a request
+was delivered and the expected change is still unconfirmed. The internal
+artifact index stays out of public replies.
+
+With secondary LAN routing enabled, an authorized second human can read the
+same popup and submit both commands for its own archaeologist. Each seat has
+its own pending artifact identity, which is checked again before the origin
+request. Secondary checkpoint comparisons preserve the archaeology scope used
+when saving.
+
+With `xp2_city_buildings=True` as well, `information("archaeology")` adds
+`museum_artifacts` under archaeology schema v2. It gives the era and origin
+player of each artifact in the player's own Great Work slots. Each entry
+identifies its city, building, slot and Great Work index. An unavailable native
+origin is `null`. The host checks the city owner and revalidates the slot
+before querying the origin. This read adds no action and has software coverage.
+
+Both routes have software coverage. Live GameCore execution, placement of the
+created artifact and its persistence across Save and Load remain to be verified.
+
+## Gathering Storm Great People information
+
+On the admitted stock and Boston BBG 7.5.1 captures, set `xp2_great_people=True` to read
+`SessionClient.information('great_people')` for the active player. The result
+includes the current timeline, the player's points by class, recruitment and
+rejection flags, and gold and faith patronage prices. The `read_only` field
+tracks the Congress and strategic-command boundaries. At those boundaries,
+prices and native flags remain visible and every `available` flag is false.
+
+Set `xp2_great_people_actions=True` alongside the reader to expose
+`recruit_great_person`, `reject_great_person` and `patronize_great_person`
+when the native panel offers them. The host rechecks the offer and the
+GameCore's command gate, then verifies the resulting grant or rejection.
+
+On BBG 7.5.1, at turn 74 the native gold patronage offer for John the Baptist cost 305.
+The client selected the offer, verified the exact debit and the new Prophet,
+and saved the resulting state. An independent session restored the same public
+observation and choices. Recruitment, rejection and faith patronage still need
+positive native witnesses on this profile.
+
+The stock route selects its own official gameplay database and the stock
+Great People popup chain. The stock command route has software coverage,
+including the composed secondary-seat gold patronage and checkpoint checks.
+
+Local evidence is recorded in `evidence/host-xp2-bbg-great-people-reader-t74-native.json`.
+The patronage witness is `evidence/host-xp2-bbg-prophet-gold-patronage-save-native.json`.
+The stock source is `evidence/host-xp2-stock-great-people-source.json`.
+
+## Gathering Storm pantheon and religion choices
+
+The independent option `xp2_pantheon=True` adds
+`SessionClient.information('pantheon')` with schema `civ6-host.pantheon.v2`.
+It contains the actor's actual native `pantheon_index` (`-1` means none) and
+the existing numerical choice catalogue. The index is read explicitly; it is
+not inferred from an empty action list. Select an offered `pantheon` candidate
+with `SessionClient.act()`. The XP1 v1 contract remains unchanged.
+
+The independent session options `xp2_prophet_activation=True`,
+`xp2_religion_founding=True` and `xp2_religion_beliefs=True` expose
+`information('prophet_activation')`, `information('religion_founding')` and
+`information('religion_beliefs')`. Select the corresponding `activate_prophet`,
+`found_religion` or `add_belief` candidate with `SessionClient.act()`.
+Each choice is explicit: the host does not move a Prophet, choose a religion or
+select beliefs automatically. The numerical founding action selects a predefined
+religion. Custom naming and other Great Person actions have separate admission.
+
+These options select the exact current XP2 image and retained stock/BBG 7.5.1
+captures. They can be enabled individually and combined with
+`xp2_religious_unit_operations` and `xp2_pantheon`. The public groups contain the acting player's
+religious state and the native choices for the current decision revision.
+Closed decision windows retain an unavailable group rather than fabricated
+choices. For an already founded religion on the admitted XP2 profile, the
+reader follows ReligionScreen's city lookup when the descriptor leaves the
+player's city set. The public `holy_city` descriptor then uses the ordinary
+absence sentinel. If the lookup still finds a city, the actor's `own` state
+also carries `holy_city_display_label`, the localized title shown by
+ReligionScreen. Its numeric owner, identifier, and location stay outside this
+field. The founded religion and its belief choices remain available in
+either case. The software checks cover both branches. Qualification on an
+actual native city loss or transfer is pending.
+
+XP2 pantheon, named religion and belief selection follow the official UI's
+direct PlayerOperation requests after their respective choice revalidation.
+They do not call the generic CanStart method: a direct request receipt records
+that distinction and is not proof of an effect. Completion still requires the
+native archive and independent resulting state. Prophet activation remains a
+UnitOperation with its native availability predicate.
+
+The first native interval loaded T73 exactly, read the public religious groups
+and moved the Prophet onto the completed Holy Site. No activation was offered.
+The pre-existing state did not yet expose GetPantheon, so its specific rejection
+reason is not established. Save succeeded; Close then failed in historical
+dependency verification at the memory bound. The added pantheon interface and
+bounded verification repair pass 32 installed, grouped checks with the private
+import boundary enabled before test imports. The corrected stock T73 interval
+then offered 22 pantheons and executed the selected index 0: the own index
+changed from -1 to 0 and faith from 82 to 70. Save and normal Unload/Destroy
+completed under 512 MiB. An independent process now reloads that checkpoint with
+identical public observations, decision catalogue and all five religious groups,
+then closes normally without an action or another turn. Native refusal text
+identifies an invalid founding location for the Prophet. A subsequent native
+inventory read identifies the Holy Site as completed but pillaged. That run
+failed during another group's dependency hashing before returning a public
+client frame. After correcting the dependency hash allocations, the same
+checkpoint returns the pillage flag through the client and accepts the offered
+repair into production. A subsequent T74 continuation observes the repaired
+Holy Site, activates the Prophet, founds predefined religion 1 and confirms
+beliefs 22 and 32 in the client. GameCore saves the complete checkpoint and
+closes normally under 512 MiB. An independent process restores the exact
+public observation, catalogue and religious groups at T74 before closing
+without further gameplay commands.
+Historical XP1 religion cycles retain their existing qualification.
+Private native evidence: `evidence/host-xp2-religious-chain-frontier-native.json`.
+Pantheon and repaired close: `evidence/host-xp2-stock-pantheon-save-native.json`.
+Independent reload: `evidence/host-xp2-stock-pantheon-cycle-native.json`.
+T74 repair and foundation: `evidence/host-xp2-stock-religion-t74-native-effects.json`.
+Complete stock T74 Save and independent reload:
+`evidence/host-xp2-stock-religion-t74-save-reload-cycle.json`.
+
+The Boston BBG 7.5.1 session restored the post-patronage checkpoint, kept the
+Holy Site clear, and selected `activate_prophet`, `found_religion`, and two
+`add_belief` candidates at T76. The client confirmed the founding city,
+religion, follower belief and worship belief. It also observed five followers
+and 1,400 lifetime pressure for that religion through
+`information('city_religion')`. The worker saved and closed normally.
+Independent reload of this post-founding checkpoint remains pending.
+Private native evidence: `evidence/host-xp2-bbg-religion-founding-save-t76-native.json`.
+
+## Gathering Storm district pillage state
+
+The exact current XP2 image selects `civ6-host.placement-inventory.v2` in
+`frame['decisions']['placement_inventory']`. Every visible owned district row
+adds a Boolean `pillaged`, independently of `complete`. Building rows carry
+`pillaged: null`: their damage state has not been qualified by this reader.
+No new action is inferred from the field. Repair must still be an actually
+offered production choice, submitted through the existing client.
+
+Historical v1 checkpoints retain every preceding field and action through an
+explicit projection that removes only `pillaged`. A v2-to-v2 comparison remains
+strict. XP1 and older images keep their previous reader and contract.
+
+The current stock T73 client reads the owned Holy Site as pillaged and the
+Encampment as intact. The client submits the offered `production_resume` for
+the Holy Site. GameCore puts it at the head of the queue and preserves its 25
+production points. The Holy Site remains pillaged in that reply. The next
+turn processes the contact and city-state quest notifications and publishes
+the same district with `pillaged: false` at T74. Independent reload confirms
+the same inventory in the saved T74 state.
+Private evidence: `evidence/host-xp2-stock-religion-t74-save-reload-cycle.json`.
+
+## Gathering Storm own-city religion details
+
+On the exact current XP2 image with its retained stock or BBG 7.5.1 capture,
+`xp2_city_religion_details=True` adds
+`SessionClient.information('city_religion')` using `civ6-host.city-religion.v2`.
+The fields match the XP1 contract below: each owned city's majority, religious
+followers, pressure per turn and accumulated pressure, rounded as in the
+official city display. Unrounded native pressure and hidden foreign cities
+remain outside this public group.
+
+The option is independent of religious actions. It preserves their catalogue
+and remains readable while the player waits, including when strategic commands
+are unavailable. Closed sessions keep the existing reduced terminal catalogue.
+An explicit older-checkpoint projection removes only the newly added group and
+composes with the district-pillage projection. Checkpoints already carrying the
+group continue to compare it exactly.
+
+The stock client reads both owned cities at T73 with no religion. At T74
+after foundation, Rome has majority index 1, three followers, zero displayed
+pressure per turn and 800 accumulated pressure. The older checkpoint's
+observation and choices match after the two explicit additive projections.
+An independent stock v2 reload matches the city details exactly. The same
+native readback on BBG remains pending.
+Private evidence: `evidence/host-xp2-stock-religion-t74-save-reload-cycle.json`.
+
+## Gathering Storm religious unit operations
+
+`xp2_religious_unit_operations=True` adds the same player-scoped
+`information('religious_unit_operations')` group and explicit `spread_religion`,
+`evangelize_belief`, `launch_inquisition` and `remove_heresy` choices on the
+exact retained stock and BBG 7.5.1 captures using the current XP2 image.
+This option is independent of the XP1 flag and other optional action families.
+Native availability owns the mask; an operation processed without a confirmed
+effect is reported as submitted, not completed.
+
+On the current stock Gathering Storm capture, the client started the Shrine at
+turn 74 and bought the offered Missionary for 70 faith on turn 75. At turn 76,
+the offered `spread_religion` completed with three to two charges, movement
+from four to zero, and Rome's displayed accumulated pressure from 800 to 1,000.
+Save and an independent exact reload preserve the player observation, choices,
+charges and city religious pressure.
+
+Private native evidence `evidence/host-xp2-stock-missionary-spread-save-reload-cycle.json`.
+
+From the same stock T109 Apostle save, `evangelize_belief` consumed
+the Apostle and raised earned beliefs from two to three. The client selected
+an offered founder belief and GameCore retained it. A separate process used
+`launch_inquisition` from that save, consumed the Apostle and verified the
+new Inquisition flag and 70-faith Inquisitor quote. Both branches saved and
+closed normally. Reload of the evangelical result and BBG execution remain
+pending. Private native evidence
+`evidence/host-xp2-stock-apostle-evangelization-belief-t109-save-native.json`
+and `evidence/host-xp2-stock-apostle-inquisition-t109-save-native.json`.
+
+The exact Inquisition reload led to an offered T112 purchase for 70 faith.
+At T113, `remove_heresy` consumed one charge and changed the same holy
+city’s accumulated pressures from 38 to 10 for the foreign religion and
+from 925 to 1,075 for the actor’s religion. A fresh native process restored
+the T113 observation, choices, and two remaining charges exactly and
+closed normally. Private native evidence
+`evidence/host-xp2-stock-inquisitor-purification-save-reload-cycle.json`.
+
+## Rise and Fall religious unit operations
+
+`xp1_religious_unit_operations=True` adds
+`information('religious_unit_operations')` and four explicit choices:
+`spread_religion`, `evangelize_belief`, `launch_inquisition`, and `remove_heresy`.
+The flag is independent of the other religious and Great Person API groups.
+Information includes the actor's native Inquisition flag and every owned unit's
+position, movement, religion and spread charges. Operations suppressed by the
+official UnitPanel movement/visibility checks are absent; availability is read
+from GameCore for the visible operations. The host does not invent a negative
+native result for an unqueried operation.
+
+Actions identify the owned unit and offered position, and submit the official
+operation with no parameters. The native archive ordinal is checked against
+the GameInfo ordinal: both loaders read the same pinned database in row order.
+This is not a rowid-minus-one rule or a hardcoded ordinal per operation.
+
+`completed` requires the exact operation's native receipt and an independent
+effect: consumed unit/charge, a newly earned belief, or the own Inquisition
+flag changing, as appropriate. An accepted operation whose effect is not
+confirmed remains `submitted` with an explicit reason and a usable session.
+A consumed spread charge does not claim a city conversion or follower gain.
+Evangelization reads its own native belief counter directly; it does not depend
+on the ownership of the holy city. No gameplay rule is calculated in Python.
+
+The stock XP1 native client has bought a Missionary for 70 faith at T42,
+advanced to T43, selected the offered spread operation, and observed charges
+fall from three to two with movement consumed. The result is saved and the
+native context closes normally. An independent process now reloads the owned
+unit, two remaining charges, economy, observation and historical choices exactly,
+with the explicitly added city-details projection below. The other three
+operations remain unqualified natively. A composed-session repair carries
+the selected faith permission through both command preflight checks; the native
+requote, city ownership and currency guards remain in place.
+Private evidence: `evidence/host-xp1-missionary-spread-save-native.json`.
+Reload: `evidence/host-xp1-missionary-spread-reload-city-details-native.json`.
+
+## Rise and Fall own-city religion details
+
+On the exact installed stock XP1 profile, `xp1_city_religion_details=True`
+upgrades `information('city_religion')` to `civ6-host.city-religion.v2`.
+Each owned city retains its majority and adds `religions`, with `religion_index`,
+`followers`, `pressure_per_turn`, and `lifetime_pressure`. The native readers
+and the shipped UI's rounding supply these values. Raw unrounded pressure,
+outward pressure and conversion forecasts are not exposed by this group.
+
+The default remains v1. The explicit checkpoint projection removes only the
+new details, retaining every previous majority, observation and action choice.
+Waiting players retain the same own-city information; terminal catalogues keep
+their existing reduced shape. Twelve grouped source, public-client and composed
+session checks pass. The independent T43 native reload reads two followers,
+zero pressure per turn and 600 accumulated pressure for the owned city, through
+the public client at the same decision revision. It executes no gameplay command
+or additional turn and closes normally below 512 MiB. These fields were first
+queried after reload; persistence of a new v2 API checkpoint is not claimed.
+There is no before/after pressure comparison or city-conversion claim.
+Private evidence: `evidence/host-xp1-missionary-spread-reload-city-details-native.json`.
+
+### Attack, deploy and rebase with aircraft
+
+Enable `xp2_air_operations=True` on the retained Gathering Storm standard or
+BBG 7.5.1 LAN profile. Native highlighted destinations that pass the game's
+click-time check appear as `air_operation` choices with operation
+`AIR_ATTACK`, `DEPLOY` or `REBASE`, the own unit ID and destination plot.
+The host rechecks the selected choice and verifies the exact native archive before
+delivery. Completion requires a newly observed position at the destination
+for movement or a consumed native attack for a strike. An unconfirmed effect
+reports `submitted`.
+
+An attack that would start a war returns `pending` and opens the existing
+explicit war confirmation choices. Selecting the attack in that case issues
+no archive. Confirmation follows the game's declaration-only popup.
+Construct the local client with
+`SessionClient(backend, war_source_sha256=backend.war_source_sha256)`
+so it can validate the modal against the source selected during backend setup.
+Other click destinations and live GameCore execution remain to be verified.
+
+### Build a road or railroad
+
+Enable `xp2_build_route=True` on the retained Gathering Storm standard or
+BBG 7.5.1 LAN profile. A `build_route` choice identifies an own unit, its
+current plot, and the route type returned by the official Unit Panel query.
+The captured rules determine the prerequisites and the route type.
+At execution the host checks the same offer and delivers the game's
+parameterless operation. `completed` requires the tile to change to the
+offered route type. This route has software coverage. Live execution and
+Save/Load remain to be verified.
+
+For an admitted secondary human seat, the same options route these choices
+through the LAN perspective switch. The host reads the seat's own units,
+checks that the native archive names that seat, then restores the original
+perspective. Secondary checkpoint receipts record the exact enabled families.
+The simultaneous routing and checkpoint comparison have software coverage.
+On the current XP2 image, the secondary seat can confirm surprise war against
+an AI major and select the resulting `diplomacy_response` Close candidate.
+While the dialogue is open, use `player_view()` for other seats. Complete the
+dialogue before submitting their commands, polling the turn, or saving.
+For a registered human defender, the native sequence closes the declarer's
+session automatically and the ordinary choices return after confirmation.
+The human-versus-human branch awaits a native two-human test.
+
+### Make peace with a city-state from the second seat
+
+The retained Gathering Storm diplomacy profiles with and without BBG 7.5.1
+expose the secondary human's city-state panel in `decisions["city_state_peace"]`.
+It shows met city-states from that seat's official panel and whether peace is
+available. When the native panel allows it, select the
+`diplomacy_initiate` candidate with choice `CHOICE_MAKE_PEACE` and the
+listed target. Use the usual decision and candidate IDs.
+
+The host rechecks the current panel and verifies the sender and target before
+delivering the native player operation. Completion requires the city-state
+panel to report peace. The host then restores the original perspective.
+Checkpoint comparison uses the panel only when the receipt includes its scope,
+so older secondary checkpoint digests remain comparable.
+
+On stock Gathering Storm, the primary seat gets the same panel in
+`decisions["diplomacy_overview"]["city_state_peace"]`. The stock overview
+keeps the separate offers to negotiate peace with major civilizations and
+the active promises already in the previous version. The checkpoint comparison
+for that previous version removes the added city-state panel and its choices.
+
+The primary-seat command and resume were verified with the GameCore under
+BBG 7.5.1. The stock paths and the secondary BBG seat have composed software
+coverage and await native execution.
 

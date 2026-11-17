@@ -1,8 +1,30 @@
 """Owned use of the shared command transport on a captured expansion owner."""
 import ctypes as C
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from struct import unpack_from
 from .configuration_profiles import XP1_CORE_SHA256,XP2_CORE_SHA256
 from .native.native_action_transport import NativeActionTransport
+
+
+_UNIT_ORDER_MESSAGES = {'command': 0x493830AF, 'operation': 0x8C0F3F36}
+
+
+@dataclass
+class _UnitOrder:
+    player_id: int
+    unit_id: int
+    route: str
+    opcode: int | None = None
+    delivered: bool = False
+
+
+@dataclass
+class _ArchiveCheck:
+    validators: tuple
+    delivered: int = 0
+
 
 class SavedActionTransport(NativeActionTransport):
     def __init__(self,services):
@@ -79,7 +101,85 @@ class SavedActionTransport(NativeActionTransport):
 
     def deliver_one(self,context_value=0xFFFFFFFF):
         self.require_transition()
-        return super().deliver_one(context_value)
+        order = getattr(self, '_expected_unit_order', None)
+        checked = getattr(self, '_expected_archives', None)
+        if checked is not None:
+            remaining = checked.validators[checked.delivered:]
+            if not remaining or len(self.pending) != len(remaining):
+                raise RuntimeError('Unexpected guarded XP2 archive count')
+            # Validate the whole pending gesture before applying its first command.
+            for validate, payload in zip(remaining, self.pending):
+                validate(payload)
+        if order is not None:
+            if order.delivered or len(self.pending) != 1:
+                raise RuntimeError('Expected one borrowed XP2 unit-order archive')
+            archive = self.pending[0]
+            # Both XP2 serializers write the cached Unit owner WORD, kind
+            # WORD (1) and native ID DWORD. The two message IDs are distinct.
+            if (type(archive) is not bytes or len(archive) < 20
+                    or unpack_from('<IHHI', archive) != (
+                        _UNIT_ORDER_MESSAGES[order.route], order.player_id, 1, order.unit_id)):
+                raise ValueError('XP2 unit-order archive differs from its route, acting seat or unit')
+            if order.route == 'operation' and (
+                    len(archive) != 28 or unpack_from('<III', archive, 16) != (0xffffffff, 0, 0)):
+                raise ValueError('XP2 parameterless unit operation contains target or parameter data')
+            if order.opcode is not None and unpack_from('<I', archive, 12)[0] != order.opcode:
+                raise ValueError('XP2 unit operation opcode differs from its selected action')
+        result = super().deliver_one(context_value)
+        if order is not None:
+            order.delivered = True
+        if checked is not None:
+            checked.delivered += 1
+        return result
+
+    def require_xp2_single_archive(self, validate, *, allow_no_archive=False):
+        """Check the one archive produced by an admitted borrowed action."""
+        return self.require_xp2_archives((validate,), allow_no_archive=allow_no_archive)
+
+    @contextmanager
+    def require_xp2_archives(self, validators, *, allow_no_archive=False):
+        """Guard the complete ordered archive sequence of one borrowed gesture."""
+        self.require_transition()
+        self.require_empty_native_queue()
+        if (self.transport_abi.core_sha256 != XP2_CORE_SHA256
+                or type(validators) is not tuple or not 1 <= len(validators) <= 2
+                or type(allow_no_archive) is not bool or allow_no_archive and len(validators) != 1
+                or not all(callable(validate) for validate in validators)
+                or getattr(self, '_expected_unit_order', None) is not None
+                or getattr(self, '_expected_archives', None) is not None):
+            raise ValueError('Invalid guarded XP2 archive scope')
+        checked = _ArchiveCheck(validators)
+        self._expected_archives = checked
+        try:
+            yield
+            if checked.delivered != len(validators) and not (
+                    allow_no_archive and checked.delivered == 0 and not self.pending):
+                raise RuntimeError('Guarded XP2 archive sequence was not delivered')
+        finally:
+            del self._expected_archives
+
+    @contextmanager
+    def require_xp2_unit_order(self, player_id, unit_id, route, *, opcode=None):
+        """Limit this native submission to one exact action route and owner/unit."""
+        self.require_transition()
+        self.require_empty_native_queue()
+        if (self.transport_abi.core_sha256 != XP2_CORE_SHA256
+                or type(player_id) is not int or not 0 <= player_id < 64
+                or type(unit_id) is not int or not 0 <= unit_id <= 0xffffffff
+                or type(route) is not str or route not in _UNIT_ORDER_MESSAGES
+                or (opcode is not None and (route != 'operation' or type(opcode) is not int
+                                            or not 0 <= opcode <= 0xffffffff))
+                or getattr(self, '_expected_archives', None) is not None
+                or getattr(self, '_expected_unit_order', None) is not None):
+            raise ValueError('Invalid borrowed XP2 unit-order scope')
+        order = _UnitOrder(player_id, unit_id, route, opcode)
+        self._expected_unit_order = order
+        try:
+            yield
+            if not order.delivered:
+                raise RuntimeError('Borrowed XP2 unit order was not delivered')
+        finally:
+            del self._expected_unit_order
 
     def update_game_once(self):
         self.require_transition()

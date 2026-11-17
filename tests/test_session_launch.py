@@ -11,6 +11,9 @@ from unittest.mock import patch
 
 from civ6_host.runtime import session_launch as target
 from civ6_host.runtime import xp1_session_inputs as inputs
+from civ6_host.runtime.native.native_saved_session import (
+    DEFAULT_MEMORY_RESERVE_MIB, MIN_EXPANSION_MEMORY_RESERVE_MIB,
+)
 
 
 class LaunchTests(unittest.TestCase):
@@ -24,6 +27,7 @@ class LaunchTests(unittest.TestCase):
         self.child = SimpleNamespace(stdout=object(), stderr=object(), stdin=object())
         self.owner = SimpleNamespace(run=Path(self.tmp.name), stdout_limit_bytes=64*1024*1024,
             nonce='1'*32, reset_timings_seconds={},
+            memory_reserve_mib=DEFAULT_MEMORY_RESERVE_MIB,
             win=SimpleNamespace(job=self.job), _read_stream=lambda *a:None,
             _watch=lambda:None, _send=lambda data:self.events.append(('send',data)),
             _receive=lambda:self.response,
@@ -67,6 +71,18 @@ class LaunchTests(unittest.TestCase):
         with self.assertRaisesRegex(OSError,'spawn failure'):
             self.run_launch(spawn_error=OSError('spawn failure'))
         self.assertEqual([row[0] for row in self.events],['fail','finish'])
+
+    def test_reduced_reserve_refusal_precedes_spawn(self):
+        self.owner.memory_reserve_mib = MIN_EXPANSION_MEMORY_RESERVE_MIB
+
+        def refuse(phase):
+            self.assertEqual(phase, 'before_spawn')
+            raise RuntimeError('low memory')
+
+        self.owner._check_reset_resources = refuse
+        with self.assertRaisesRegex(RuntimeError, 'low memory'):
+            self.run_launch(spawn_error=AssertionError('spawn attempted after memory refusal'))
+        self.assertEqual(self.events, [])
 
     def test_invalid_initial_reply_uses_existing_failure_and_reaper(self):
         def reject(*args):raise ValueError('wrong initial reply')

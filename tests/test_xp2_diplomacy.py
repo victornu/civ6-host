@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from struct import pack
 import unittest
 from unittest.mock import Mock, patch
 
@@ -83,6 +84,22 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
         self.assertEqual(app.require_context.call_count, 2)
 
     def test_saved_context_composes_real_choice_read_and_apply_without_base_displays(self):
+        for choice, response in (
+                ('CHOICE_EXIT', None), ('CHOICE_POSITIVE', 'POSITIVE'),
+                ('CHOICE_NEGATIVE', 'NEGATIVE'), ('CHOICE_IGNORE', 'RESPONSE_IGNORE')):
+            with self.subTest(choice=choice):
+                self._exercise_saved_response(choice, response)
+
+    def test_surprise_war_exit_checks_actor_and_effect(self):
+        for actor, effect, error in (
+                (0, b'closed_at_war', None),
+                (1, b'closed_at_war', 'exit archive differs'),
+                (0, b'effect_unverified', 'did not close the session')):
+            with self.subTest(actor=actor, effect=effect):
+                self._exercise_saved_response('CHOICE_EXIT', None, war_exit=(actor, effect, error))
+
+    def _exercise_saved_response(self, choice, response, *, war_exit=None):
+        from civ6_host.runtime import xp2_world_war
         from civ6_host.runtime.native import native_diplomacy_choices as choices
         from civ6_host.runtime.native import native_saved_player_map as player_map
         from civ6_host.runtime.native import native_diplomacy_display986 as display
@@ -103,6 +120,21 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
             namespaces=SimpleNamespace(register=Mock()), ui_child=object())
         ledger = [statement]
         actions = SimpleNamespace(pending=[])
+        if war_exit is not None:
+            sender, readback, error = war_exit
+
+            def evaluate(child, source, name, **_):
+                if name == b'@explicit_native_diplomacy_response':
+                    actions.pending.append(pack('<6I', 0x08a6cf5f, 77, 0x1baabc8b, sender, 0, 0))
+                    return b'accepted'
+                if name == b'@xp2_surprise_war_exit_effect':
+                    self.assertIn(b'local pid,sid,turn,target=0,77,47,1', source)
+                    self.assertIn(b'IsSessionIDOpen(sid)', source)
+                    self.assertIn(b'IsAtWarWith(target)', source)
+                    return readback
+                return b'menu'
+
+            runtime.evaluate_text.side_effect = evaluate
         prefix = SimpleNamespace(runtime=runtime, ui_child=runtime.ui_child,
             deferred_events=SimpleNamespace(pending_diplomacy_statements=ledger,
                 drain_empty_receivers=Mock()), actions=actions,
@@ -129,21 +161,24 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
                 self.assert_owner(owner)
                 self.finished = True
             def poison(self, owner):
-                raise AssertionError('synthetic native response should succeed')
+                self.poisoned = True
             def resume(self, owner):
                 self.assert_owner(owner)
                 state.pending = None
                 return observation
 
         context = Context()
+        statement_type = ('DECLARE_SURPRISE_WAR' if war_exit is not None
+                          else 'WARNING_STOP_CONVERTING_MY_CITIES' if response else 'DENOUNCE')
         data = dict(session=dict(player_id=0, session_id=77, from_player=1,
-            to_player=0, statement_type='MAKE_DEAL', statement_subtype='NONE', response_type=None),
-            statement_text='deal', mood=0, selections=[dict(key='CHOICE_EXIT', sort=0,
-                text='Close', tooltip=None, diplomatic_action_type=None, disabled=False)])
+            to_player=0, statement_type=statement_type, statement_subtype='NONE', response_type=None),
+            statement_text='statement', mood=0, selections=[dict(key=choice, sort=0,
+                text=choice, tooltip=None, diplomatic_action_type=None, disabled=False)])
         saved_map = dict(schema='test-map', player_id=0, turn=47)
         with patch.object(choices, 'parse', return_value=data), \
              patch.object(choices, 'lua_source', return_value=b'menu-source'), \
-             patch.object(choices, 'deliver_response') as deliver, \
+             patch.object(choices, 'deliver_response', side_effect=lambda transport, _: transport.pending.clear()) as deliver, \
+             patch.object(xp2_world_war, 'verify_close_writer') as verify_writer, \
              patch.object(choices.pending, 'source', return_value=b'check-session'), \
              patch.object(choices, '_snapshot', return_value={'jobs': 0}) as snapshot, \
              patch('civ6_host.runtime.native.native_player_observation.observe_player', return_value=observation), \
@@ -154,6 +189,17 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
              patch.object(yield_display, 'observe', side_effect=AssertionError('unqualified yield reader used')):
             observation_read, catalogue = choices.read(backend, 0, saved_context=context)
             action = catalogue['candidates'][0]['action']
+            if war_exit is not None and error is not None:
+                with self.assertRaisesRegex(RuntimeError, error):
+                    choices.apply(backend, action, saved_context=context)
+                verify_writer.assert_called_once_with(backend)
+                self.assertTrue(context.poisoned and backend.poisoned)
+                self.assertEqual(ledger, [statement])
+                if sender == 0:
+                    deliver.assert_called_once_with(actions, choice)
+                else:
+                    deliver.assert_not_called()
+                return
             effect = choices.apply(backend, action, saved_context=context)
 
         self.assertEqual(observation_read, observation)
@@ -163,12 +209,38 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
         self.assertEqual(effect, observation)
         self.assertTrue(context.started and context.finished)
         self.assertEqual(ledger, [])
-        self.assertEqual(deliver.call_count, 1)
+        deliver.assert_called_once_with(actions, choice)
+        if war_exit is not None:
+            verify_writer.assert_called_once_with(backend)
+        else:
+            verify_writer.assert_not_called()
+        script, = [call.args[1] for call in runtime.evaluate_text.call_args_list
+                   if call.args[2] == b'@explicit_native_diplomacy_response']
+        if response:
+            self.assertIn(f'DiplomacyManager.AddResponse(77,0,"{response}")'.encode(), script)
+            self.assertNotIn(b'CloseSession', script)
+        else:
+            self.assertIn(b'CloseSession(77)', script)
         self.assertEqual(config_read.call_count, 2)
         self.assertTrue(all(call.kwargs['core_sha256'] == XP2_CORE_SHA256
                             for call in config_read.call_args_list))
         self.assertEqual(map_observe.call_count, 2)
         self.assertGreaterEqual(snapshot.call_count, 6)
+
+    def test_received_promise_responses_use_the_native_add_response_archive(self):
+        from civ6_host.runtime.native import native_diplomacy_choices as choices
+
+        for choice in ('CHOICE_POSITIVE', 'CHOICE_NEGATIVE', 'CHOICE_IGNORE'):
+            with self.subTest(choice=choice):
+                pending = [(0xa4172391).to_bytes(4, 'little') + b'native-fixture']
+                transport = SimpleNamespace(pending=pending, deliver_one=Mock(side_effect=pending.pop))
+                choices.deliver_response(transport, choice)
+                transport.deliver_one.assert_called_once_with()
+                self.assertEqual(pending, [])
+        transport = SimpleNamespace(pending=[b'wrong archive'], deliver_one=Mock())
+        with self.assertRaisesRegex(RuntimeError, 'expected command'):
+            choices.deliver_response(transport, 'CHOICE_IGNORE')
+        transport.deliver_one.assert_not_called()
 
     def test_composed_saved_snapshot_uses_real_owner_and_job_observer_after_finished_context(self):
         from civ6_host.runtime.native import native_diplomacy_choices as choices
@@ -366,7 +438,7 @@ class XP2DiplomacyConfigurationTests(unittest.TestCase):
         native = dict(episode_terminated=False)
         with patch('civ6_host.runtime.xp1_session_result.read', return_value=native) as read:
             self.assertIs(network_worker._read_xp1_outcome(saved, 0), native)
-        read.assert_called_once_with(saved, player_id=0)
+        read.assert_called_once_with(saved, player_id=0, allow_inactive_observer=True)
         saved._xp2_diplomacy = object()
         with patch('civ6_host.runtime.xp1_session_result.read', return_value=native) as read:
             self.assertIs(network_worker._read_xp1_outcome(saved, 0), native)

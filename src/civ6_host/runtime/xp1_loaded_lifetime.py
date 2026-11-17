@@ -13,6 +13,33 @@ from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256, _source, _
 SOURCE=('work/host-extensions/xp1-loaded-lifetime-static/loaded-lifetime-source-v1.json',
         'afbbaa559595a916f1a47f7c63428ecbcf59853c1f11c2a34eeceff52c32b3b7')
 
+_XP2_DEPENDENCY_PROJECTION=(
+    'work/x1trade/lifetime-memory-repair-stage/'
+    'be8b667b47fd690adf7dfb786f46b3162b58883cf7ebf3b95834b5626d57499f.json',
+    'be8b667b47fd690adf7dfb786f46b3162b58883cf7ebf3b95834b5626d57499f')
+
+
+def _verified_dependency_children(actual,digest,projection):
+    # This projection supplies only references/parents edges, derived from the
+    # exact immutable JSON files. Live bodies and ABI checks still use source().
+    # Rehash the whole original file even when the small projection is cached.
+    from .native.native_source_cache import _stat_identity
+    before=_stat_identity(actual)
+    hashed=hashlib.sha256()
+    with actual.open('rb') as stream:
+        while chunk:=stream.read(64*1024):
+            hashed.update(chunk)
+    if hashed.hexdigest()!=digest:
+        raise ValueError('Lifetime source dependency changed: '+str(actual))
+    if _stat_identity(actual)!=before:
+        raise ValueError('Lifetime source dependency changed while hashing: '+str(actual))
+    if actual.suffix.lower()!='.json':
+        return ()
+    row=projection['documents'].get(digest)
+    if row is None:
+        raise ValueError('Lifetime dependency is outside its authenticated graph: '+str(actual))
+    return row['children']
+
 def source(core_sha256=XP1_CORE_SHA256):
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_loaded_lifetime_source import source as selected
@@ -44,6 +71,13 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuatio
     if core_sha256==XP2_CORE_SHA256:
         from .xp2_loaded_lifetime_source import SOURCE as selected
     rows={selected[0]:selected[1]};p=source(core_sha256)
+    projection=None
+    if core_sha256==XP2_CORE_SHA256:
+        projection=_source(_XP2_DEPENDENCY_PROJECTION)
+        if (projection['schema']!='civ6-host.xp2-lifetime-dependency-projection.v1'
+                or dict(projection['root'])!=dict(path=selected[0],sha256=selected[1])):
+            raise ValueError('Lifetime dependency projection belongs to another source')
+        rows[_XP2_DEPENDENCY_PROJECTION[0]]=_XP2_DEPENDENCY_PROJECTION[1]
     def add(ref):
         path,digest=ref['path'],ref['sha256']
         if path in rows:
@@ -51,6 +85,9 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuatio
             return
         rows[path]=digest
         actual=resolve_path(resource_root()/path)
+        if projection is not None:
+            for child in _verified_dependency_children(actual,digest,projection):add(child)
+            return
         if actual.suffix.lower()!='.json':
             if hashlib.sha256(actual.read_bytes()).hexdigest()!=digest:
                 raise ValueError('Lifetime source dependency changed: '+str(actual))
@@ -72,8 +109,11 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,postload=False,continuatio
         if execution_image is not None:
             from .xp2_capture_notification_source import source_dependencies as current_district_dependencies
             from .xp2_diplomacy_events import source_dependencies as diplomacy_dependencies
+            from .xp2_culture_changed import source_dependencies as culture_dependencies
+            from .xp2_host_victory_history import source_dependencies as victory_history_dependencies
             for group in (current_district_dependencies(execution_image),
-                          diplomacy_dependencies(execution_image)):
+                          diplomacy_dependencies(execution_image), culture_dependencies(execution_image),
+                          victory_history_dependencies(execution_image)):
                 for path, digest in group.items():
                     if pins.setdefault(path, digest) != digest:
                         raise ValueError('Conflicting current XP2 lifetime dependency: '+path)

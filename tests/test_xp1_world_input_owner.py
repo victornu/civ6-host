@@ -59,6 +59,7 @@ class Fixture(existing.Fixture):
         b.thread=(threading.get_ident(),1357);b.runtime=NS(thread=lambda:b.thread,read=self.read)
         b.raw_load_result={};b.loaded_readback=dict(width=8,height=8)
         t.owner=b;t.prefix=p;t.sequence=0;t.publication_count=0;t.publishing=False
+        t.world_input_selections={};t.world_input_prompts={}
         t.observation=dict(player_id=0,turn=8,width=8,height=8,units=[dict(id=17,x=0,y=0)])
         self.observation=deepcopy(t.observation);self.goal=None;self.route='request'
         self.move_on_drain = True

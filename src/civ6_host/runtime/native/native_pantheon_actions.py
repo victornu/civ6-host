@@ -25,8 +25,12 @@ _MAX_RESPONSE = 131072
 PINNED_EVIDENCE_SHA256 = '6d0db5c53ce5d3daaa74f43abe5d480731e37c6cddb0229a922629a2a08bb73a'
 _PROOF = _ROOT / 'evidence/native-pantheon-actions' / f'{PINNED_EVIDENCE_SHA256}.json'
 
-def verify_source() -> None:
+def verify_source(*, core_sha256=_ROUTE_IMAGES['core']) -> None:
     """Verify native bindings/return representation, UI and request route pins."""
+    if core_sha256 != _ROUTE_IMAGES['core']:
+        from civ6_host.runtime.xp1_pantheon_source import verify_source as selected_source
+        selected_source(core_sha256)
+        return
     native = load_pinned_json(_PROOF, PINNED_EVIDENCE_SHA256)
     expected_callbacks = {'Game.GetReligion': '0x1805234a0', 'Player.GetReligion': '0x180531290', 'CachePlayerReligion.GetPantheon': '0x18053ab60', 'CachePlayerReligion.CanCreatePantheon': '0x18053a990', 'CacheGameReligion.IsInSomePantheon': '0x180527ba0', 'CacheGameReligion.IsInSomeReligion': '0x180527c00'}
     if native['schema'] != 'civ6rl.native_required_pantheon_decision.static.v1' or native['core_sha256'] != _ROUTE_IMAGES['core'] or native['exe_sha256'] != _ROUTE_IMAGES['exe'] or any((native['bindings'][name]['callback_va'] != value for name, value in expected_callbacks.items())) or (native['contracts']['GetPantheon']['cache_offset'] != '0x74') or (native['contracts']['GetPantheon']['absence_sentinel'] != -1) or (native['contracts']['blocker']['signed_value'] != -1679521882):
@@ -68,11 +72,36 @@ def _parse_uint(token: bytes, label: str, maximum: int=4294967295) -> int:
 def _common_lua_guards(pid: int, turn: int) -> bytes:
     return b'local pid,expectedTurn=' + str(pid).encode() + b',' + str(turn).encode() + b"\nassert(Game and type(Game.GetLocalPlayer)=='function' and Game.GetLocalPlayer()==pid,\n       'native UI perspective is another player')\nassert(type(Game.GetLocalObserver)=='function' and Game.GetLocalObserver()==pid,\n       'native observer perspective is another player')\nassert(type(Game.GetCurrentGameTurn)=='function' and Game.GetCurrentGameTurn()==expectedTurn,\n       'pantheon choice is stale')\nassert(type(Game.IsAllowStrategicCommands)=='function' and\n       Game.IsAllowStrategicCommands(pid)==true,'strategic commands are not allowed')\nlocal player=Players and Players[pid]\nassert(player and player:IsAlive()==true and player:IsTurnActive()==true and\n       player:IsTurnActiveComplete()==true,'requested player is not ready')\nlocal religion=player:GetReligion()\nassert(religion and type(religion.GetPantheon)=='function' and\n       type(religion.CanCreatePantheon)=='function','player religion API unavailable')\nlocal function assertContextStillValid()\n assert(type(Game.GetLocalPlayer)=='function' and Game.GetLocalPlayer()==pid and\n        type(Game.GetLocalObserver)=='function' and Game.GetLocalObserver()==pid and\n        type(Game.GetCurrentGameTurn)=='function' and Game.GetCurrentGameTurn()==expectedTurn,\n        'pantheon request context changed')\n assert(type(Game.IsAllowStrategicCommands)=='function' and\n        Game.IsAllowStrategicCommands(pid)==true,'strategic commands are no longer allowed')\n assert(player:IsAlive()==true and player:IsTurnActive()==true and\n        player:IsTurnActiveComplete()==true,'pantheon player is no longer ready')\nend\nassertContextStillValid()\n"
 
-def catalog_source(player_id: int, expected_turn: int) -> bytes:
+def catalog_source(player_id: int, expected_turn: int, *, core_sha256=_ROUTE_IMAGES['core']) -> bytes:
     """Return the current official pantheon catalog or an explicit not-due result."""
     pid, turn = (_player_id(player_id), _turn(expected_turn))
-    verify_source()
+    verify_source(core_sha256=core_sha256)
     return _common_lua_guards(pid, turn) + b"local current=religion:GetPantheon()\nassert(type(current)=='number' and current==math.floor(current) and\n       current>=-2147483648 and current<=2147483647,'invalid pantheon state')\nlocal canCreate=religion:CanCreatePantheon()\nassert(type(canCreate)=='boolean','invalid CanCreatePantheon result')\nlocal function notDue(reason)\n local currentAgain=religion:GetPantheon()\n local canCreateAgain=religion:CanCreatePantheon()\n assert(type(currentAgain)=='number' and currentAgain==current and\n        type(canCreateAgain)=='boolean' and canCreateAgain==canCreate,\n        'pantheon due-state changed during catalog')\n assertContextStillValid()\n return 'not_due,'..pid..','..expectedTurn..','..reason\nend\nif current>=0 then return notDue('already_has_pantheon') end\nif not canCreate then return notDue('cannot_create') end\nlocal gameReligion=Game.GetReligion()\nassert(gameReligion and type(gameReligion.IsInSomePantheon)=='function' and\n       type(gameReligion.IsInSomeReligion)=='function','global religion filter unavailable')\nassert(PlayerOperations and PlayerOperations.FOUND_PANTHEON~=nil and\n       PlayerOperations.PARAM_BELIEF_TYPE~=nil and\n       PlayerOperations.PARAM_INSERT_MODE~=nil and\n       PlayerOperations.VALUE_EXCLUSIVE~=nil,'source PlayerOperations enums unavailable')\nlocal function u32(v,label)\n assert(type(v)=='number' and v==math.floor(v) and v>=0 and v<=2147483647,\n        'invalid nonnegative signed index '..label)\n return v\nend\nlocal function signedBits(v,label)\n assert(type(v)=='number' and v==math.floor(v) and v>=-2147483648 and v<=2147483647,\n        'native signed integer out of range '..label)\n return v<0 and v+4294967296 or v\nend\nlocal operation=signedBits(PlayerOperations.FOUND_PANTHEON,'operation')\nlocal key=signedBits(PlayerOperations.PARAM_BELIEF_TYPE,'belief parameter')\nlocal insert=signedBits(PlayerOperations.PARAM_INSERT_MODE,'insert parameter')\nlocal exclusive=signedBits(PlayerOperations.VALUE_EXCLUSIVE,'exclusive mode')\nassert(key~=insert,'pantheon parameter keys collide')\nlocal choices,seenIndex,seenHash={}, {}, {}\nlocal scanned=0\nfor row in GameInfo.Beliefs() do\n scanned=scanned+1; assert(scanned<=" + str(_MAX_CHOICES).encode() + b',\n   \'GameInfo belief enumeration exceeds diagnostic bound\')\n assert(row and row.Index~=nil and row.Hash~=nil and row.BeliefClassType~=nil,\n        \'incomplete belief row\')\n local index=u32(row.Index,\'belief index\')\n local hash=signedBits(row.Hash,\'belief hash\')\n local usedPantheon=gameReligion:IsInSomePantheon(index)\n local usedReligion=gameReligion:IsInSomeReligion(index)\n assert(type(usedPantheon)==\'boolean\' and type(usedReligion)==\'boolean\',\n        \'native global belief availability is not boolean\')\n if row.BeliefClassType=="BELIEF_CLASS_PANTHEON" and\n    not usedPantheon and not usedReligion then\n   assert(not seenIndex[index] and not seenHash[hash],\n          \'duplicate eligible belief index or hash\')\n   seenIndex[index]=true; seenHash[hash]=true\n   choices[#choices+1]={index=index,hash=hash}\n end\nend\ntable.sort(choices,function(a,b) return a.index<b.index end)\nlocal function dec(n) return string.format(\'%.0f\',n) end\nlocal fields={\'catalog\',dec(pid),dec(expectedTurn),dec(operation),dec(key),\n dec(insert),dec(exclusive),dec(#choices)}\nfor _,item in ipairs(choices) do\n fields[#fields+1]=dec(item.index)..\':\'..dec(item.hash)\nend\nassert(religion:GetPantheon()==current and religion:CanCreatePantheon()==true,\n       \'pantheon due-state changed during catalog\')\nassertContextStillValid()\nreturn table.concat(fields,\',\')\n'
+
+def index_source(player_id, expected_turn, *, core_sha256):
+    pid,turn = _player_id(player_id),_turn(expected_turn)
+    verify_source(core_sha256=core_sha256)
+    return _common_lua_guards(pid,turn) + b'''
+local index=religion:GetPantheon()
+assert(type(index)=='number' and index==math.floor(index) and index>=-1 and index<=2147483647,
+       'invalid own pantheon index')
+assertContextStillValid()
+return string.format('pantheon,%.0f,%.0f,%.0f',pid,expectedTurn,index)
+'''
+
+
+def parse_index(payload, player_id, expected_turn):
+    pid,turn = _player_id(player_id),_turn(expected_turn)
+    if type(payload) is not bytes or len(payload)>128:
+        raise ValueError('Invalid own pantheon index response')
+    fields=payload.split(b',')
+    if (len(fields)!=4 or fields[0]!=b'pantheon'
+            or (_parse_uint(fields[1],'player',63),_parse_uint(fields[2],'turn'))!=(pid,turn)):
+        raise ValueError('Foreign or stale own pantheon index')
+    if fields[3]==b'-1':
+        return -1
+    return _parse_uint(fields[3],'own pantheon index',0x7fffffff)
+
 
 def parse_catalog(payload: bytes, player_id: int, expected_turn: int) -> dict:
     pid, turn = (_player_id(player_id), _turn(expected_turn))
@@ -160,10 +189,10 @@ def _validate_choice(choice: dict) -> None:
     if type(params) is not dict or len(params) != 2 or any((type(k) is not int or type(v) is not int for k, v in params.items())) or (params != expected):
         raise ValueError('Pantheon request parameters are not exact')
 
-def revalidate_choice_source(choice: dict) -> bytes:
+def revalidate_choice_source(choice: dict, *, core_sha256=_ROUTE_IMAGES['core']) -> bytes:
     """Recheck catalog identity and legality immediately before caller submits."""
     _validate_choice(choice)
-    verify_source()
+    verify_source(core_sha256=core_sha256)
     pid = _player_id(choice['player_id'])
     turn = _turn(choice['current_game_turn'])
     index = _uint(choice['selected_index'], 'selected index')
@@ -185,10 +214,10 @@ def parse_revalidated_choice(payload: bytes, choice: dict) -> dict:
         raise ValueError('Revalidated pantheon choice differs from selection')
     return {'valid': True, 'choice': choice, 'operation': choice['operation'], 'parameters': dict(choice['parameters'])}
 
-def effect_source(choice: dict) -> bytes:
+def effect_source(choice: dict, *, core_sha256=_ROUTE_IMAGES['core']) -> bytes:
     """Read back founded pantheon; never submits or infers acceptance from request."""
     _validate_choice(choice)
-    verify_source()
+    verify_source(core_sha256=core_sha256)
     pid = _player_id(choice['player_id'])
     turn = _turn(choice['current_game_turn'])
     index = _uint(choice['selected_index'], 'selected index')
@@ -211,12 +240,12 @@ def parse_effect(payload: bytes, choice: dict) -> dict:
         raise ValueError('Verified pantheon value does not match selection')
     return {'status': fields[0].decode('ascii'), 'confirmed': fields[0] == b'verified', 'player_id': actual[0], 'current_game_turn': actual[1], 'selected_index': actual[2], 'selected_hash': actual[3], 'observed_pantheon': observed}
 
-def guard_case() -> bytes:
+def guard_case(*, core_sha256=_ROUTE_IMAGES['core']) -> bytes:
     """Lua-double guards; they apply no native action or gameplay mutation."""
-    catalog = catalog_source(0, 7)
+    catalog = catalog_source(0, 7, core_sha256=core_sha256)
     example = parse_catalog(b'catalog,0,7,4294967195,4294967193,4294967191,4294967190,1,4:2147483648', 0, 7)
     choice = choose(example, 4)
-    revalidate = revalidate_choice_source(choice)
-    effect = effect_source(choice)
+    revalidate = revalidate_choice_source(choice, core_sha256=core_sha256)
+    effect = effect_source(choice, core_sha256=core_sha256)
     body = b'local S={pid=0,observer=0,turn=7,alive=true,active=true,complete=true,\n allowStrategic=true,pantheon=-1,canCreate=true,badCanCreate=false,\n badAvailability=false,bumpTurnOnPantheon=false,usedPantheon={},usedReligion={},\n rows={{Index=4,Hash=-2147483648,BeliefClassType="BELIEF_CLASS_PANTHEON"},\n       {Index=5,Hash=77,BeliefClassType="BELIEF_CLASS_FOUNDER"}}}\nlocal function iter(rows) local i=0; return function() i=i+1; return rows[i] end end\nlocal function callable(rows) return setmetatable({}, {__call=function() return iter(rows) end}) end\nGame={GetLocalPlayer=function() return S.pid end,GetLocalObserver=function() return S.observer end,\n GetCurrentGameTurn=function() return S.turn end,\n IsAllowStrategicCommands=function(i)\n  assert(i==0,\'strategic predicate needs the requested player ID\')\n  return S.allowStrategic end,\n GetReligion=function() return {IsInSomePantheon=function(_,i) return S.usedPantheon[i] or false end,\n  IsInSomeReligion=function(_,i) if S.badAvailability then return 0 end; return S.usedReligion[i] or false end} end}\nlocal rel={GetPantheon=function()\n if S.bumpTurnOnPantheon then S.turn=S.turn+1 end\n return S.pantheon end,\n CanCreatePantheon=function() if S.badCanCreate then return 0 end; return S.canCreate end}\nlocal player={IsAlive=function() return S.alive end,IsTurnActive=function() return S.active end,\n IsTurnActiveComplete=function() return S.complete end,GetReligion=function() return rel end}\nPlayers={[0]=player}; GameInfo={Beliefs=callable(S.rows)}\nPlayerOperations={FOUND_PANTHEON=-101,PARAM_BELIEF_TYPE=-103,\n PARAM_INSERT_MODE=-105,VALUE_EXCLUSIVE=-106}\nlocal function runCatalog()\n' + catalog + b'\nend\nlocal function runRevalidate()\n' + revalidate + b'\nend\nlocal function runEffect()\n' + effect + b'\nend\nassert(runCatalog()==\'catalog,0,7,4294967195,4294967193,4294967191,4294967190,1,4:2147483648\')\nS.pantheon=9; assert(runCatalog()==\'not_due,0,7,already_has_pantheon\'); S.pantheon=-1\nS.canCreate=false; assert(runCatalog()==\'not_due,0,7,cannot_create\'); S.canCreate=true\nS.badCanCreate=true; assert(not pcall(runCatalog)); S.badCanCreate=false\nS.usedPantheon[4]=true; assert(runCatalog():match(\',0$\')); S.usedPantheon[4]=false\nS.usedReligion[4]=true; assert(runCatalog():match(\',0$\')); S.usedReligion[4]=false\nS.badAvailability=true; assert(not pcall(runCatalog)); S.badAvailability=false\nS.rows[2]={Index=4,Hash=77,BeliefClassType="BELIEF_CLASS_PANTHEON"}\nassert(not pcall(runCatalog)); S.rows[2]={Index=5,Hash=77,BeliefClassType="BELIEF_CLASS_FOUNDER"}\nassert(runRevalidate()==\'valid,0,7,4,2147483648,4294967195,4294967193,4294967191,4294967190\')\nassert(runEffect()==\'pending,0,7,4,2147483648,4294967295\')\nS.pantheon=4; S.usedPantheon[4]=true\nassert(runEffect()==\'verified,0,7,4,2147483648,4\')\nS.pantheon=-1; S.usedPantheon[4]=false\nS.usedPantheon[4]=true; assert(not pcall(runRevalidate)); S.usedPantheon[4]=false\nS.usedReligion[4]=true; assert(not pcall(runRevalidate)); S.usedReligion[4]=false\nS.turn=8; assert(not pcall(runCatalog) and not pcall(runRevalidate) and not pcall(runEffect)); S.turn=7\nS.pid=1; assert(not pcall(runCatalog)); S.pid=0\nS.observer=1; assert(not pcall(runCatalog)); S.observer=0\nS.alive=false; assert(not pcall(runCatalog)); S.alive=true\nS.active=false; assert(not pcall(runRevalidate)); S.active=true\nS.complete=false; assert(not pcall(runCatalog)); S.complete=true\nS.allowStrategic=false; assert(not pcall(runCatalog) and not pcall(runRevalidate) and not pcall(runEffect)); S.allowStrategic=true\nS.pantheon=3; S.bumpTurnOnPantheon=true; assert(not pcall(runCatalog)); S.bumpTurnOnPantheon=false; S.turn=7; S.pantheon=-1\nS.rows[1].Hash=12; assert(not pcall(runRevalidate)); S.rows[1].Hash=-2147483648\nPlayerOperations.VALUE_EXCLUSIVE=12; assert(not pcall(runRevalidate)); PlayerOperations.VALUE_EXCLUSIVE=-106\nreturn \'pantheon-guards-ok\'\n'
     return b'local saved={Game=Game,Players=Players,GameInfo=GameInfo,\n PlayerOperations=PlayerOperations}\nlocal ok,result=pcall(function()\n' + body + b'\nend)\nGame,Players,GameInfo,PlayerOperations=saved.Game,saved.Players,saved.GameInfo,saved.PlayerOperations\nassert(ok,result)\nreturn result\n'

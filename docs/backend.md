@@ -71,6 +71,98 @@ not establish a GameCore crash, a complete expansion Load, or a simulation
 throughput measurement. No identical long capture should be retried before
 the capture's memory growth is investigated.
 
+The installed Base image has a separate native host build profile.
+`python tools/build_native_host.py --profile base-current-havok --output-dir <private-build-directory>`
+stages the retained Base sources with the 48 current Havok thread export
+addresses and the current `lua_tonumber` guard. The staged source includes the
+shared event aggregation implementation. Building this profile does not admit
+the current Base saved-session route.
+
+For local input preparation, `base_capture_inputs.prepare_bundle` reuses the
+qualified Capture09 hotseat export. It checks the original save, the three final
+databases, the captured content and the archived validator sources against their
+pins. The capture retains its original engine identity while the fixture is
+prepared for the installed Base Core and its exact host build. The normal
+worker-copy helper stages three private databases from this fixture.
+The hotseat reset transport selects that exact pair with
+`execution_image_profile="base-gamecore-current-160875db"` and the retained
+Capture09 reference. The child verifies its own executable, the saved inputs
+and the three private database copies before mapping GameCore.
+The compiled worker can inspect its live Base job registry and reconcile a
+real empty-list creation with its stdout event. Base Prepare uses the same
+Localization ABI as the installed shared-library profile, and the Base script
+prefix selects the current Havok runtime. The bounded service witness verified
+Localization against the private French database and protected Lua execution
+without creating a GameCore context.
+The installed Base profile also uses the length-aware Lua Locale bridge for
+public yield formatting. The official String constructor and Lua Lookup
+matched across 21 number cases. A retained Capture09 player observation
+replayed in that Lua context passed the public yield validator, and a mismatched
+observer was refused. This qualifies the formatting and perspective check in
+isolation.
+The selected Base build now passes static admission for the bounded
+Capture09 Init/Load trial. The installed PE file matched the pinned context,
+configuration provider, Load, cache and post-load code and vtable checks.
+The normal client preflight requires a 512 MiB child budget plus a 2,048 MiB
+system reserve. With this explicit Base profile and capture, callers can opt
+in to `reduced_memory_reserve=True` to reuse the guarded LAN budget.
+It requires 1,792 MiB free at launch, keeps the 512 MiB child Job limit and
+stops on system headroom below 1,024 MiB. It also checks the supervisor's
+memory.
+The installed Base Core consumed all 2,983,549 gameplay bytes from Capture09,
+returned status zero, matched the retained own-player state and completed the
+native cache and post-load stages. The Python client completed reset, observe
+and close. Its turn-one observation matched the retained Capture09 headless
+reply, with 28 choices under the default options. The supervisor reaped the
+worker on the controlled close path. The controller uses the pinned Capture09
+producer bytes and unwind data, and the public yield reader initializes Locale
+on its own Lua child.
+For this installed Base profile, `ui_profile="base-standard-hotseat-capture09-ui-v1"`
+also binds the five retained UI gates to the selected Core. The parent and
+worker check the same official UI evidence and installed Havok identity.
+This enables source admission for citizen assignments, city focus, production
+queues, Shift+Enter and plot purchases. The installed build has now founded
+the selected city and used Shift+Enter to hand control from player 0 to 1,
+from 1 to 2, and from 2 to 3. With an explicit 330-second diagnostic budget,
+the fourth command returned control to player 0 at turn two. The city
+persisted across the native round boundary, and the client closed in
+245 seconds under the 512 MiB process cap.
+The optional `public_objective_players=[0, 1, 2, 3]` hook can bind its narrow
+per-player records to this same installed Core and headless host. The reader
+checks the live UI getters for own cities, units and gold. These records stay
+in their separate files and carry the episode and decision sequence. The
+installed file matches the retained getter bodies. In the live founding and
+turn sequence, the client accepted the narrow records for all four seats and
+checked the active seat against its normal observation. In a separate live
+reset, `client.player_view(pid)` returned all four scoped views with distinct
+revealed plots. The host restored the active perspective after each read.
+That view check covered turn one and closed in 171 seconds.
+
+With `checkpoint_on_close=True`, the same installed Base path can write a
+native GameCore stream and application configuration after a human action.
+The client founded a city as player 0 at turn one, then closed with Save enabled.
+Save returned zero. The host verified the same active player's observation and
+choices, unchanged scheduler state and process exit within the 512 MiB cap.
+A fresh worker loaded the same two components with three separate private
+database copies. The raw Game enumeration still contained the consumed settler
+with native delayed-death state and off-map coordinates. The comparison uses
+the existing delayed-death rule at raw Load and then strictly matches the
+public observation and all 43 action choices. The restored city accepted a
+Scout order and reported it in the native queue. The Save and reload
+workers closed in 94 and 69 seconds respectively, within the 512 MiB cap.
+The two raw files are private. This witness covers player 0 at turn one.
+
+The host can also write a child checkpoint from a resumed session. In the
+Capture09 handoff test, the restored player 0 used the native forced end-turn
+choice. The host saved the resulting player-1 decision boundary. The next
+GameCore Load consumed all 3,112,389 bytes and reported player 1 active. The
+client received the same public observation and 21 choices. The previous
+player's city remained visible in their own view and player 1 could found a
+second city. The three workers used distinct copies of the same databases.
+The child Save and reload sessions took 104 and 148 seconds with the 512 MiB
+cap. Native evidence covers one parent link and player 1 as the resumed actor.
+
+
 The low-level script runtime now has an explicit source-selected XP2 game-API
 registration branch. It reuses the existing owned Lua root/child and protected
 registration mechanism, calls the official Core binder, and verifies the exact
@@ -282,6 +374,16 @@ finally:
 
 This example is an API sketch using caller-provided configuration, not a runnable default scenario. Existing explicit session options retain their historical names and semantics during extraction. Unsupported options, profiles and missing resources fail rather than substitute a different setup. The native supervisor retains process duration/memory limits, private database copies, source checks and cleanup. Uncertain action completion is not retried automatically.
 
+For local Gathering Storm LAN, `NetworkBackend(..., reduced_memory_reserve=True)`
+requires 1,792 MiB available physical memory and commit at admission and again
+just before spawning the worker. The child keeps its 512 MiB Windows Job cap.
+The watchdog samples system headroom and Python supervisor memory once per
+second, and ends the worker if available physical memory or commit falls
+below 1,024 MiB, or if Python exceeds 512 MiB of private memory. The
+supervisor records minimum headroom, peak Python memory, and the stop reason.
+The standard launch policy
+requires 2,560 MiB available physical memory and commit.
+
 The optional [prepared capture](capture-package.md) is produced by full original admission and consumed by the same Load path. It avoids revalidating thousands of raw export fragments at every reset, while retaining runtime-file hashes, exact capture/code identity, official-save checks and private database copies. Relocated input mode requires both this capture and the explicit private resource manifest; original admission remains available separately.
 
 ## Provenance and compatibility
@@ -415,6 +517,274 @@ The response uses `civ6-host.player-view.v1`, joined to the episode, generation,
 Collection calls Core's automatic perspective-update routine used during native turn activation, retaining its notification path, with pinned code and live human-status checks. The Lua `PlayerManager.SetLocalPlayerAndObserver` setter is excluded because it also transfers human/AI control. It checks native turn/activity/configuration state, drains supported callbacks, restores the original local player and observer, and compares the original public observation. Unknown callbacks or uncertain restoration fail the session. It never advances the game to obtain a view.
 
 Only the latest per-player files are retained, bounded to 8 MiB each, and the client refuses stale or unconfigured players and closed episodes. This interface does not establish simultaneous command scheduling, a complete observation space or graphical parity for every player's view. The existing revealed-map limits remain explicit in the response.
+
+The LAN `SessionClient.controllable_player_ids` property lists the players
+the backend declares it can currently route. Backends without a declaration
+return `None`. The captured local player is routed by default. Other captured
+humans appear in the session roster. Enable the explicit secondary scope
+above to submit its supported commands for those seats.
+For saved Gathering Storm LAN sessions, the host reads the human roster from
+the authenticated configuration and checks it against native player flags at
+load and during session reads.
+
+For a current Gathering Storm LAN capture, set `public_view_players` to the
+human seat IDs to collect, with `input_profile="xp2-lan"` and
+`execution_image_profile="xp2-gamecore-current-092abfbb"`. After reset or a
+subsequent accepted reply, `SessionClient.player_view(player_id)` reads that
+seat's observation and revealed map at the reply's exact revision. A defeated
+seat's view becomes unavailable and its previous view file is removed. The
+backend continues to report command permissions through `controllable_player_ids`.
+The LAN path has been exercised with the client, the installed image's source
+guards and fixture native calls. Its two-human live GameCore validation is pending.
+
+With the same view selection, `secondary_unit_commands=True` enables `observe`
+and `act` for living secondary human seats on that Gathering Storm LAN profile.
+The secondary catalogue includes Wake, ordinary Cancel, Sleep, Fortify, Heal,
+Religious Heal and Skip Unit Turn when the native UI offers them. Each action is
+checked again against current native legality and the queued message's route,
+owner and unit. A received message with no verified effect returns `submitted`.
+The catalogue also exposes regular End Turn, Shift+Enter and Unready through
+the existing turn controls. Availability comes from the current seat's official
+UI predicates. A forced pass sent while waiting can return `submitted` if
+readiness stays unchanged. If the request generates a round-completion message,
+the receiver checks its sender against the currently selected seat and consumes
+it in the native pre-update phase. Advance and close through the session owner.
+The v4 catalogue adds `research` and `civic` actions. Its `research_choices`
+contains that seat's current selection indices and the offers returned by the
+native choosers. The host checks the selected row again before submission, then
+checks the archive's player, operation and parameters before dispatch. Reselecting
+the same item can return `submitted` without a change in the current selection.
+The v5 catalogue adds `founders` and `found_city` for the current legal settler
+sites. The existing native foundation path is guarded by actor, settler and
+operation. The returned observation must show the founder consumed and the new
+city owned by that seat at the offered coordinates.
+The v6 catalogue adds `production_choices` for the acting seat's cities. It
+exposes the current queue head and native ordinary replacement choices. The
+archive guard checks the player, city, selected item and replacement mode before
+delivery. A changed queue head invalidates a previously offered replacement for
+that city.
+The v7 catalogue also exposes `production_queues` and explicit append,
+eighth-slot replacement, removal and swap choices. The host checks the selected
+city's previously observed entries, verifies the positions in the native
+archive and reads the resulting order back from GameCore. Placement, formations
+and purchases have separate action families.
+With `city_focus_diagnostic=True` and `city_management_diagnostic=True`, the v8
+catalogue also carries the acting seat's focus indicators and native citizen
+targets. It offers each displayed focus and citizen gesture through the same
+client, checks the prior state of that city, verifies the whole ordered archive
+sequence for the gesture, and reads the result in the acting perspective.
+These flags retain the scope of the existing expansion UI source. A v7
+catalogue is used when the city controls are disabled. The reader still accepts
+recorded v1–v16 catalogues. Client-to-worker routing is covered by software tests.
+A live official two-human LAN witness remains pending.
+
+When secondary LAN routing is enabled, the v9 catalogue includes that seat's
+unit selection and queued destinations. Select a unit to expose the whole
+public map grid. The official click handler chooses the native branch, with
+movement and unit swaps admitted. Unsupported branches return a refusal.
+The host checks the archived owner, unit and coordinates before dispatch.
+It uses the resulting unit positions or queued destination to report the
+effect. With checkpointing enabled, the host also restores each routed
+seat's selection before checking its available actions.
+
+On the selected XP2 war popup source, a secondary seat's map click can also
+open its own war confirmation. The client offers Cancel and Confirm while
+the popup is pending. Cancel clears only that seat's popup. Confirmation
+against a city-state checks the owner and target in the command archive
+before delivery and verifies the resulting war state. On the current XP2
+image, confirmation against an AI major opens the acting secondary seat's
+native surprise-war dialogue. That seat receives the official Close choice.
+Other seats can read their own player views while it is open. Resolve the
+dialogue before sending another seat's commands, advancing, or saving.
+For a captured human defender on the same LAN, the declarer route delivers
+the Core-generated war action and automatic session close. It checks the
+sender, target and session order and reads back the resulting state before
+the ordinary catalogue returns. The defender's native notification remains
+to be witnessed. Both secondary routes have composed software coverage.
+The retained native war witness covers the primary seat against an AI major.
+For the current XP2 image, closing the surprise-war dialogue checks the
+native message's exact actor and session before delivery. A fresh read must
+then show the session closed and the two civilizations at war.
+
+When the first seat's surprise-war dialogue is open, the LAN worker can
+publish a fresh read-only view for each admitted human. The view files carry
+the selected seat's observation and map. The worker checks the original
+dialogue before switching perspective and again after restoring the first
+seat. Listing these views consumes no dialogue response. This path has
+composed software coverage and awaits a native match with two human seats.
+
+The v10 catalogue adds native promotion offers, acquired promotions and
+experience, plus upgrade targets and their gold and strategic-resource quotes.
+Promotion uses its own eligibility check. A change in the published offer
+invalidates an older choice before it reaches the native command queue.
+
+The v11 catalogue adds the borrowed human's visible attack plots, own attacks
+remaining and public city defenses. It uses the native legality checks for the
+unit and city input routes. Before delivery, the host verifies the owner, unit,
+operation, route modifiers and coordinates in the actual command archive.
+The reply reports observed combat state after delivery. A queued move with no
+immediate combat effect is reported as submitted. The engine selects defenders.
+Choices and observations are included in the v4 checkpoint view comparison.
+
+On admitted Gathering Storm stock and BBG captures, v12 adds the borrowed
+human's pending city and the directives offered by the native occupation
+dialogue. Only recipients attached to offered liberation choices are public.
+The worker checks the city command archive against the acting seat and directive,
+then verifies that the pending choice cleared and that the corresponding city
+was kept, removed or transferred. The v5 checkpoint view comparison includes
+that seat's occupation catalogue.
+
+The v13 catalogue lists the native city-center and district ranged shots
+available to the borrowed human. The host verifies the acting seat, shooter
+type and destination in the command archive, then reads the resulting public
+state. The GameCore selects the defender. The v6 checkpoint view comparison
+includes both shot catalogues and records whether occupation was enabled.
+
+The v14 catalogue includes the secondary human's city purchase quotes. The
+native buy panel supplies ordinary plots in gold and units or buildings in
+gold or faith. The host rechecks the submitted quote before delivery. It
+validates the native command archive, exact currency debit and item or plot
+readback. The v7 checkpoint view comparison includes both quote tables.
+
+The v15 catalogue exposes the secondary human's government choices, policy
+slots and paid policy window. Policy assignments use the exact chosen hashes
+ordered by slot. The host checks the native request before delivery, then
+reads back the government, assigned slots, confirmation marker or unlock
+payment as applicable. The v8 checkpoint view comparison includes those
+choices.
+
+The v16 catalogue lists the secondary human's envoy choices and, on admitted
+Gathering Storm levy profiles, the native levy quotes and public unit timers.
+Envoy assignment checks the acting player and city-state in the command
+archive. Levy execution checks the same fields, the gold debit and actual unit
+transfer. The levy button uses its own native eligibility. The v9 checkpoint
+comparison restores pending envoy consideration from the authenticated
+player view when the native save omitted that bit.
+
+The v17 catalogue adds native current-tile improvements and terrain
+operations. It also exposes each owned unit's charges and the information
+displayed by the UnitPanel for its current tile. The host verifies the
+native operation archive and checks the resulting plot state. Choices and
+work state participate in the v10 checkpoint view comparison.
+
+On the pinned current Gathering Storm image, both the primary catalogue and
+the secondary v18 catalogue ask the native operation for adjacent improvement
+targets. The action binds
+the owned unit's source tile, visible destination and improvement type. The
+host checks the coordinates in the generated archive and verifies the change
+on the destination. The `unit_work` information group includes
+`info.visible_plots_with_work`, a sparse list of visible tiles with a route,
+improvement or pillage flag. The list includes the destination after the
+builder has spent its final charge. The v11 checkpoint view compares that
+list and the actor's offers. Primary checkpoints compare those fields when
+present at save time. When loading an older primary checkpoint, the comparison
+removes only the added work fields and choices. The current ABI and the
+composed software paths are verified. Native LAN execution remains to be
+demonstrated on a save containing an eligible action.
+
+On admitted Gathering Storm LAN profiles, the existing city panel options
+also expose `growth`, `city_loyalty`, `city_buildings` and `city_religion` for the authenticated
+secondary player. The worker reads each enabled panel while that player is
+the native observer and refreshes it after commands such as city purchases.
+Growth exposes the public display fields. The building inventory only reads
+visible owned plots. The religion panel requires `xp2_city_religion_details=True`
+and returns native majority, followers and display-rounded pressure for the
+seat's own cities. The checkpoint records enabled panel groups with the
+secondary decision digest and can still compare older views made before
+those groups were enabled. The secondary route has software coverage.
+
+On the admitted stock and BBG 7.5.1 Great People source profiles, enabling `xp2_great_people`
+also exposes the current timeline and the secondary seat's own points through
+`SessionClient.information('great_people')`. The optional
+`xp2_great_people_actions` includes the offered recruitment, rejection and gold
+or faith patronage choices for that seat. The worker rechecks the native quote,
+uses the existing GameCore operation and verifies the grant or rejection before
+it returns completion. During Congress the panel can be read-only. Checkpoints
+compare the scope and offers recorded for each admitted seat. The newly routed
+secondary path has software coverage.
+
+The existing `xp2_pantheon` option also exposes `information('pantheon')`
+and the available beliefs for the authenticated secondary seat on the admitted
+stock and BBG LAN captures. The worker checks the native player and observer
+before signing and again before submitting the direct pantheon request. It
+requires readback of the selected belief. If another player already chose it,
+the old choice is refused and the next reply shows the current offers.
+Checkpoints compare the recorded pantheon scope. The secondary path has
+software coverage.
+
+With `xp2_prophet_activation`, `xp2_religion_founding` and
+`xp2_religion_beliefs`, the admitted Gathering Storm stock and BBG LAN workers
+also expose the secondary seat's Great Prophet activation, predefined religion
+names and belief choices. Each step refreshes the acting player's offers and
+verifies the native effect. Only the acting seat's religion data is returned
+through these groups. Checkpoint readback compares each enabled group with the
+same seat and options. The secondary route has software coverage.
+
+With `xp2_religious_unit_operations`, the secondary seat also gets the original
+spread, evangelize, launch-inquisition and remove-heresy offers and its own
+units' charges. A changed offer is refused before submission. A processed
+request without a verified effect returns `submitted`. Checkpoint readback
+compares the recorded roster and offers for that seat.
+
+On the admitted XP2 LAN BBG 7.5.1 profile with `governors_diagnostic`,
+`SessionClient.observe(player_id)` includes the secondary seat's
+`decisions['governors']` and offers for appointment, promotion, assignment
+and title consideration while the seat can act. The worker rechecks the
+selected offer and, for player operations, validates the queued sender,
+operation and parameters before delivery. It returns completion after
+reading the effect for the acting seat. Checkpoint comparison preserves
+the recorded governor scope. This secondary path has software coverage
+against the retained primary-seat native archives. A two-human native
+replay remains pending.
+
+On the admitted BBG 7.5.1 profile with `espionage_diagnostic`, the secondary
+human's current spies and offered orders are available through
+`SessionClient.information('espionage')` and the ordinary action catalogue.
+The worker checks the fresh offer, native archive's acting seat and order
+readback. Unconfirmed orders return `submitted`. Checkpoint comparison
+records the secondary espionage scope. The secondary command and restore
+paths have software coverage.
+
+On the admitted Gathering Storm trade profiles, the secondary LAN seat can
+read its Trader destinations, outgoing routes and relocation choices through
+`SessionClient.information('trade')`. The API checks the current offer and the
+sender, unit and coordinates in the native command archive before delivery.
+A route must appear in the acting seat's outgoing routes. A relocation must
+move its Trader to the offered own city. Checkpoints compare the recorded
+secondary trade scope. The secondary path has software coverage against
+retained primary-seat native archives.
+
+With `unit_formations` on the admitted stock Gathering Storm profile, the
+secondary seat can read its formation roster and the native Join and Leave
+offers through `SessionClient.information('unit_formations')`. The worker
+checks both unit identities before submitting Join and reads the resulting
+formation before reporting completion. Internal formation IDs remain private.
+The secondary path and checkpoint comparison have software coverage.
+
+With `stock_dedications`, the secondary seat can read its age, available
+dedications, selections remaining and active dedications. It confirms the
+ordered indices through the same parameterized action as the primary seat.
+The worker checks every command's sender and index before delivering the
+batch and verifies the ordered active selections. Checkpoints compare the
+recorded dedication scope. The secondary path has software coverage.
+
+When BBG emits a spy completion for a captured human seat, its gameplay
+listener uses that seat's native mission and capacity even while the shared
+host is observing another human. The host checks the installed GameCore
+getters at startup for this multi-seat path and keeps the native
+player-operation filter. This routing has installed-image and Lua fixture
+coverage. The multi-human native witness remains pending.
+
+Each authenticated seat has its own current spy completion and pending
+stack. During its decision boundary, `information('spy_completion')` exposes
+the result attached to that seat's native event and its offered dismissal
+or renewal. Closing an event pops at most one result from the stack. Renewal checks
+the queued actor and unit, then reads the order effect. As with the primary
+seat, checkpoints require the pending UI occurrences to be settled first.
+The two-seat client routing and checkpoint comparison have software coverage.
+An already displayed result stays available while the player waits for
+their next turn. Renewal uses the official popup's legality check and reads
+only the selected unit's order when the ordinary espionage panel is unavailable.
 
 The LAN `SessionClient` keeps a separate catalogue per actor within a turn.
 When a native reply advances the turn, earlier actor views and catalogues expire.

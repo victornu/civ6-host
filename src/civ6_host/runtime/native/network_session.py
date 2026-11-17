@@ -6,6 +6,7 @@ connects the LAN actor protocol to those existing lifecycle hooks.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from contextlib import closing, contextmanager
 import copy
 import hashlib
@@ -20,8 +21,44 @@ from civ6_host.runtime.network_protocol import CLOSURE_SCHEMA, NetworkProtocol, 
 from civ6_host.runtime.network_protocol import validate_network_response
 from civ6_host.runtime.network_protocol import _player_id
 from civ6_host.runtime.native.native_action_session import NativeActionSession
+from civ6_host.runtime.player_views import SessionViewsMixin, validate_players
+from civ6_host.runtime.native.native_saved_session import (
+    DEFAULT_MEMORY_RESERVE_MIB, MIN_EXPANSION_MEMORY_RESERVE_MIB,
+)
 from civ6_host.contracts.action_budget import LAN_EVENT_LINE_BYTES
 from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+
+
+_SUPERVISOR_PROOF_BYTES = 8 * 1024**2
+
+
+class _SupervisorProofCache(OrderedDict):
+    """Evict parsed proofs by serialized size after the pinned reader uses them."""
+
+    def move_to_end(self, key, last=True):
+        if key[2][2] > _SUPERVISOR_PROOF_BYTES:
+            del self[key]
+        else:
+            super().move_to_end(key, last)
+            self.trim()
+
+    def trim(self):
+        retained = sum(identity[2] for _, _, identity in self)
+        while retained > _SUPERVISOR_PROOF_BYTES:
+            (_, _, identity), _ = self.popitem(last=False)
+            retained -= identity[2]
+
+
+def _configure_supervisor_proof_cache():
+    # The worker is spawned in another process. The pinned reader and its
+    # file authentication stay unchanged in either process.
+    from civ6_host.runtime.native import native_source_cache
+
+    with native_source_cache._LOCK:
+        if not isinstance(native_source_cache._CACHE, _SupervisorProofCache):
+            cache = _SupervisorProofCache(native_source_cache._CACHE)
+            cache.trim()
+            native_source_cache._CACHE = cache
 
 
 def xp1_loaded_close_evidence(run, report, pins, *, core_sha256=XP1_CORE_SHA256, official_bundle=None):
@@ -188,7 +225,7 @@ def xp1_loaded_close_evidence(run, report, pins, *, core_sha256=XP1_CORE_SHA256,
         full_job_ledger_requalified=False, cleanup_inferred_from_process_exit=False)
 
 
-class NativeNetworkSession(NativeActionSession):
+class NativeNetworkSession(SessionViewsMixin, NativeActionSession):
     event_line_limit_bytes = LAN_EVENT_LINE_BYTES
     input_profile = 'lan'
     worker_name = 'network_worker.py'
@@ -204,7 +241,20 @@ class NativeNetworkSession(NativeActionSession):
                  governors_diagnostic=False,
                  diplomacy_overview_diagnostic=False,
                  trade_diagnostic=False,
-                 standard_trade=False, unit_formations=False, stock_dedications=False,
+                 standard_trade=False, xp1_trade=False, xp1_trade_overview=False, xp1_government=False,
+                 xp1_plot_purchase=False, xp1_city_purchase=False, xp1_faith_purchase=False, xp1_city_buildings=False,
+                 xp1_promotions=False, xp1_unit_upgrades=False, xp1_unit_work=False,
+                 xp1_pantheon=False, xp1_religion_beliefs=False,
+                 xp1_religion_founding=False, xp1_religion_custom_names=False,
+                 xp1_prophet_activation=False, xp1_great_person_activation=False,
+                 xp1_religious_unit_operations=False, xp1_city_religion_details=False,
+                 xp2_religious_unit_operations=False,
+                 xp2_prophet_activation=False, xp2_religion_founding=False, xp2_religion_beliefs=False, xp2_pantheon=False,
+                 xp2_city_religion_details=False, xp2_city_buildings=False,
+                 xp2_great_people=False, xp2_great_people_actions=False, xp2_great_person_activation=False,
+                 xp1_great_people=False, xp1_great_people_actions=False, xp1_great_people_reject=False,
+                 unit_formations=False, stock_dedications=False,
+                 city_state_levies=False,
                  espionage_diagnostic=False,
                  world_congress_diagnostic=False,
                  world_congress_review_diagnostic=False,
@@ -215,11 +265,22 @@ class NativeNetworkSession(NativeActionSession):
                  unit_order_cancel_diagnostic=False, movement_ui_probe=None,
                  world_input_diagnostic=False, input_profile='lan',
                  prepared_capture=None, public_display_diagnostic=False,
-                 public_display_source=None, war_source_sha256=None,
+                 public_display_source=None, public_view_players=None, secondary_unit_commands=False,
+                 war_source_sha256=None,
                  execution_image_profile=None, checkpoint_compatibility=None,
-                 command_profile_diagnostic=False, **options):
+                 command_profile_diagnostic=False, reduced_memory_reserve=False, world_score=False, xp2_archaeology=False,
+                 xp2_archaeology_commands=False, xp2_air_operations=False, xp2_build_route=False,
+                 xp2_designate_park=False, xp2_rock_bands=False, xp2_extra_unit_orders=False, expansion_city_growth=False, expansion_city_loyalty=False,
+                 expansion_national_parks=False, **options):
         if type(input_profile) is not str or input_profile not in ('lan', 'xp1-lan', 'xp2-lan'):
             raise ValueError('Unknown captured network input profile')
+        if (type(reduced_memory_reserve) is not bool
+                or reduced_memory_reserve and input_profile != 'xp2-lan'):
+            raise ValueError('Reduced memory reserve requires an explicit Gathering Storm LAN session')
+        self.memory_reserve_mib = (MIN_EXPANSION_MEMORY_RESERVE_MIB if reduced_memory_reserve
+                                   else DEFAULT_MEMORY_RESERVE_MIB)
+        if input_profile in ('xp1-lan', 'xp2-lan'):
+            _configure_supervisor_proof_cache()
         self.execution_image = None
         if execution_image_profile is not None:
             if input_profile not in ('xp1-lan', 'xp2-lan') or type(execution_image_profile) is not str:
@@ -229,9 +290,14 @@ class NativeNetworkSession(NativeActionSession):
                 core_path=known_path(execution_image_profile))
             if (self.execution_image is _XP1_PROFILE) != (input_profile == 'xp1-lan'):
                 raise ValueError('Selected execution image differs from its expansion family')
-            if self.execution_image is _XP1_PROFILE and (
-                    city_focus_diagnostic is not False or city_management_diagnostic is not False):
-                raise ValueError('Installed XP1 session has no city-control admission yet')
+        if validate_players(public_view_players):
+            from civ6_host.runtime.execution_images import _PROFILE
+            if input_profile != 'xp2-lan' or self.execution_image is not _PROFILE:
+                raise ValueError('LAN public views require the installed Gathering Storm image')
+        if type(secondary_unit_commands) is not bool or (secondary_unit_commands
+                and not validate_players(public_view_players)):
+            raise ValueError('LAN secondary unit commands require explicitly selected public human views')
+        self.secondary_unit_commands = secondary_unit_commands
         if (type(command_profile_diagnostic) is not bool
                 or command_profile_diagnostic and (
                     input_profile != 'xp2-lan' or self.execution_image is None)):
@@ -246,6 +312,25 @@ class NativeNetworkSession(NativeActionSession):
                     or self.execution_image is None or checkpoint is None):
                 raise ValueError('Checkpoint compatibility requires an explicit image and checkpoint')
         self.checkpoint_compatibility = checkpoint_compatibility
+        if type(xp2_air_operations) is not bool or (xp2_air_operations and input_profile != 'xp2-lan'):
+            raise ValueError('Air operations require Gathering Storm LAN')
+        self.xp2_air_operations = xp2_air_operations
+        if type(xp2_build_route) is not bool or (xp2_build_route and input_profile != 'xp2-lan'):
+            raise ValueError('Build Route requires Gathering Storm LAN')
+        self.xp2_build_route = xp2_build_route
+        if type(xp2_designate_park) is not bool or (xp2_designate_park and input_profile != 'xp2-lan'):
+            raise ValueError('Park designation requires Gathering Storm LAN')
+        self.xp2_designate_park = xp2_designate_park
+        if type(xp2_rock_bands) is not bool or (xp2_rock_bands and input_profile != 'xp2-lan'):
+            raise ValueError('Rock bands require Gathering Storm LAN')
+        self.xp2_rock_bands = xp2_rock_bands
+        if type(xp2_extra_unit_orders) is not bool or (xp2_extra_unit_orders and input_profile != 'xp2-lan'):
+            raise ValueError('Additional unit orders require Gathering Storm LAN')
+        self.xp2_extra_unit_orders = xp2_extra_unit_orders
+        if xp2_air_operations and war_source_sha256 is None:
+            from civ6_host.runtime.xp2_world_war_display import verify_source
+
+            war_source_sha256 = verify_source()['source_sha256']
         from civ6_host.runtime.xp2_world_war import source_pin
         self.war_source_sha256 = source_pin(war_source_sha256, input_profile)
         if (type(public_display_diagnostic) is not bool
@@ -290,19 +375,48 @@ class NativeNetworkSession(NativeActionSession):
             raise ValueError('Governors require the explicit XP2 diagnostic')
         if (type(diplomacy_overview_diagnostic) is not bool
                 or diplomacy_overview_diagnostic and (
-                    input_profile != 'xp2-lan' or not governors_diagnostic
+                    input_profile != 'xp2-lan' or not (governors_diagnostic or standard_trade)
                     or self.execution_image is None or self.war_source_sha256 is None)):
-            raise ValueError('Initial diplomacy requires current XP2, its receiver and the complete v32 query group')
+            raise ValueError('Initial diplomacy requires current XP2 and a selected diplomacy scope')
         if type(trade_diagnostic) is not bool or trade_diagnostic and not diplomacy_overview_diagnostic:
             raise ValueError('Trade requires the complete current XP2 diplomacy query group')
         if (type(standard_trade) is not bool or standard_trade and (
                 input_profile != 'xp2-lan' or self.execution_image is None
                 or trade_diagnostic or governors_diagnostic or foundation_legality_diagnostic)):
             raise ValueError('Standard trade requires the current stock Gathering Storm session')
+        if diplomacy_overview_diagnostic and standard_trade:
+            from civ6_host.runtime.xp2_diplomacy_overview import require_stock_capture
+            require_stock_capture(official_bundle)
+        if type(xp1_trade) is not bool or xp1_trade and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall trade requires an explicit Rise and Fall LAN session')
+        if type(xp1_trade_overview) is not bool or xp1_trade_overview and not xp1_trade:
+            raise ValueError('Rise and Fall trade overview requires its exact trade session')
+        if type(xp1_government) is not bool or xp1_government and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall government requires its own LAN session')
+        if type(xp1_plot_purchase) is not bool or xp1_plot_purchase and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall plot purchase requires its own LAN session')
+        if type(xp1_city_purchase) is not bool or xp1_city_purchase and not xp1_plot_purchase:
+            raise ValueError('Rise and Fall city purchases require the stock gold purchase catalogue')
+        if type(xp1_faith_purchase) is not bool or xp1_faith_purchase and not xp1_city_purchase:
+            raise ValueError('Rise and Fall faith purchases require the stock city purchase catalogue')
+        if type(xp1_city_buildings) is not bool or xp1_city_buildings and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall city buildings require the stock LAN capture')
+        if type(xp1_promotions) is not bool or xp1_promotions and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall promotions require the stock LAN capture')
+        if type(xp1_unit_upgrades) is not bool or xp1_unit_upgrades and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall upgrades require the stock LAN capture')
+        if type(xp1_pantheon) is not bool or xp1_pantheon and input_profile != 'xp1-lan':
+            raise ValueError('Pantheon requires an explicit Rise and Fall LAN session')
         if type(unit_formations) is not bool or unit_formations and not standard_trade:
             raise ValueError('Unit formations require the exact stock Gathering Storm session')
         if type(stock_dedications) is not bool or stock_dedications and not unit_formations:
             raise ValueError('Dedications require the exact stock Gathering Storm v2 capability')
+        if type(city_state_levies) is not bool:
+            raise ValueError('Military levy capability must be an exact Boolean')
+        if city_state_levies:
+            from civ6_host.runtime.execution_images import _PROFILE
+            if input_profile != 'xp2-lan' or self.execution_image is not _PROFILE:
+                raise ValueError('Military levies require the installed Gathering Storm LAN image')
         if type(espionage_diagnostic) is not bool or espionage_diagnostic and not trade_diagnostic:
             raise ValueError('Espionage requires the complete current XP2 trade query group')
         if (type(world_congress_diagnostic) is not bool or world_congress_diagnostic and not (
@@ -345,7 +459,7 @@ class NativeNetworkSession(NativeActionSession):
             unit_order_cancel_diagnostic=False, movement_ui_probe=None,
             world_input_diagnostic=False, ui_profile=None,
             official_bundle=official_bundle, episode_budget=None,
-            _admitted_bundle=_admitted_bundle, **options)
+            _admitted_bundle=_admitted_bundle, public_view_players=public_view_players, **options)
         # These same explicit diagnostic switches are consumed by the LAN
         # worker and the inherited closure/proof pinning code. Force EndTurn,
         # critic and Hotseat UI admission remain unavailable. Checkpoints use
@@ -363,8 +477,108 @@ class NativeNetworkSession(NativeActionSession):
         self.diplomacy_overview_diagnostic = diplomacy_overview_diagnostic
         self.trade_diagnostic = trade_diagnostic
         self.standard_trade = standard_trade
+        self.xp1_trade = xp1_trade
+        self.xp1_trade_overview = xp1_trade_overview
+        self.xp1_government = xp1_government
+        self.xp1_plot_purchase = xp1_plot_purchase
+        self.xp1_city_purchase = xp1_city_purchase
+        self.xp1_faith_purchase = xp1_faith_purchase
+        self.xp1_city_buildings = xp1_city_buildings
+        if type(xp1_unit_work) is not bool or (xp1_unit_work and input_profile != 'xp1-lan'):
+            raise ValueError('Unit work opt-in requires the Rise and Fall LAN backend')
+        self.xp1_unit_work = xp1_unit_work
+        if type(world_score) is not bool or (world_score and input_profile not in ('xp1-lan', 'xp2-lan')):
+            raise ValueError('World score opt-in requires an expansion LAN session')
+        self.world_score = world_score
+        if type(xp2_archaeology) is not bool or (xp2_archaeology and input_profile != 'xp2-lan'):
+            raise ValueError('Archaeology opt-in requires Gathering Storm LAN')
+        self.xp2_archaeology = xp2_archaeology
+        if type(xp2_archaeology_commands) is not bool or (xp2_archaeology_commands and not xp2_archaeology):
+            raise ValueError('Artifact origin commands require the Gathering Storm archaeology reader')
+        self.xp2_archaeology_commands = xp2_archaeology_commands
+        if (type(expansion_city_growth) is not bool
+                or (expansion_city_growth and input_profile not in ('xp1-lan', 'xp2-lan'))):
+            raise ValueError('Expansion city growth requires explicit expansion LAN admission')
+        self.expansion_city_growth = expansion_city_growth
+        if (type(expansion_city_loyalty) is not bool
+                or (expansion_city_loyalty and input_profile not in ('xp1-lan', 'xp2-lan'))):
+            raise ValueError('Expansion city loyalty requires explicit expansion LAN admission')
+        self.expansion_city_loyalty = expansion_city_loyalty
+        if (type(expansion_national_parks) is not bool
+                or (expansion_national_parks and input_profile not in ('xp1-lan', 'xp2-lan'))):
+            raise ValueError('National parks require explicit expansion LAN admission')
+        self.expansion_national_parks = expansion_national_parks
+        self.xp1_promotions = xp1_promotions
+        self.xp1_unit_upgrades = xp1_unit_upgrades
+        self.xp1_pantheon = xp1_pantheon
+        if type(xp1_religion_beliefs) is not bool or xp1_religion_beliefs and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall belief choices require their own LAN session')
+        self.xp1_religion_beliefs = xp1_religion_beliefs
+        if type(xp1_religion_founding) is not bool or xp1_religion_founding and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall religion founding requires its own LAN session')
+        self.xp1_religion_founding = xp1_religion_founding
+        if (type(xp1_religion_custom_names) is not bool or xp1_religion_custom_names
+                and (xp1_religion_founding is not True or input_profile != 'xp1-lan')):
+            raise ValueError('Custom religion naming requires the Rise and Fall foundation group')
+        self.xp1_religion_custom_names = xp1_religion_custom_names
+        if type(xp1_prophet_activation) is not bool or xp1_prophet_activation and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall Prophet activation requires its own LAN session')
+        self.xp1_prophet_activation = xp1_prophet_activation
+        if type(xp1_great_person_activation) is not bool or xp1_great_person_activation and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall Great Person activation requires its own LAN session')
+        self.xp1_great_person_activation = xp1_great_person_activation
+        if type(xp1_religious_unit_operations) is not bool or xp1_religious_unit_operations and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall religious unit operations require their own LAN session')
+        self.xp1_religious_unit_operations = xp1_religious_unit_operations
+        if type(xp2_religious_unit_operations) is not bool or xp2_religious_unit_operations and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm religious unit operations require their own LAN session')
+        self.xp2_religious_unit_operations = xp2_religious_unit_operations
+        if type(xp2_prophet_activation) is not bool or xp2_prophet_activation and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm prophet activation requires its own LAN session')
+        self.xp2_prophet_activation = xp2_prophet_activation
+        if type(xp2_religion_founding) is not bool or xp2_religion_founding and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm religion founding requires its own LAN session')
+        self.xp2_religion_founding = xp2_religion_founding
+        if type(xp2_religion_beliefs) is not bool or xp2_religion_beliefs and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm belief choices requires its own LAN session')
+        self.xp2_religion_beliefs = xp2_religion_beliefs
+        if type(xp2_pantheon) is not bool or xp2_pantheon and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm pantheon requires its own LAN session')
+        self.xp2_pantheon = xp2_pantheon
+        if type(xp2_city_religion_details) is not bool or xp2_city_religion_details and input_profile != 'xp2-lan':
+            raise ValueError('City religion details require explicit Gathering Storm admission')
+        self.xp2_city_religion_details = xp2_city_religion_details
+        if (type(xp2_city_buildings) is not bool or xp2_city_buildings
+                and (input_profile != 'xp2-lan' or not (standard_trade or trade_diagnostic))):
+            raise ValueError('Gathering Storm city buildings require explicit LAN admission')
+        self.xp2_city_buildings = xp2_city_buildings
+        if type(xp2_great_people) is not bool or xp2_great_people and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm Great People require explicit LAN admission')
+        self.xp2_great_people = xp2_great_people
+        if type(xp2_great_people_actions) is not bool or xp2_great_people_actions and not xp2_great_people:
+            raise ValueError('Gathering Storm Great Person actions require their admitted reader')
+        self.xp2_great_people_actions = xp2_great_people_actions
+        if type(xp2_great_person_activation) is not bool or xp2_great_person_activation and input_profile != 'xp2-lan':
+            raise ValueError('Gathering Storm Great Person activation requires explicit LAN admission')
+        self.xp2_great_person_activation = xp2_great_person_activation
+        if type(xp1_city_religion_details) is not bool or xp1_city_religion_details and input_profile != 'xp1-lan':
+            raise ValueError('City religion details require explicit Rise and Fall admission')
+        self.xp1_city_religion_details = xp1_city_religion_details
+        if type(xp1_great_people) is not bool or xp1_great_people and input_profile != 'xp1-lan':
+            raise ValueError('Rise and Fall Great People require their own LAN session')
+        self.xp1_great_people = xp1_great_people
+        if (type(xp1_great_people_actions) is not bool or xp1_great_people_actions
+                and (input_profile != 'xp1-lan' or xp1_great_people is not True)):
+            raise ValueError('Rise and Fall Great Person commands require the Great People query group')
+        self.xp1_great_people_actions = xp1_great_people_actions
+        if (type(xp1_great_people_reject) is not bool or xp1_great_people_reject
+                and (xp1_great_people_actions is not True or xp1_great_people is not True
+                     or input_profile != 'xp1-lan')):
+            raise ValueError('Great Person rejection requires its Great People command and query groups')
+        self.xp1_great_people_reject = xp1_great_people_reject
         self.unit_formations = unit_formations
         self.stock_dedications = stock_dedications
+        self.xp2_city_state_levies_enabled = city_state_levies
         self.espionage_diagnostic = espionage_diagnostic
         self.world_congress_diagnostic = world_congress_diagnostic
         self.world_congress_review_diagnostic = world_congress_review_diagnostic
@@ -377,10 +591,172 @@ class NativeNetworkSession(NativeActionSession):
             candidate = for_family(input_profile, official_bundle=self.official_bundle).candidate
             if self.official_bundle != candidate.reference:
                 raise ValueError('Expansion session requires its exact retained official capture')
+            if self.world_score:
+                from civ6_host.runtime.world_score import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.xp2_archaeology:
+                from civ6_host.runtime.xp2_archaeology import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image, commands=self.xp2_archaeology_commands)
+            if self.xp2_air_operations:
+                from civ6_host.runtime.xp2_air_operations import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.xp2_build_route:
+                from civ6_host.runtime.xp2_build_route import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.xp2_designate_park:
+                from civ6_host.runtime.xp2_designate_park import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.xp2_rock_bands:
+                from civ6_host.runtime.xp2_rock_bands import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.xp2_extra_unit_orders:
+                from civ6_host.runtime.xp2_extra_unit_orders import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.expansion_city_growth:
+                from civ6_host.runtime.expansion_city_growth import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.expansion_city_loyalty:
+                from civ6_host.runtime.expansion_city_loyalty import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
+            if self.expansion_national_parks:
+                from civ6_host.runtime.expansion_national_parks import source_dependencies
+                source_dependencies(candidate.reference, self.execution_image)
             if standard_trade:
                 from civ6_host.runtime.xp2_bundle_inputs import REFERENCE
                 if candidate.reference != REFERENCE:
                     raise ValueError('Standard trade requires its exact stock capture')
+            if xp1_trade:
+                from civ6_host.runtime.xp1_trade_source import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall trade requires its exact stock capture and engine')
+            if xp1_government:
+                from civ6_host.runtime.xp1_government_policy_source import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall government requires its exact stock capture and engine')
+            if xp1_unit_upgrades:
+                from civ6_host.runtime.xp1_unit_upgrades import supports
+                if not supports(candidate.reference,self.execution_image):
+                    raise ValueError('Rise and Fall upgrades require their exact stock capture and engine')
+            if xp1_pantheon:
+                from civ6_host.runtime import xp1_pantheon_source
+                from civ6_host.runtime.execution_images import _XP1_PROFILE
+                if (candidate.reference != xp1_pantheon_source.REFERENCE
+                        or self.execution_image is not _XP1_PROFILE):
+                    raise ValueError('Pantheon requires the exact installed Rise and Fall capture')
+                xp1_pantheon_source.require_actions()
+            if xp1_religion_beliefs:
+                from civ6_host.runtime import xp1_religion_beliefs_source
+                from civ6_host.runtime.xp1_saved_load import REFERENCE
+                from civ6_host.runtime.execution_images import _XP1_PROFILE
+                if candidate.reference != REFERENCE or self.execution_image is not _XP1_PROFILE:
+                    raise ValueError('Belief choices require the exact installed Rise and Fall capture')
+                xp1_religion_beliefs_source.require_actions()
+            if xp1_religion_founding:
+                from civ6_host.runtime import xp1_religion_founding_source
+                from civ6_host.runtime.xp1_saved_load import REFERENCE
+                from civ6_host.runtime.execution_images import _XP1_PROFILE
+                if candidate.reference != REFERENCE or self.execution_image is not _XP1_PROFILE:
+                    raise ValueError('Religion founding requires the exact installed Rise and Fall capture')
+                xp1_religion_founding_source.require_actions()
+            if xp1_religion_custom_names:
+                from civ6_host.runtime import xp1_religion_custom_names as names
+                if not names.supports(candidate.reference, self.execution_image):
+                    raise ValueError('Custom religion naming requires the exact installed Rise and Fall capture')
+                names.require_actions()
+            if xp1_prophet_activation:
+                from civ6_host.runtime import xp1_prophet_activation_source
+                from civ6_host.runtime.xp1_saved_load import REFERENCE
+                from civ6_host.runtime.execution_images import _XP1_PROFILE
+                if candidate.reference != REFERENCE or self.execution_image is not _XP1_PROFILE:
+                    raise ValueError('Prophet activation requires the exact installed Rise and Fall capture')
+                xp1_prophet_activation_source.require_actions()
+            if xp1_great_person_activation:
+                from civ6_host.runtime import xp1_great_person_activation_source as activation
+                if not activation.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Great Person activation requires the exact installed Rise and Fall capture')
+                activation.require_actions()
+            if xp1_great_people:
+                from civ6_host.runtime.xp1_great_people import supports, verify_source
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Great People require the exact installed Rise and Fall capture')
+                verify_source()
+            if xp1_city_religion_details:
+                from civ6_host.runtime import xp1_city_religion
+                if (candidate.reference != xp1_city_religion.REFERENCE
+                        or self.execution_image is not xp1_city_religion._XP1_PROFILE):
+                    raise ValueError('City religion details require the exact installed Rise and Fall capture')
+                xp1_city_religion.verify_details_source()
+            if xp2_city_religion_details:
+                from civ6_host.runtime import xp1_city_religion
+                if not xp1_city_religion.supports(candidate.reference,self.execution_image):
+                    raise ValueError('City religion details require the exact admitted Gathering Storm capture and image')
+                xp1_city_religion.source_dependencies(self.execution_image,include_details=True,
+                                                     reference=candidate.reference)
+            if xp2_city_buildings:
+                from civ6_host.runtime import xp2_city_buildings as buildings
+                if not buildings.supports(candidate.reference, self.execution_image):
+                    raise ValueError('Gathering Storm city buildings require an admitted capture and image')
+            if xp2_great_people:
+                from civ6_host.runtime.xp2_great_people_source import require_actions, require_source
+                require_source(self.execution_image, reference=candidate.reference)
+                if xp2_great_people_actions:
+                    require_actions(self.execution_image, reference=candidate.reference)
+            if xp2_great_person_activation:
+                from civ6_host.runtime import xp2_great_person_activation_source as activation
+                activation.require_actions(self.execution_image, reference=candidate.reference)
+            if xp1_religious_unit_operations:
+                from civ6_host.runtime import xp1_religious_unit_operations as religious
+                if not religious.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Religious unit operations require the exact installed Rise and Fall capture')
+                religious.require_actions()
+            if xp2_religious_unit_operations:
+                from civ6_host.runtime import xp1_religious_unit_operations as religious
+                if not religious.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Religious unit operations require the exact admitted Gathering Storm capture and image')
+                religious.require_actions(self.execution_image)
+            if xp2_prophet_activation:
+                from civ6_host.runtime import xp1_prophet_activation_source as source
+                if not source.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Prophet activation requires the exact admitted Gathering Storm capture and image')
+                source.require_actions(self.execution_image)
+            if xp2_religion_founding:
+                from civ6_host.runtime import xp1_religion_founding_source as source
+                if not source.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Religion founding requires the exact admitted Gathering Storm capture and image')
+                source.require_actions(self.execution_image)
+            if xp2_religion_beliefs:
+                from civ6_host.runtime import xp1_religion_beliefs_source as source
+                if not source.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Belief choices requires the exact admitted Gathering Storm capture and image')
+                source.require_actions(self.execution_image)
+            if xp2_pantheon:
+                from civ6_host.runtime import xp1_pantheon_source as source
+                if not source.supports(candidate.reference,self.execution_image):
+                    raise ValueError('Pantheon requires the exact admitted Gathering Storm capture and image')
+                source.require_actions(self.execution_image)
+            if xp1_great_people_actions:
+                from civ6_host.runtime import xp1_great_people_commands as commands
+                if not commands.supports(candidate.reference, self.execution_image):
+                    raise ValueError('Great Person commands require the exact installed Rise and Fall capture')
+                commands.require_actions()
+                if xp1_great_people_reject:
+                    commands.verify_reject_source()
+            if xp1_promotions:
+                from civ6_host.runtime.xp1_promotions import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall promotions require their exact stock capture and engine')
+            if xp1_city_buildings:
+                from civ6_host.runtime.xp1_city_buildings import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall city buildings require their exact stock capture and engine')
+            if xp1_unit_work:
+                from civ6_host.runtime.xp1_unit_work_profile import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall unit work requires its exact stock capture and engine')
+            if xp1_plot_purchase:
+                from civ6_host.runtime.xp1_plot_purchases import supports
+                if not supports(candidate.reference, self.execution_image):
+                    raise ValueError('Rise and Fall plot purchase requires its exact stock capture and engine')
             from civ6_host.runtime import xp2_bbg_inputs as bbg
             if privileged_critic_diagnostic and candidate.reference != bbg.REFERENCE:
                 raise ValueError('The LAN critic diagnostic requires the exact BBG XP2 capture')
@@ -425,7 +801,8 @@ class NativeNetworkSession(NativeActionSession):
                 run_directory=str(failed_run) if failed_run is not None else None,
                 previous_supervised_run=None if previous['run'] is missing else str(previous['run']),
                 native_process_started=False, supervisor_report_created=False,
-                reset_timings_seconds=copy.deepcopy(self.reset_timings_seconds))
+                reset_timings_seconds=copy.deepcopy(self.reset_timings_seconds),
+                reset_resource_samples=copy.deepcopy(self.reset_resource_samples))
             try:
                 if failed_run is not None:
                     from civ6_host.runtime.xp1_session_inputs import _write_once
@@ -587,6 +964,23 @@ class NativeNetworkSession(NativeActionSession):
             # A terminal reply can have no board and still change perspective.
             self._last_actor_id = response['outcome']['native_victory']['player_id']
 
+    @property
+    def controllable_player_ids(self):
+        """Return the local seat and opted-in living secondary unit-command seats."""
+        self._owner()
+        if self.finished or self.protocol is None or self.protocol.session is None:
+            return ()
+        local = self.protocol.session['local_player_id']
+        manifest = getattr(self, '_view_manifest', None)
+        if (not getattr(self, 'secondary_unit_commands', False) or manifest is None
+                or manifest['sequence'] != self.protocol.sequence
+                or manifest['episode_id'] != self.protocol.identity.episode_id
+                or manifest['game_generation'] != self.protocol.identity.game_generation):
+            return (local,)
+        humans = self.protocol.session['human_player_ids']
+        return (local, *(row['player_id'] for row in manifest['files']
+                         if row['player_id'] != local and row['player_id'] in humans and row['file'] is not None))
+
     def _cancel_offer_admitted(self):
         if self.unit_order_cancel_diagnostic:
             return True
@@ -659,6 +1053,93 @@ class NativeNetworkSession(NativeActionSession):
                 for path,expected in city_dependencies(selected.candidate.core_sha256,
                         official_bundle=self.official_bundle,**execution_options).items():
                     saved_load_pin(closure['pins'],path,expected)
+            if getattr(self, 'world_score', False):
+                from civ6_host.runtime import world_score
+                closure['world_score'] = True
+                saved_load_pin(closure['pins'], Path(world_score.__file__))
+                for path, expected in world_score.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_build_route', False):
+                from civ6_host.contracts import unit_work
+                from civ6_host.runtime import xp2_build_route
+
+                closure['xp2_build_route'] = True
+                for module in (unit_work, xp2_build_route):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in xp2_build_route.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_designate_park', False):
+                from civ6_host.contracts import national_parks
+                from civ6_host.runtime import xp2_designate_park
+
+                closure['xp2_designate_park'] = True
+                for module in (national_parks, xp2_designate_park):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in xp2_designate_park.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_extra_unit_orders', False):
+                from civ6_host.runtime import xp2_extra_unit_orders
+
+                closure['xp2_extra_unit_orders'] = True
+                saved_load_pin(closure['pins'], Path(xp2_extra_unit_orders.__file__))
+                for path, expected in xp2_extra_unit_orders.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_rock_bands', False):
+                from civ6_host.contracts import rock_bands
+                from civ6_host.runtime import xp2_rock_bands, xp2_rock_concert_source
+
+                closure['xp2_rock_bands'] = True
+                for module in (rock_bands, xp2_rock_bands, xp2_rock_concert_source):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in xp2_rock_bands.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_air_operations', False):
+                from civ6_host.contracts import air_operations
+                from civ6_host.runtime import xp2_air_operations
+
+                closure['xp2_air_operations'] = True
+                for module in (air_operations, xp2_air_operations):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in xp2_air_operations.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'xp2_archaeology', False):
+                from civ6_host.contracts import archaeology
+                from civ6_host.runtime import xp2_archaeology
+
+                closure['xp2_archaeology'] = True
+                commands = getattr(self, 'xp2_archaeology_commands', False)
+                if commands:
+                    from civ6_host.runtime import xp2_archaeology_excavation
+                    from civ6_host.runtime.native import native_player_operation_request
+
+                    closure['xp2_archaeology_commands'] = True
+                    saved_load_pin(closure['pins'], Path(native_player_operation_request.__file__))
+                    saved_load_pin(closure['pins'], Path(xp2_archaeology_excavation.__file__))
+                for module in (archaeology, xp2_archaeology):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in xp2_archaeology.source_dependencies(
+                        self.official_bundle, image, commands=commands).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'expansion_city_growth', False):
+                from civ6_host.runtime import city_growth, expansion_city_growth
+                closure['expansion_city_growth'] = True
+                for module in (city_growth, expansion_city_growth):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in expansion_city_growth.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'expansion_city_loyalty', False):
+                from civ6_host.runtime import city_growth, expansion_city_growth, expansion_city_loyalty
+                closure['expansion_city_loyalty'] = True
+                for module in (city_growth, expansion_city_growth, expansion_city_loyalty):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                for path, expected in expansion_city_loyalty.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
+            if getattr(self, 'expansion_national_parks', False):
+                from civ6_host.runtime import expansion_national_parks
+                closure['expansion_national_parks'] = True
+                saved_load_pin(closure['pins'], Path(expansion_national_parks.__file__))
+                for path, expected in expansion_national_parks.source_dependencies(self.official_bundle, image).items():
+                    saved_load_pin(closure['pins'], path, expected)
             if self.input_profile=='xp2-lan':
                 from civ6_host.runtime.source_build_identity import CURRENT_STRINGS_BUILD_PROFILE
                 if image is not None and image.native_host_build.profile_id == CURRENT_STRINGS_BUILD_PROFILE:
@@ -680,7 +1161,8 @@ class NativeNetworkSession(NativeActionSession):
                 if getattr(self, 'diplomacy_overview_diagnostic', False):
                     from civ6_host.runtime.xp2_diplomacy_overview import source_dependencies
                     closure['diplomacy_overview_diagnostic'] = True
-                    for path, digest in source_dependencies(execution_image=self.execution_image).items():
+                    for path, digest in source_dependencies(execution_image=self.execution_image,
+                            stock=self.standard_trade).items():
                         saved_load_pin(closure['pins'], path, digest)
                 if getattr(self, 'trade_diagnostic', False):
                     from civ6_host.runtime import xp2_bbg_trade_feedback, xp2_trade
@@ -706,6 +1188,11 @@ class NativeNetworkSession(NativeActionSession):
                     dependencies = xp2_dedications.source_dependencies(
                         selected.candidate.reference, execution_image=image)
                     for path, digest in dependencies.items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if getattr(self, 'xp2_city_state_levies_enabled', False):
+                    from civ6_host.runtime.xp2_city_state_levies import source_dependencies
+                    closure['city_state_levies'] = True
+                    for path, digest in source_dependencies(image).items():
                         saved_load_pin(closure['pins'], path, digest)
                 if getattr(self, 'espionage_diagnostic', False):
                     from civ6_host.runtime import xp2_espionage
@@ -742,6 +1229,86 @@ class NativeNetworkSession(NativeActionSession):
                         for path, digest in xp2_captured_city.source_dependencies(
                                 execution_image=image, stock=stock).items():
                             saved_load_pin(closure['pins'], path, digest)
+                if self.xp2_religious_unit_operations:
+                    from civ6_host.runtime import xp1_religious_unit_operations, xp2_lan_religion
+                    from civ6_host.runtime.xp1_religious_unit_operations import source_dependencies, require_actions
+                    require_actions(image)
+                    closure['xp2_religious_unit_operations'] = True
+                    for module in (xp1_religious_unit_operations, xp2_lan_religion):
+                        saved_load_pin(closure['pins'], Path(module.__file__))
+                    for path,digest in source_dependencies(image,reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],path,digest)
+                if self.xp2_prophet_activation or self.xp2_religion_founding or self.xp2_religion_beliefs:
+                    from civ6_host.runtime import xp2_direct_religion_source, xp2_lan_religion
+                    from civ6_host.runtime.native import native_religion_diagnostic, native_saved_religion
+
+                    for module in (xp2_direct_religion_source, xp2_lan_religion,
+                                   native_religion_diagnostic, native_saved_religion):
+                        saved_load_pin(closure['pins'], Path(module.__file__))
+                if self.xp2_prophet_activation:
+                    from civ6_host.runtime.xp1_prophet_activation_source import source_dependencies, require_actions
+                    require_actions(image)
+                    closure['xp2_prophet_activation'] = True
+                    for path,digest in source_dependencies(image,reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],path,digest)
+                if self.xp2_religion_founding:
+                    from civ6_host.runtime.xp1_religion_founding_source import source_dependencies, require_actions
+                    require_actions(image)
+                    closure['xp2_religion_founding'] = True
+                    for path,digest in source_dependencies(image,reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],path,digest)
+                if self.xp2_religion_beliefs:
+                    from civ6_host.runtime.xp1_religion_beliefs_source import source_dependencies, require_actions
+                    require_actions(image)
+                    closure['xp2_religion_beliefs'] = True
+                    for path,digest in source_dependencies(image,reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],path,digest)
+                if self.xp2_pantheon:
+                    from civ6_host.runtime import xp1_pantheon, xp2_direct_religion_source
+                    from civ6_host.runtime.xp1_pantheon_source import source_dependencies, require_actions
+                    from civ6_host.runtime.native import native_saved_pantheon
+
+                    require_actions(image)
+                    closure['xp2_pantheon'] = True
+                    for module in (xp1_pantheon, xp2_direct_religion_source, native_saved_pantheon):
+                        saved_load_pin(closure['pins'], Path(module.__file__))
+                    for path,digest in source_dependencies(image,reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],path,digest)
+                if self.xp2_city_religion_details:
+                    from civ6_host.runtime import xp1_city_religion
+                    closure['xp2_city_religion_details'] = True
+                    saved_load_pin(closure['pins'], Path(xp1_city_religion.__file__))
+                    for dependency_path,digest in xp1_city_religion.source_dependencies(image,include_details=True,
+                            reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'],dependency_path,digest)
+                if self.xp2_city_buildings:
+                    from civ6_host.runtime import xp2_city_buildings
+                    closure['xp2_city_buildings'] = True
+                    saved_load_pin(closure['pins'], Path(xp2_city_buildings.__file__))
+                    for dependency_path, digest in xp2_city_buildings.source_dependencies(
+                            image, reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'], dependency_path, digest)
+                if self.xp2_great_people:
+                    from civ6_host.runtime import xp1_great_people, xp2_great_people_source, xp2_lan_great_people
+                    closure['xp2_great_people'] = True
+                    for module in (xp1_great_people, xp2_great_people_source, xp2_lan_great_people):
+                        saved_load_pin(closure['pins'], Path(module.__file__))
+                    if self.xp2_great_people_actions:
+                        from civ6_host.runtime import xp1_great_people_commands
+
+                        closure['xp2_great_people_actions'] = True
+                        saved_load_pin(closure['pins'], Path(xp1_great_people_commands.__file__))
+                    for path, digest in xp2_great_people_source.source_dependencies(
+                            image, reference=selected.candidate.reference, include_actions=self.xp2_great_people_actions).items():
+                        saved_load_pin(closure['pins'], path, digest)
+                if self.xp2_great_person_activation:
+                    from civ6_host.runtime import xp1_great_person_activation, xp2_great_person_activation_source
+                    closure['xp2_great_person_activation'] = True
+                    for module in (xp1_great_person_activation, xp2_great_person_activation_source):
+                        saved_load_pin(closure['pins'], Path(module.__file__))
+                    for path, digest in xp2_great_person_activation_source.source_dependencies(
+                            image, reference=selected.candidate.reference).items():
+                        saved_load_pin(closure['pins'], path, digest)
                 if self.public_display_diagnostic:
                     from civ6_host.runtime.player_display_toppanel import pin_display_closure
                     pin_display_closure(closure,self.public_display_source)
@@ -751,11 +1318,23 @@ class NativeNetworkSession(NativeActionSession):
                 self._xp1_unit_order_source_admission=dict(official_bundle=self.official_bundle,
                     source_sha256=(SOURCE[1],TRANSPORT_SOURCE[1],UI_SOURCE[1]))
                 if self.checkpoint_on_close or self.network_checkpoint_ref is not None:
+                    from civ6_host.runtime.configuration_profiles import codec_source
                     from civ6_host.runtime.xp1_checkpoint_profile import source_dependencies
                     from civ6_host.runtime.network_checkpoint import configure_closure
-                    for path,expected in source_dependencies(core_sha256=selected.candidate.core_sha256,
-                                                            **execution_options).items():
+                    from civ6_host.runtime.paths import resource_root
+                    if self.checkpoint_on_close:
+                        codec_source(selected.candidate.core_sha256)
+                    checkpoint_sources = source_dependencies(
+                        core_sha256=selected.candidate.core_sha256, **execution_options)
+                    for path, expected in checkpoint_sources.items():
                         saved_load_pin(closure['pins'],path,expected)
+                    if self.checkpoint_on_close:
+                        # Save rehashes these exact files without rebuilding the proof graph.
+                        root = resource_root()
+                        closure['xp2_checkpoint_sources'] = {
+                            path: digest for path, digest in checkpoint_sources.items()
+                            if Path(path).is_relative_to(root)
+                        }
                     configure_closure(closure, self.network_checkpoint_ref, validate_fields=True,
                                       **execution_options)
                 return
@@ -766,13 +1345,160 @@ class NativeNetworkSession(NativeActionSession):
             self._xp1_unit_order_source_admission = dict(
                 official_bundle=self.official_bundle,
                 source_sha256=(SOURCE[1], TRANSPORT_SOURCE[1], UI_SOURCE[1]))
+            if getattr(self, 'xp1_trade', False):
+                from civ6_host.runtime.xp1_trade_source import source_dependencies
+                closure['xp1_trade'] = True
+                for path, digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if getattr(self, 'xp1_trade_overview', False):
+                from civ6_host.runtime.xp2_trade_overview import stock_source_dependencies
+                closure['xp1_trade_overview'] = True
+                for path, digest in stock_source_dependencies(self.official_bundle,
+                        core_sha256=selected.candidate.core_sha256, execution_image=image).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if getattr(self, 'xp1_government', False):
+                from civ6_host.runtime.xp1_government_policy_source import source_dependencies
+                closure['xp1_government'] = True
+                for path, digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if getattr(self, 'xp1_plot_purchase', False):
+                from civ6_host.runtime.xp1_plot_purchases import source_dependencies
+                closure['xp1_plot_purchase'] = True
+                for path, digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if self.xp1_city_purchase:
+                from civ6_host.runtime.xp1_city_purchases import source_dependencies
+                closure['xp1_city_purchase'] = True
+                if self.xp1_faith_purchase:
+                    closure['xp1_faith_purchase'] = True
+                for path, digest in source_dependencies(image, allow_faith=self.xp1_faith_purchase).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if self.xp1_city_buildings:
+                from civ6_host.runtime.xp1_city_buildings import source_dependencies
+                closure['xp1_city_buildings'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if getattr(self, 'xp1_unit_work', False):
+                from civ6_host.runtime import xp1_unit_work_profile
+                closure['xp1_unit_work'] = True
+                saved_load_pin(closure['pins'], Path(xp1_unit_work_profile.__file__))
+                for path, digest in xp1_unit_work_profile.source_dependencies(image).items():
+                    saved_load_pin(closure['pins'], path, digest)
+            if self.xp1_promotions:
+                from civ6_host.runtime.xp1_promotions import source_dependencies
+                closure['xp1_promotions'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_unit_upgrades:
+                from civ6_host.runtime.xp1_unit_upgrades import source_dependencies
+                closure['xp1_unit_upgrades'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_pantheon:
+                from civ6_host.runtime.xp1_pantheon_source import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_pantheon'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_religion_beliefs:
+                from civ6_host.runtime.xp1_religion_beliefs_source import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_religion_beliefs'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_religion_founding:
+                from civ6_host.runtime.xp1_religion_founding_source import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_religion_founding'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_religion_custom_names:
+                from civ6_host.runtime.xp1_religion_custom_names import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_religion_custom_names'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_prophet_activation:
+                from civ6_host.runtime.xp1_prophet_activation_source import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_prophet_activation'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
             from civ6_host.runtime.network_checkpoint import configure_closure
+            if self.xp1_great_person_activation:
+                from civ6_host.runtime.xp1_great_person_activation_source import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_great_person_activation'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_great_people:
+                from civ6_host.runtime.xp1_great_people import source_dependencies
+                closure['xp1_great_people'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_city_religion_details:
+                from civ6_host.runtime.xp1_city_religion import source_dependencies
+                closure['xp1_city_religion_details'] = True
+                for path,digest in source_dependencies(image,include_details=True).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_religious_unit_operations:
+                from civ6_host.runtime.xp1_religious_unit_operations import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_religious_unit_operations'] = True
+                for path,digest in source_dependencies(image).items():
+                    saved_load_pin(closure['pins'],path,digest)
+            if self.xp1_great_people_actions:
+                from civ6_host.runtime.xp1_great_people_commands import source_dependencies, require_actions
+                require_actions()
+                closure['xp1_great_people_actions'] = True
+                if self.xp1_great_people_reject:
+                    closure['xp1_great_people_reject'] = True
+                for path,digest in source_dependencies(image,include_reject=self.xp1_great_people_reject).items():
+                    saved_load_pin(closure['pins'],path,digest)
             if self.checkpoint_on_close or self.network_checkpoint_ref is not None:
                 from civ6_host.runtime.xp1_checkpoint_profile import source_dependencies
                 for path, expected in source_dependencies(**execution_options).items():
                     saved_load_pin(closure['pins'], path, expected)
             configure_closure(closure, self.network_checkpoint_ref, validate_fields=True,
                               **execution_options)
+            self._configure_public_views(closure)
+            if getattr(self, 'secondary_unit_commands', False):
+                from civ6_host.contracts import capability_policies, captured_city, city_ranged
+                from civ6_host.contracts import city_state_levies, envoys
+                from civ6_host.contracts import government, network_turn, plot_purchases, policies, policy_unlock
+                from civ6_host.contracts import unit_work as work_contract
+                from civ6_host.contracts import unit_work_info as work_info_contract
+                from civ6_host.contracts import unit_work_state as work_state_contract
+                from civ6_host.runtime import captured_city_session, explicit_production_operation, xp1_choice_queries
+                from civ6_host.runtime import xp1_action_transport, xp1_production_queue
+                from civ6_host.runtime import xp2_lan_city_controls, xp2_lan_production, xp2_lan_production_queue
+                from civ6_host.runtime import xp2_lan_research, xp2_lan_unit_commands, xp2_lan_world_input
+                from civ6_host.runtime import xp2_lan_ranged_shots, xp2_plot_purchases
+                from civ6_host.runtime import xp2_government, xp2_lan_government, xp2_policies, xp2_policy_unlock
+                from civ6_host.runtime import xp1_city_state_levies, xp2_city_state_levies, xp2_envoys, xp2_lan_city_states
+                from civ6_host.runtime import unit_work_info, unit_work_state, xp2_lan_unit_work
+                from civ6_host.runtime import xp2_lan_unit_attacks
+                from civ6_host.runtime import xp2_lan_unit_development, xp2_promotions, xp2_unit_upgrades
+                from civ6_host.runtime.native import native_saved_captured_city, native_saved_combat
+                from civ6_host.runtime.native import native_saved_city_shot, native_saved_district_shot
+                from civ6_host.runtime.native import native_plot_purchases, native_saved_purchases
+                from civ6_host.runtime.native import native_policy_actions
+                from civ6_host.runtime.native import native_saved_unit_work
+                for module in (xp2_lan_unit_commands, xp2_lan_research, xp2_lan_production,
+                               explicit_production_operation, xp1_choice_queries, network_turn,
+                               xp1_action_transport, xp1_production_queue, xp2_lan_production_queue,
+                               xp2_lan_city_controls, xp2_lan_world_input, xp2_lan_unit_development,
+                               xp2_promotions, xp2_unit_upgrades, xp2_lan_unit_attacks, native_saved_combat,
+                               captured_city, captured_city_session, native_saved_captured_city,
+                               city_ranged, xp2_lan_ranged_shots, native_saved_city_shot, native_saved_district_shot,
+                               plot_purchases, xp2_plot_purchases, native_plot_purchases, native_saved_purchases,
+                               xp2_lan_government, xp2_government, xp2_policies, xp2_policy_unlock, native_policy_actions,
+                               capability_policies, government, policies, policy_unlock,
+                               city_state_levies, envoys, xp1_city_state_levies, xp2_city_state_levies,
+                               xp2_envoys, xp2_lan_city_states, work_contract, unit_work_info, unit_work_state,
+                               work_info_contract, work_state_contract, xp2_lan_unit_work, native_saved_unit_work):
+                    saved_load_pin(closure['pins'], Path(module.__file__))
+                closure['secondary_unit_commands'] = True
             return
         super()._configure_closure(closure)
         from civ6_host.runtime.network_ui import city_source_files, map_source_files
@@ -813,6 +1539,9 @@ class NativeNetworkSession(NativeActionSession):
             raise RuntimeError('Reset before issuing a LAN command')
         if operation == 'act':
             raise ValueError('Use act(player_id, candidate_id) for actor-specific choices')
+        if (player_id is None and operation in ('poll', 'close')
+                and getattr(self, 'secondary_unit_commands', False)):
+            player_id = self.protocol.session['local_player_id']
         if player_id is None:
             player_id = self._last_actor_id
         if player_id is None:

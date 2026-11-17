@@ -18,7 +18,8 @@ import threading
 from typing import Protocol
 from uuid import UUID
 
-from .contracts import plot_display990, policies, production_info988, research_info983, yield_display982
+from .contracts import capability_unit_attacks, captured_city, plot_display990, policies
+from .contracts import production_info988, research_info983, yield_display982
 from .player_view import validate_player_view
 
 SCHEMA = "civ6rl.hotseat_action_session923.v1"
@@ -49,14 +50,54 @@ def _digest(value):
                                      ensure_ascii=True).encode("utf-8")).hexdigest()
 
 
+def _hotseat_decisions(decisions, observation, *, ended):
+    updates = {}
+    offered = [row["action"] for row in decisions["candidates"]
+               if row["action"].get("kind") == captured_city.KIND]
+    pending = decisions.get("captured_city")
+    if pending is None and offered:
+        raise ProtocolError("Occupation choices lack a captured-city catalogue")
+    try:
+        if pending is not None:
+            public = captured_city.project_public(pending, observation=observation)
+            if offered != ([] if ended else captured_city.public_actions(public)):
+                raise ValueError("Occupation choices differ from the captured-city catalogue")
+            if public != pending:
+                updates["captured_city"] = public
+        if decisions.get("schema") in capability_unit_attacks.HOTSEAT_COMBAT_SCHEMAS:
+            cities = capability_unit_attacks.project_hotseat(decisions, observation)["cities"]
+            prior = decisions["combat_cities"]
+            if cities != prior or any(type(raw[key]) is not type(public[key])
+                    for raw, public in zip(prior, cities, strict=True) for key in public):
+                updates["combat_cities"] = cities
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProtocolError(str(exc)) from exc
+    if not updates:
+        return None
+    projected = dict(decisions, **updates)
+    del projected["decision_id"]
+    projected["decision_id"] = _digest(projected)
+    return projected
+
+
 def _public_contracts(decisions, observation, ended):
+    from .contracts import network_turn
+
+    schema = network_turn.xp2_great_person_base_schema(decisions.get('schema'))
+    if schema != decisions.get('schema'):
+        decisions = dict(decisions, schema=schema)
     pid, turn = observation["player_id"], observation["turn"]
     if "yield_display" in decisions:
         yield_display982.validate(decisions["yield_display"], pid, turn, observation)
     if "production_info" in decisions:
         from .contracts.production_inputs import validate as validate_production
-        validate_production(decisions["production_info"], pid, turn,
-            candidates=decisions["candidates"], observation=observation, ended=ended)
+        unavailable = (decisions.get('schema') in network_turn.XP1_PRODUCTION_INFO_SCHEMAS
+                       and decisions['production_info'] is None)
+        # The capability validator requires the matching unavailable queue and
+        # current-production fields before this common public-contract pass.
+        if not unavailable:
+            validate_production(decisions["production_info"], pid, turn,
+                candidates=decisions["candidates"], observation=observation, ended=ended)
     if decisions.get('production',{}).get('schema')=='civ6-host.current-production.v1':
         from .contracts.production_inputs import validate_current
         validate_current(decisions['production'],pid,turn,observation=observation,
@@ -74,7 +115,7 @@ def _public_contracts(decisions, observation, ended):
     if ('espionage' in decisions
             or any(row['action'].get('kind') in ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')
                    for row in decisions['candidates'])):
-        from .contracts import espionage, network_turn
+        from .contracts import espionage
         if decisions.get('schema') not in network_turn.ESPIONAGE_CAPABILITY_SCHEMAS:
             raise ValueError('Espionage requires its explicit capability revision')
         catalogue = decisions.get('espionage')
@@ -87,7 +128,7 @@ def _public_contracts(decisions, observation, ended):
     if ('spy_completion' in decisions
             or any(row['action'].get('kind') in ('spy_renew', 'spy_completion_dismiss')
                    for row in decisions['candidates'])):
-        from .contracts import spy_completion, network_turn
+        from .contracts import spy_completion
         if decisions.get('schema') not in network_turn.SPY_COMPLETION_CAPABILITY_SCHEMAS:
             raise ValueError('Spy completion requires its explicit capability revision')
         catalogue = decisions.get('spy_completion')
@@ -101,7 +142,7 @@ def _public_contracts(decisions, observation, ended):
     if ('world_congress' in decisions
             or any((type(row['action'].get('kind')) is str and row['action'].get('kind').startswith('congress_'))
                    for row in decisions['candidates'])):
-        from .contracts import world_congress, network_turn
+        from .contracts import world_congress
         if decisions.get('schema') not in network_turn.WORLD_CONGRESS_CAPABILITY_SCHEMAS:
             raise ValueError('Congress requires its explicit capability revision')
         catalogue = decisions.get('world_congress')
@@ -126,6 +167,7 @@ class HotseatClient:
     def __init__(self, backend: SessionBackend):
         self._backend = backend
         self._reply = None
+        self._player_decisions = None
         self._closed = True
         self._owner = threading.get_ident()
 
@@ -162,6 +204,7 @@ class HotseatClient:
                 or result["terminated"] and result["truncated"]):
             raise ProtocolError("Invalid terminal/truncation outcome")
         observation, decisions = response["observation"], response["decisions"]
+        player_decisions = None
         if observation is None or decisions is None:
             if result["terminated"] is not True:
                 raise ProtocolError("Non-terminal reply lost its player state")
@@ -188,7 +231,9 @@ class HotseatClient:
                 ids.append(row["candidate_id"])
             if len(set(ids)) != len(ids) or ((result["terminated"] or result["truncated"]) and candidates):
                 raise ProtocolError("Duplicate or closed native choices")
-            _public_contracts(decisions, observation, result["terminated"] or result["truncated"])
+            ended = result["terminated"] or result["truncated"]
+            _public_contracts(decisions, observation, ended)
+            player_decisions = _hotseat_decisions(decisions, observation, ended=ended)
         if operation != "act" and response["applied_action"] is not None:
             raise ProtocolError("Host applied an unsolicited action")
         if operation == "act":
@@ -210,6 +255,7 @@ class HotseatClient:
             elif _digest(applied) != _digest(chosen):
                 raise ProtocolError("Applied action differs from caller choice")
         self._reply = copy.deepcopy(response)
+        self._player_decisions = copy.deepcopy(player_decisions)
         self._closed = operation == "close"
         return self.view()
 
@@ -235,7 +281,7 @@ class HotseatClient:
         # host callback information as actor inputs.
         return copy.deepcopy(dict(episode_id=r["episode_id"], game_generation=r["game_generation"],
             sequence=r["sequence"], turn_mode=self.turn_mode, observation=r["observation"],
-            decisions=r["decisions"], applied_action=r["applied_action"],
+            decisions=self._player_decisions or r["decisions"], applied_action=r["applied_action"],
             outcome={k:result[k] for k in ("terminated", "truncated", "reason")}))
 
     def _send(self, operation, selection=None):
@@ -258,25 +304,28 @@ class HotseatClient:
         return self._send("observe")
 
     def information(self, group, *, player_id=None, channel='public'):
-        """Read trade information for the current actor from the accepted reply."""
+        """Read public information for the current actor from the accepted reply."""
         self._check_owner()
         from .contracts.information import envelope, project, required_fields
-        if group != 'trade' or channel != 'public':
-            raise ValueError('Hotseat supports the public trade information group')
+        if group not in ('trade', 'captured_city', 'combat') or channel != 'public':
+            raise ValueError('Unsupported hotseat information group or channel')
         if player_id is not None and (type(player_id) is not int or not 0 <= player_id < 64):
             raise ValueError('player_id must be an integer in [0, 63]')
         response = self._reply
         if (response is None or self._closed
                 or any(response['outcome'][key] for key in ('terminated', 'truncated'))):
             raise InformationUnavailable('Reset and observe an active hotseat session first')
-        observation, decisions = response['observation'], response['decisions']
+        observation = response['observation']
+        decisions = self._player_decisions or response['decisions']
         if player_id is not None and player_id != observation['player_id']:
-            raise InformationUnavailable('Trade information requires this player to be the current actor')
-        if any(decisions.get(field) is None for field in required_fields(group)):
-            raise InformationUnavailable('Trade information is unavailable at this hotseat boundary')
+            raise InformationUnavailable('Information requires this player to be the current actor')
+        if group == 'combat' and decisions.get('schema') not in capability_unit_attacks.HOTSEAT_COMBAT_SCHEMAS:
+            raise InformationUnavailable('This hotseat catalogue lacks the qualified combat projection')
+        if any(decisions.get(field) is None for field in required_fields(group, decisions.get('schema'))):
+            raise InformationUnavailable(group + ' information is unavailable at this hotseat boundary')
         data = project(group, observation, decisions)
         sources = {'decision_catalogue': decisions['schema']} if 'schema' in decisions else {}
-        return envelope(response, group, channel, data, sources)
+        return envelope(dict(response, decisions=decisions), group, channel, data, sources)
 
     def player_view(self, player_id):
         """Read one backend-authorized public perspective without changing choices."""
@@ -308,7 +357,7 @@ class HotseatClient:
         self._check_owner()
         if self._reply is None or self._closed:
             raise RuntimeError("Reset before choosing an action")
-        decisions = self._reply["decisions"]
+        decisions = self._player_decisions or self._reply["decisions"]
         if type(decisions) is not dict or decisions["decision_id"] != decision_id:
             raise ProtocolError("Stale decision catalogue")
         matches = [r for r in decisions["candidates"] if r["candidate_id"] == candidate_id]
@@ -331,7 +380,7 @@ class HotseatClient:
                 raise ProtocolError(str(exc)) from exc
         elif parameters is not None:
             raise ProtocolError("This action accepts no additional parameters")
-        selection = dict(decision_id=decision_id, candidate_id=candidate_id)
+        selection = dict(decision_id=self._reply["decisions"]["decision_id"], candidate_id=candidate_id)
         if parameters is not None:
             selection["parameters"] = parameters
         return self._send("act", selection)

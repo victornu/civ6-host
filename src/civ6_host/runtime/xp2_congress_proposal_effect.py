@@ -171,7 +171,7 @@ def _values(s):
     return (s.serial, s.player_id, s.turn, s.sequence, s.marker_turn, s.own_rows, s.resolved_types)
 
 
-def _owner(saved, active):
+def _owner(saved, active, borrowed_player=None):
     from .xp1_world_input import _owner as require_owner
     from .xp1_session_view import _reference
     if type(active) is not bool:
@@ -180,11 +180,19 @@ def _owner(saved, active):
     if (b.load_abi.core_sha256 != XP2_CORE_SHA256
             or getattr(saved, 'world_congress_diagnostic', False) is not True):
         raise ValueError('Congress effect requires the retained explicit XP2 owner')
-    pid, turn = c.observation['player_id'], c.observation['turn']
+    pid = c.observation['player_id'] if borrowed_player is None else borrowed_player
+    turn = c.observation['turn']
     if (type(pid) is not int or not 0 <= pid < 64 or type(turn) is not int
             or not 0 <= turn <= 100000):
         raise ValueError('Invalid Congress effect perspective')
-    _reference(saved, pid)
+    if borrowed_player is None:
+        _reference(saved, pid)
+    else:
+        from .xp2_human_perspective import verify_turn_completion_player
+
+        if not active:
+            raise ValueError('Borrowed Congress proposal readback requires its active perspective')
+        verify_turn_completion_player(saved, pid)
     runtime, base = b.runtime, _pointer(b.core._handle)
     image = getattr(b.core, '_civ6_host_execution_image', None)
     _require_image(image)
@@ -259,7 +267,7 @@ def _resolve(runtime, base, keys):
     return tuple(resolved)
 
 
-def read(saved, *, type_keys=(), active=True):
+def read(saved, *, type_keys=(), active=True, borrowed_player=None):
     """Borrow official accessors, then copy only this player's own tuples.
 
     Caller owns FIFO emptiness at the two batch boundaries. No action, callback,
@@ -269,7 +277,7 @@ def read(saved, *, type_keys=(), active=True):
             or any(type(k) is not int or not 0 <= k <= 0xffffffff for k in type_keys)
             or len(set(type_keys)) != len(type_keys)):
         raise ValueError('Congress effect needs bounded unique unsigned type keys')
-    owner, pid, turn, sequence = _owner(saved, active)
+    owner, pid, turn, sequence = _owner(saved, active, borrowed_player)
     runtime, base = owner.runtime, owner.base
     source_dependencies(execution_image=owner.image)
     proof = source(execution_image=owner.image)
@@ -301,7 +309,7 @@ def read(saved, *, type_keys=(), active=True):
             or _qword(runtime, base + _GAME) != game
             or _int(runtime, game + 0xc0) != turn):
         raise ValueError('Congress native storage changed during its read')
-    if _owner(saved, active) != (owner, pid, turn, sequence):
+    if _owner(saved, active, borrowed_player) != (owner, pid, turn, sequence):
         raise ValueError('Congress effect owner revision changed during its read')
     owner.serial += 1
     snapshot = Snapshot(owner, owner.serial, pid, turn, sequence, marker, tuple(own), resolved)
@@ -323,9 +331,9 @@ def _description(snapshot):
         resolved_types=[dict(type_key=k, type_index=i) for k, i in snapshot.resolved_types])
 
 
-def compare(saved, before, after, *, selections=(), looked=True, active=True):
+def compare(saved, before, after, *, selections=(), looked=True, active=True, borrowed_player=None):
     """Return own-state evidence only; delivery and journal release stay external."""
-    owner, pid, turn, sequence = _owner(saved, active)
+    owner, pid, turn, sequence = _owner(saved, active, borrowed_player)
     _check_snapshot(owner, before, pid, turn, sequence)
     _check_snapshot(owner, after, pid, turn, sequence)
     if after.serial <= before.serial:

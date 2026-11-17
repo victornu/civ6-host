@@ -73,5 +73,20 @@ class CurrentLocaleProfileTests(unittest.TestCase):
         attach.assert_called_once_with(prefix)
         self.assertIs(prefix.numeric_locale_child,prefix.ui_child)
 
+    def test_installed_rise_and_fall_shares_the_exact_formatter_libraries(self):
+        profile_id = 'xp1-gamecore-current-63c17d9'
+        image = select(profile_id, core_path=known_path(profile_id))
+        self.runtime.shared_dependency_profile = profile_for_shared_dependencies(
+            self.directory, actual_image_sha256=image.image_sha256,
+            interface_reference_sha256=image.reference_core_sha256)
+        _, original = arguments.verified_files()
+        self.assertIs(arguments.verify_runtime_images(self.runtime, original), image)
+        self.assertEqual(locale_text.source_files(execution_image=image),
+                         locale_text.source_files(execution_image=self.image))
+        _, proof = locale_text.source_files(execution_image=image)
+        bad = dict(proof, hks=dict(proof['hks'], sha256='0' * 64))
+        with self.assertRaisesRegex(ValueError, 'another shared-library build'):
+            locale_text._require_current_dependencies(bad, image)
+
 
 if __name__=='__main__':unittest.main()

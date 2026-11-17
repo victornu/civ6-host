@@ -120,16 +120,21 @@ def _proposal_choice(public):
 def catalogue_state(saved, public, private):
     """Project owned presentation; never open or send a native acknowledgement."""
     _,_,_,_,review = _current(saved,public)
+    return presentation_state(public, private, starting_favor=None if review is None else review.starting_favor)
+
+
+def presentation_state(public, private, *, starting_favor):
+    """Project the official popup gates for the caller's owned presentation."""
     gates = _opening(private)
     ordinary = public['stage']=='ordinary' and public['in_session'] is False
-    visible = review is not None
+    visible = starting_favor is not None
     return dict(presentation='available_proposals' if visible else 'closed',
         open=(not visible and ordinary and public['paused'] is False
               and public['local_alive'] is True and gates['capability']
               and gates['current_era']>=gates['initial_era']
               and gates['has_emergency_proposals']),
         confirm_proposals=bool(visible and ordinary and not public['paused']
-                               and _proposal_choice(dict(public, favor=review.starting_favor))),
+                               and _proposal_choice(dict(public, favor=starting_favor))),
         close=bool(visible and ordinary))
 
 

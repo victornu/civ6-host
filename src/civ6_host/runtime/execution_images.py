@@ -15,6 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
+from .saved_load_profiles import BASE_CORE_SHA256
 
 _CURRENT_CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
 _CURRENT_CORE_SIZE_BYTES = 12941080
@@ -86,7 +87,7 @@ class ExecutionImageProfile:
     matching_correspondence_spans: int
     source_proofs: tuple[SourceProofReference, ...]
     correspondence_sources: tuple[PinnedSourceReference, ...]
-    native_host_build: NativeHostBuildReference
+    native_host_build: NativeHostBuildReference | None
     covered_groups: tuple[str, ...]
     matched_interface_groups: tuple[str, ...]
     matched_build_groups: tuple[str, ...]
@@ -96,7 +97,7 @@ class ExecutionImageProfile:
     @property
     def state(self) -> str:
         """Static evidence state; this does not authorize a native load."""
-        if (self.missing_groups or not self.covered_groups or not self.source_proofs or
+        if (self.native_host_build is None or self.missing_groups or not self.covered_groups or not self.source_proofs or
                 not self.matched_interface_groups or not self.matched_build_groups or
                 self.correspondence_manifest_spans <= 0 or
                 self.correspondence_manifest_spans != self.matching_correspondence_spans):
@@ -263,6 +264,19 @@ _XP1_SOURCE_PROOFS = (*_SOURCE_PROOFS[:2], SourceProofReference(
     'xp1_retained_lan_code_spans', 'work/trade-common-client/xp1-installed-source-comparison.json',
     '277edae93a3d533e944cf16ca2bd97d40675c241c901a7985228a0e06e6f4b96', 39262, 39262))
 _XP1_UI_BINDER = '1ec54d12e6c014a8ba9b2f97e68edf7ad2d775e9129a16eaa092db2159affc9f'
+_XP1_UNSIGNED_LOG_SOURCE = PinnedSourceReference(
+    'evidence/host-xp1-installed-unsigned-log-host-source.json',
+    '39e7c4caf34d7d770f43d8ef46204c9f4480a477f4dff9a87869004a5ef495e3',
+)
+_XP1_UNSIGNED_LOG_HOST_BUILD = NativeHostBuildReference(
+    profile_id='xp2-current-strings-unsigned-log-source-v1',
+    executable_path='work/native-host-xp2-current-strings-unsigned-log-build01/civ6rl-native-python.exe',
+    executable_sha256='d5f15e2c314831234b5056dd041d253ab6e542bfa6070ee7327f8e17b3c3f3c8',
+    executable_size_bytes=134656,
+    build_record_path='work/native-host-xp2-current-strings-unsigned-log-build01/build.json',
+    build_record_sha256='60956421113f7e6c9781e1cb84af55e8f5610047bed01d70576ad32e04e55ecd',
+    source_manifest_sha256='547f4338e4be0525ed03633086e6bb40cf7e3bcd94191aa0dbce8c15927aaf52',
+)
 _XP1_PROFILE = replace(
     _PROFILE,
     id='xp1-gamecore-current-63c17d9',
@@ -275,6 +289,8 @@ _XP1_PROFILE = replace(
     correspondence_manifest_spans=39290,
     matching_correspondence_spans=39290,
     source_proofs=_XP1_SOURCE_PROOFS,
+    correspondence_sources=(*_CORRESPONDENCE_SOURCES, _XP1_UNSIGNED_LOG_SOURCE),
+    native_host_build=_XP1_UNSIGNED_LOG_HOST_BUILD,
     covered_groups=tuple(row.group for row in _XP1_SOURCE_PROOFS),
     matched_interface_groups=(*_PROFILE.matched_interface_groups, 'xp1_imports_resolved_in_shared_libraries'),
     matched_build_groups=(*_PROFILE.matched_build_groups, 'xp1_legacy_lua_binder_retained'),
@@ -283,8 +299,58 @@ _XP1_PROFILE = replace(
         'Context preflight does not qualify an official capture, a native session, or any gameplay family.',
     ),
 )
+BASE_INSTALLED_CORE_SHA256 = '160875db284b825ec2711d23ba425dab99e10a386b7ad0cbd4a33e40e75bcc05'
+BASE_INSTALLED_SOURCE = ('work/base-current-image/comparison-v2.json',
+                         '20fe832f128fb4b4b5434608beb9f4e6d7175f48d9f8d12f2c40b2b128b75cc5')
+_BASE_CONTEXT_PROOF = SourceProofReference('base_mapped_image_correspondence', *BASE_INSTALLED_SOURCE, 1, 1)
+_BASE_LOAD_BODIES = PinnedSourceReference(
+    'work/base-current-image/load-current-bodies01.json',
+    '7158d741a8e8efc46824a308c40e3a3d888919d6f2c8c86d5378bb2f3ec01e9f',
+)
+_BASE_LOAD_COMPONENTS = PinnedSourceReference(
+    'evidence/host-base-current-native-load-service-components.json',
+    'c6d181ad8aa6abd7ce520523ab93bc3e3777ed3392f26a194175b29ed5380d79',
+)
+_BASE_PUBLIC_LOCALE = PinnedSourceReference(
+    'evidence/host-base-current-public-locale.json',
+    '4c875049db614b16fe36f8e0b5ab4d6d022797c4e4dc2a5f5f810ea34a45f66c',
+)
+_BASE_CURRENT_HOST = NativeHostBuildReference(
+    'base-current-havok-201979',
+    'work/base-current-image/host-build02/civ6rl-native-python.exe',
+    '99b42c5b1da0ba2465efe5d15d0536e9ed3f6fc94d0b6889664add7e170b44ae',
+    116224,
+    'work/base-current-image/host-build02/build.json',
+    '7312a610ef7bc6a73e4826ff83b1c4d7cebb9d880b07f368651076bac099cc88',
+    '7432c4df775f6b76717a41a9557d2cdac55769616133294052de79054465f4d8',
+)
+_BASE_PROFILE = ExecutionImageProfile(
+    id='base-gamecore-current-160875db',
+    image_sha256=BASE_INSTALLED_CORE_SHA256,
+    image_size_bytes=9794848,
+    reference_core_sha256=BASE_CORE_SHA256,
+    path=_DEPENDENCIES[0].path.replace('DatabaseDLL_FinalRelease.dll', 'GameCore_Base_FinalRelease.dll'),
+    shared_dependencies=_DEPENDENCIES,
+    correspondence_manifest_path=BASE_INSTALLED_SOURCE[0],
+    correspondence_manifest_sha256=BASE_INSTALLED_SOURCE[1],
+    correspondence_manifest_spans=1,
+    matching_correspondence_spans=1,
+    source_proofs=(_BASE_CONTEXT_PROOF,),
+    correspondence_sources=(_CORRESPONDENCE_SOURCES[0], _BASE_LOAD_BODIES,
+                            _BASE_LOAD_COMPONENTS, _BASE_PUBLIC_LOCALE),
+    native_host_build=_BASE_CURRENT_HOST,
+    covered_groups=(_BASE_CONTEXT_PROOF.group,),
+    matched_interface_groups=('database_shared_file_identity', 'localization_shared_file_identity',
+                              'havok_shared_file_identity'),
+    matched_build_groups=('base_current_havok_source_build', 'base_native_load_services'),
+    missing_groups=(),
+    limitations=(
+        'Trial restricted to the exact captured four-player hotseat inputs.',
+        'Load, public readback and gameplay on this installed image require a live witness.',
+    ),
+)
 _REGISTRY: Mapping[str, ExecutionImageProfile] = MappingProxyType(
-    {row.id: row for row in (_PROFILE, _XP1_PROFILE)}
+    {row.id: row for row in (_PROFILE, _XP1_PROFILE, _BASE_PROFILE)}
 )
 _SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
 _REQUIRED_EXECUTION_GROUPS = (
@@ -401,21 +467,32 @@ def _resource_file(root: Path, relative_path: str) -> Path:
     return resolved
 
 
-def _verify_native_host_build(profile: ExecutionImageProfile):
+def _verify_native_host_build(profile: ExecutionImageProfile, *, historical_xp1=False):
+    from .configuration_profiles import _source
     from .source_build_identity import (
-        CURRENT_STRINGS_BUILD_PROFILE,
+        BASE_CURRENT_HOST_COMPONENTS,
+        BASE_CURRENT_HOST_REFERENCE,
         CURRENT_STRINGS_HOST_REFERENCE,
+        CURRENT_UNSIGNED_LOG_HOST_REFERENCE,
         SOURCE_BUILDS,
         _CURRENT_STRINGS_COMPONENT_TRANSITION,
         verify_source_build,
         xp2_component_requirements,
     )
 
-    build_pin = profile.native_host_build
-    if (CURRENT_STRINGS_BUILD_PROFILE != build_pin.profile_id or
-            CURRENT_STRINGS_HOST_REFERENCE !=
-            (build_pin.executable_path, build_pin.executable_sha256)):
-        raise ValueError('registered current strings host build differs from the execution-image pin')
+    base = profile is _BASE_PROFILE
+    xp1 = profile is _XP1_PROFILE
+    if historical_xp1 and not xp1:
+        raise ValueError('Historical current-host build is specific to XP1 stdout evidence')
+    unsigned_log = xp1 and not historical_xp1
+    build_pin = _NATIVE_HOST_BUILD if historical_xp1 else profile.native_host_build
+    if build_pin is None:
+        raise ValueError('The selected execution image has no qualified native host build')
+    expected_host = CURRENT_UNSIGNED_LOG_HOST_REFERENCE if unsigned_log else CURRENT_STRINGS_HOST_REFERENCE
+    if base:
+        expected_host = BASE_CURRENT_HOST_REFERENCE
+    if expected_host != (build_pin.executable_path, build_pin.executable_sha256):
+        raise ValueError('registered shared host build differs from the execution-image pin')
     selected_build = SOURCE_BUILDS.get(build_pin.executable_sha256)
     if (selected_build is None or
             selected_build.get('profile') != build_pin.profile_id or
@@ -450,6 +527,9 @@ def _verify_native_host_build(profile: ExecutionImageProfile):
             Path(artifact.get('path', '')).resolve(strict=True) != executable):
         raise ValueError('native host build receipt differs from the exact bounded-trial build')
 
+    if base:
+        return verify_source_build(executable, required_components=BASE_CURRENT_HOST_COMPONENTS)
+
     expected_transition_names = {
         'script_game_event_aggregators.inc',
         'gamecore_python_host.c',
@@ -466,9 +546,24 @@ def _verify_native_host_build(profile: ExecutionImageProfile):
     expected_current_components = {
         name: current for name, (_old, current) in _CURRENT_STRINGS_COMPONENT_TRANSITION.items()
     }
+    if unsigned_log:
+        source = _source((_XP1_UNSIGNED_LOG_SOURCE.path, _XP1_UNSIGNED_LOG_SOURCE.sha256))
+        previous, selected = source['previous_host'], source['selected_host']
+        component = source['changed_component']
+        if (source['schema'] != 'civ6-host.xp1-shared-unsigned-log-build.source.v1'
+                or source['execution_image'] != identity(profile)
+                or (previous['path'], previous['sha256']) != CURRENT_STRINGS_HOST_REFERENCE
+                or (selected['path'], selected['sha256']) != expected_host
+                or source['selected_source_manifest_sha256'] != build_pin.source_manifest_sha256
+                or source['xp1_legacy_binder_sha256'] != _XP1_UI_BINDER
+                or source['unchanged_stdout_wait_source'] is not True
+                or component['name'] != 'gamecore_python_host.c'
+                or component['previous'] != expected_current_components['gamecore_python_host.c']):
+            raise ValueError('XP1 unsigned diplomacy log source transition differs')
+        expected_current_components['gamecore_python_host.c'] = component['selected']
     if required_components != expected_current_components:
         raise ValueError('current strings component transition changed from the reviewed build')
-    if profile is _XP1_PROFILE:
+    if xp1:
         required_components = dict(required_components, **{'script_core_bindings_xp1_legacy.inc': _XP1_UI_BINDER})
     receipt = verify_source_build(executable, required_components=required_components)
     if (receipt.get('profile') != build_pin.profile_id or
@@ -478,6 +573,81 @@ def _verify_native_host_build(profile: ExecutionImageProfile):
             receipt.get('native_compatibility_claimed') is not False):
         raise ValueError('source-build identity verifier returned an unexpected receipt')
     return receipt
+
+
+def verify_base_context_correspondence(profile: ExecutionImageProfile) -> dict:
+    """Authenticate the exact Base context metadata and shared file identities."""
+    from .configuration_profiles import _source
+
+    if profile is not _BASE_PROFILE:
+        raise ValueError('Expected the exact registered installed Base image')
+    comparison = _source(BASE_INSTALLED_SOURCE)
+    installed = comparison['installed_core']
+    mapped = comparison['mapped_comparison']
+    dependencies = {entry.path: (entry.sha256, entry.reference_sha256)
+                    for entry in profile.shared_dependencies}
+    recorded = {entry['path']: (entry['sha256'], entry['old_interface_reference_sha256'])
+                for entry in comparison['installed_shared_dependencies']}
+    if (comparison['schema'] != 'civ6-host.base-installed-image-comparison.v1'
+            or comparison['reference_core']['sha256'] != profile.reference_core_sha256
+            or (installed['path'], installed['sha256'], installed['bytes']) !=
+                (profile.path, profile.image_sha256, profile.image_size_bytes)
+            or comparison['static_only'] is not True or comparison['native_execution_admitted'] is not False
+            or mapped['every_mapped_file_byte_outside_reviewed_metadata_matches'] is not True
+            or mapped['normalized_mapped_sha256'] != '033465b83ee18b8dbf7ddbaa540e881e0b62a35131f16d6daf4954de00c2dea5'
+            or dependencies != recorded):
+        raise ValueError('Installed Base context does not match the reviewed image comparison')
+    return comparison
+
+
+def base_capture_execution(profile: ExecutionImageProfile, process: dict) -> tuple[Path, dict[str, str]]:
+    """Join the historical Base producer to the installed Core for input preparation."""
+    from .resource_resolution import resolve_path
+
+    comparison = verify_base_context_correspondence(profile)
+    core = process['gamecore_module']
+    captured_exe = comparison['executable']['reference']
+    if (os.path.normcase(os.path.normpath(core['path'])) != os.path.normcase(os.path.normpath(profile.path))
+            or core['sha256'] != profile.reference_core_sha256
+            or process['exe_sha256'] != captured_exe['sha256']):
+        raise ValueError('Captured Base producer does not match the reviewed reference')
+
+    pins = source_dependencies(profile)
+    for row in (comparison['reference_core'], comparison['installed_core'], captured_exe):
+        path = resolve_path(Path(row['path'])).resolve(strict=True)
+        if _hash_file_and_size(str(path)) != (row['sha256'], row['bytes']):
+            raise ValueError('Base capture or execution image changed: ' + path.name)
+        pins[str(path)] = row['sha256']
+    for row in profile.shared_dependencies:
+        if _hash_file_and_size(row.path) != (row.sha256, _DEPENDENCY_FILE_SIZES[row.name]):
+            raise ValueError('Installed Base shared dependency changed: ' + row.name)
+    return Path(profile.path).resolve(strict=True), pins
+
+
+def _verify_base_load_sources(profile: ExecutionImageProfile, root: Path) -> None:
+    verify_base_context_correspondence(profile)
+    bodies = json.loads(_resource_file(root, _BASE_LOAD_BODIES.path).read_bytes())
+    components = json.loads(_resource_file(root, _BASE_LOAD_COMPONENTS.path).read_bytes())['checks']
+    locale = json.loads(_resource_file(root, _BASE_PUBLIC_LOCALE.path).read_bytes())['checks']
+    if (bodies.get('schema') != 'civ6-host.base-installed-load-static-bodies.v1'
+            or bodies.get('core_actual_sha256') != profile.image_sha256
+            or bodies.get('core_reference_sha256') != profile.reference_core_sha256
+            or bodies.get('gamecore_loaded') is not False
+            or set(bodies['proof_spans']) != {'context_table_getter', 'load_prepare_bodies',
+                'configuration_provider_code', 'facade_cache_bodies_slots',
+                'postload_bodies_slots', 'saved_load_vtable_targets'}
+            or any(len(row) != 2 or min(row) <= 0 for row in bodies['proof_spans'].values())):
+        raise ValueError('Installed Base Load bodies lack the required static correspondence')
+    if (components.get('actual_worker_gamecore_loaded') is not False
+            or components.get('scheduler_create_ledger_reconciled') is not True
+            or components.get('registry_restored_on_free') is not True
+            or components.get('native_lua_result_protected_error_and_recovery') is not True
+            or locale.get('actual_image_profile') != profile.id
+            or locale.get('lua_and_localization_executed_natively') is not True
+            or locale.get('numeric_constructor_and_lookup_agree_cases') != 21
+            or locale.get('foreign_observer_refused_before_yield_read') is not True
+            or locale.get('gamecore_loaded') is not False):
+        raise ValueError('Installed Base Load services lack the scoped native component witnesses')
 
 
 def source_dependencies(profile: ExecutionImageProfile) -> dict[str, str]:
@@ -646,7 +816,7 @@ def _verify_xp1_capture_manifest(profile: ExecutionImageProfile, root: Path, man
                 or row['reference_sha256'] != dependency.reference_sha256
                 or len(row['imports']) != count):
             raise ValueError('XP1 shared library import evidence changed: ' + dependency.name)
-    if (manifest['host']['sha256'] != profile.native_host_build.executable_sha256
+    if (manifest['host']['sha256'] != _NATIVE_HOST_BUILD.executable_sha256
             or manifest['xp1_legacy_binder']['sha256'] != _XP1_UI_BINDER
             or set(manifest['host_exports']) != {'LAB_HavokHeapCreate', 'LAB_HavokHeapDestroy',
                 'LAB_XP1ScriptCoreBindingsInstall', 'LAB_XP1ScriptCoreUIBindingsInstall'}):
@@ -765,7 +935,7 @@ def verify(
         raise ExecutionImageVerificationError(
             'required static correspondence groups are missing: ' + ', '.join(missing),
             missing_groups=missing)
-    if (not profile.covered_groups or not profile.source_proofs or
+    if (profile.native_host_build is None or not profile.covered_groups or not profile.source_proofs or
             not profile.matched_interface_groups or not profile.matched_build_groups or
             profile.correspondence_manifest_spans <= 0 or
             profile.correspondence_manifest_spans != profile.matching_correspondence_spans or
@@ -790,7 +960,10 @@ def verify(
             if (os.path.normcase(path) == native_host_key and
                     actual_size != profile.native_host_build.executable_size_bytes):
                 raise ValueError('selected native-host executable size differs from its build pin')
-        _verify_capture_manifest(profile, root)
+        if profile is _BASE_PROFILE:
+            _verify_base_load_sources(profile, root)
+        else:
+            _verify_capture_manifest(profile, root)
         _verify_interface_contract(profile, root)
     except (OSError, ValueError, KeyError, TypeError, RuntimeError,
             json.JSONDecodeError) as exc:

@@ -18,7 +18,9 @@ from civ6_host.runtime.native import native_saved_player_map as player_map
 from civ6_host.runtime.native.native_episode_identity import DiagnosticEpisodeIdentity
 from civ6_host.runtime.native.native_saved_session_protocol import outcome as classify_outcome
 from civ6_host.contracts import network_turn as network_turn_contract
-from civ6_host.contracts.session_result import project_terminal_result, require_same_terminal_result
+from civ6_host.contracts.session_result import (
+    project_inactive_player, project_terminal_result, require_same_terminal_result,
+)
 
 SCHEMA = 'civ6-host.session.v1'
 CLOSURE_SCHEMA = 'civ6-host.session.closure.v1'
@@ -63,8 +65,8 @@ def _validate_session(value):
     return copy.deepcopy(value)
 
 
-def _validate_command(value):
-    if type(value) is not dict or set(value) != _COMMAND_FIELDS:
+def _validate_command(value, observation=None):
+    if type(value) is not dict or set(value) not in (_COMMAND_FIELDS, _COMMAND_FIELDS | {'concert'}):
         raise ValueError('Unexpected command-result fields')
     if type(value['status']) is not str or value['status'] not in _STATUS:
         raise ValueError('Unknown command-result status')
@@ -72,6 +74,18 @@ def _validate_command(value):
         raise ValueError('Invalid command-result reason')
     if value['requested_action'] is not None and type(value['requested_action']) is not dict:
         raise ValueError('Invalid requested action')
+    rock_concert = (value['requested_action'] is not None
+                    and value['requested_action'].get('kind') == 'perform_rock_concert')
+    if ('concert' in value) != (rock_concert and value['status'] == 'completed'):
+        raise ValueError('Concert result requires its completed public action')
+    if rock_concert:
+        from civ6_host.contracts import rock_bands
+        if type(observation) is not dict:
+            raise ValueError('Concert receipt lacks its decision observation')
+        rock_bands.validate_action(value['requested_action'], observation)
+        if 'concert' in value:
+            rock_bands.validate_result(value['concert'], observation['player_id'],
+                                       observation['turn'], value['requested_action'])
     return copy.deepcopy(value)
 
 
@@ -127,6 +141,9 @@ class NetworkProtocol(ActionProtocol):
             raise ValueError('LAN session metadata is not initialized')
         if player_id not in self.session['human_player_ids']:
             raise ValueError('Requested actor is not a captured human player')
+        pending = network_turn_contract.borrowed_dialogue_player(self.decisions, self.session['local_player_id'])
+        if pending is not None and (player_id != pending or operation not in ('observe', 'act')):
+            raise ValueError('Resolve the secondary player\'s pending diplomacy dialogue first')
         if operation == 'act':
             selected = self.selected(request)
             native_forced=network_turn_contract.offered_forced_turn(self.catalogues[player_id],selected)
@@ -167,20 +184,24 @@ class NetworkProtocol(ActionProtocol):
                 raise ValueError('World-war response is absent from the current modal')
             return copy.deepcopy(matches[0])
         if network_turn_contract.is_diplomacy_decisions(catalogue):
+            from civ6_host.contracts.diplomacy_decisions import resolve_gold_amount
             network_turn_contract.validate_catalogue(
                 catalogue, self.identity, catalogue['sequence'], catalogue['turn'],
                 player_id=player_id, actions_closed=self.ended,
                 observation=self.observations.get(player_id))
             selection = request.get('selection')
             if (type(selection) is not dict
-                    or set(selection) != {'decision_id', 'candidate_id'}
+                    or set(selection) not in ({'decision_id', 'candidate_id'},
+                                              {'decision_id', 'candidate_id', 'parameters'})
                     or selection['decision_id'] != catalogue['decision_id']):
                 raise ValueError('Malformed or stale diplomacy modal selection')
             matches = [row['action'] for row in catalogue['candidates']
                        if row['candidate_id'] == selection['candidate_id']]
             if len(matches) != 1:
                 raise ValueError('Diplomacy response is absent from the current modal')
-            return copy.deepcopy(matches[0])
+            if 'parameters' in selection and type(selection['parameters']) is not dict:
+                raise ValueError('Diplomatic parameters must be a mapping')
+            return resolve_gold_amount(catalogue, matches[0], selection.get('parameters'))
         legacy = network_turn_contract.validate_catalogue(
             catalogue, self.identity, catalogue['sequence'], catalogue['turn'],
             player_id=player_id, actions_closed=self.ended,
@@ -247,6 +268,11 @@ class NetworkProtocol(ActionProtocol):
         if self.ended:
             self.catalogues = {}
             self.observations = {}
+        elif observation is None:
+            pid = self.last_outcome['native_victory']['player_id']
+            self.catalogues.pop(pid, None)
+            self.observations.pop(pid, None)
+            self.decisions = None
         elif observation is not None and decisions is not None:
             self.catalogues[observation['player_id']] = copy.deepcopy(decisions)
             self.observations[observation['player_id']] = copy.deepcopy(observation)
@@ -335,9 +361,13 @@ def validate_network_response(response, protocol, operation, *, request=None):
     project_terminal_result(result, episode_id=protocol.identity.episode_id,
         game_generation=protocol.identity.game_generation,
         player_id=native['player_id'], turn=session['turn'])
+    inactive_player = project_inactive_player(result, episode_id=protocol.identity.episode_id,
+        game_generation=protocol.identity.game_generation,
+        player_id=native['player_id'], turn=session['turn'])
     require_same_terminal_result(protocol.last_outcome, result)
 
-    command = _validate_command(response['command_result'])
+    command = _validate_command(response['command_result'],
+        protocol.observations.get(requested_player) if operation == 'act' else None)
     if operation != 'act':
         if command['status'] != 'none' or command['requested_action'] is not None:
             raise ValueError('Non-action RPC returned an action result')
@@ -352,8 +382,12 @@ def validate_network_response(response, protocol, operation, *, request=None):
 
     observation, decisions = response['observation'], response['decisions']
     ended = result['terminated'] or result['truncated']
+    if inactive_player is not None and (observation is not None or decisions is not None
+            or native['player_id'] in session['active_human_player_ids']):
+        raise ValueError('Inactive player cannot have an active or live LAN view')
     if observation is None or decisions is None:
-        if not ended or observation is not None or decisions is not None:
+        if ((not ended and inactive_player is None)
+                or observation is not None or decisions is not None):
             raise ValueError('Live LAN reply needs both observation and decisions')
     else:
         if type(observation) is not dict or type(decisions) is not dict:

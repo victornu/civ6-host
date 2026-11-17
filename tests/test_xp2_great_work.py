@@ -2,14 +2,18 @@
 
 import ctypes
 import struct
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from civ6_host.runtime import a0_foundation_events as foundation, xp2_great_work
 from civ6_host.runtime import foundation_event_profile, xp2_feature_events as feature
 from civ6_host.runtime import xp1_load_capability as capability
-from civ6_host.runtime.execution_images import known_path, select
+from civ6_host.runtime import xp1_great_work_move_source
+from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256
+from civ6_host.runtime.execution_images import _XP1_PROFILE, known_path, select
 from civ6_host.runtime.native import native_event_great_work as codec
+from civ6_host.runtime.native.native_deferred_empty_profile import validate_empty_profile_record
 import test_xp2_improvement_event_source as plot_fixtures
 from test_xp2_turn_notifications import pending_civilization_render
 
@@ -89,6 +93,47 @@ class GreatWorkTransportTests(unittest.TestCase):
             g.owner.dispatch(codec.EVENT_KIND, self.fields(g, descriptor_type=2), 0)
         self.assertEqual(g.owner.pending, [])
         self.assertNotIn('outer_map', [name for name, _ in g.calls])
+
+    def test_rise_and_fall_move_joins_the_shared_record_with_its_own_producer(self):
+        import pefile
+
+        image = _XP1_PROFILE
+        deps = xp1_great_work_move_source.source_dependencies(image)
+        self.assertIn(xp2_great_work.MOVED_SOURCE[1], deps.values())
+        profile = foundation_event_profile.event_profile(core_sha256=XP1_CORE_SHA256, execution_image=image)
+        self.assertEqual(profile.record_types_by_kind[xp2_great_work.MOVED_KIND], {221})
+        self.assertEqual(profile.record_sizes[221], 128)
+        pe = pefile.PE(image.path, fast_load=True)
+        self.addCleanup(pe.close)
+        base = 0x180000000
+        first, second = 0xa10000, 0xa11000
+        descriptors = {first:struct.pack('<HHI', 1, 2, 65536), second:struct.pack('<HHI', 1, 2, 65537)}
+
+        def read(ptr, count):
+            return descriptors[ptr] if ptr in descriptors and count==8 else pe.get_data(ptr-base, count)
+
+        fields = {
+            0x23739f42: struct.pack('<H6xQII', 1024, first, 8, 0x21000001),
+            0x5474afd4: struct.pack('<H6xQII', 1024, second, 8, 0x21000001),
+            0xa1e5a149: struct.pack('<H6xI12x', 3, 0),
+            0xd6fcf3e4: struct.pack('<H6xI12x', 2, 17),
+            0xa1fbc372: struct.pack('<H6xI12x', 2, 34),
+        }
+        queue, emitted = [], []
+        owner = SimpleNamespace(core=SimpleNamespace(_civ6_host_execution_image=image, _handle=base),
+            active_kind=xp2_great_work.MOVED_KIND, normalizer_transform_present=False,
+            per_thread_hook_present=False, writer_metadata_callback_present=False, entity_listener_count=0,
+            _require_no_f391_reentry=lambda: None, _sequence=0, read=read, _enqueue=queue.append,
+            emit=lambda name,**data: emitted.append((name,data)))
+        with patch.object(foundation, 'require_borrow'):
+            self.assertEqual(xp2_great_work.dispatch_moved(owner, fields), 0)
+        record, = queue
+        self.assertEqual(struct.unpack_from('<IIII',record),(128,221,1,0))
+        self.assertEqual(struct.unpack_from('<HHIHHI',record,96),(1,2,65536,1,2,65537))
+        handled = validate_empty_profile_record(record, observer_registered=False, state_pointer_nonnull=True,
+            pre_hook=None,post_hook=None,subscriber_count=0,state_flags=0,execution_image=image)
+        self.assertEqual(handled['event_name'], 'GameCoreEvent::GreatWorkMoved')
+        self.assertEqual(emitted[0][1]['source_proof_sha256'], xp1_great_work_move_source.SOURCE[1])
 
     def test_current_feature_family_reads_native_facades_and_drains_in_order(self):
         g = self.graph()

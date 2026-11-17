@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from .source_verification import file_sha256
 from .paths import resource_root
 from .resource_resolution import resolve_path
 from .configuration_profiles import XP2_CORE_SHA256
@@ -74,7 +75,7 @@ def source_dependencies(*, execution_image):
     result[str(resolve_path(resource_root() / OPERATION_SOURCE[0]).resolve())] = OPERATION_SOURCE[1]
     authority = operations['request_authority']
     authority_path = resolve_path(Path(authority['path']))
-    if hashlib.sha256(authority_path.read_bytes()).hexdigest() != authority['sha256']:
+    if file_sha256(authority_path) != authority['sha256']:
         raise ValueError('Congress requested-player authority source changed')
     result[str(authority_path.resolve())] = authority['sha256']
     # Host rows are an inventory snapshot, not immutable runtime dependencies.
@@ -106,7 +107,7 @@ class _Permit:
     name: str
 
 
-def request_permit(saved, kind, operation, parameters, enums):
+def request_permit(saved, kind, operation, parameters, enums, *, borrowed_player=None):
     """Only the already-revalidated player catalogue may call this helper."""
     from .xp1_world_input import _owner
     b, _, _, _ = _owner(saved, active=True)
@@ -119,8 +120,14 @@ def request_permit(saved, kind, operation, parameters, enums):
             or any(type(v) is not int or not 0 <= v <= 0xffffffff for v in parameters.values())
             or bool(parameters) == (name in EMPTY)):
         raise ValueError('Congress request has a foreign operation or parameter shape')
-    return _Permit(_SEAL, b.core, b.context, saved.continuation.observation['player_id'],
-                   operation, tuple(parameters.items()), name)
+    if borrowed_player is None:
+        player = saved.continuation.observation['player_id']
+    else:
+        from .xp1_session_view import _borrowed_xp2_reference
+
+        _borrowed_xp2_reference(saved, borrowed_player)
+        player = borrowed_player
+    return _Permit(_SEAL, b.core, b.context, player, operation, tuple(parameters.items()), name)
 
 
 def authorize_request(permit, core, context, player, operation, parameters, *,

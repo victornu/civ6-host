@@ -172,8 +172,11 @@ def source_dependencies(core_sha256=XP1_CORE_SHA256,*,official_bundle=None,execu
         if str(path) in result and result[str(path)]!=ref['sha256']:raise ValueError('Conflicting city-control dependency')
         result[str(path)]=ref['sha256']
     if execution_image is not None:
-        if core_sha256!=XP2_CORE_SHA256:
-            raise ValueError('Selected city-control execution image requires XP2')
+        from .execution_images import identity
+        selected_identity = identity(execution_image)
+        if (core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256)
+                or selected_identity['reference_core_sha256'] != core_sha256):
+            raise ValueError('City-control runtime image differs from its expansion source')
         from .runtime_source_dependencies import materialize_runtime_source_pins
         result=materialize_runtime_source_pins(result,execution_image=execution_image,
             provenance_images=(p['exe'],selected['image']))

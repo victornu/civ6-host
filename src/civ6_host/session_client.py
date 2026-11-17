@@ -14,7 +14,9 @@ from uuid import UUID
 from .client import InformationUnavailable, ProtocolError, _ENVELOPE, _digest, _public_contracts
 from .contracts import network_turn
 from .contracts import policies
-from .contracts.session_result import project_terminal_result, require_same_terminal_result
+from .contracts.session_result import (
+    project_inactive_player, project_terminal_result, require_same_terminal_result,
+)
 
 SCHEMA = 'civ6-host.session.v1'
 _RESPONSE_FIELDS = _ENVELOPE | {'session', 'command_result'}
@@ -55,7 +57,7 @@ def _validate_session(value):
 
 
 def _validate_command(value, observation=None):
-    if type(value) is not dict or set(value) != _COMMAND_FIELDS:
+    if type(value) is not dict or set(value) not in (_COMMAND_FIELDS, _COMMAND_FIELDS | {'concert'}):
         raise ProtocolError('Unexpected command-result fields')
     if type(value['status']) is not str or value['status'] not in _STATUSES:
         raise ProtocolError('Unknown command-result status')
@@ -63,6 +65,18 @@ def _validate_command(value, observation=None):
         raise ProtocolError('Invalid command-result reason')
     if value['requested_action'] is not None and type(value['requested_action']) is not dict:
         raise ProtocolError('Invalid requested action')
+    rock_concert = value['requested_action'] is not None and value['requested_action'].get('kind') == 'perform_rock_concert'
+    if ('concert' in value) != (rock_concert and value['status'] == 'completed'):
+        raise ProtocolError('Concert result requires its completed public action')
+    if rock_concert:
+        from .contracts import rock_bands
+        try:
+            rock_bands.validate_action(value['requested_action'], observation)
+            if 'concert' in value:
+                rock_bands.validate_result(value['concert'], observation['player_id'],
+                                           observation['turn'], value['requested_action'])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProtocolError('Invalid public concert result: ' + str(exc)) from exc
     if (value['requested_action'] is not None and value['requested_action'].get('kind')
             in ('spy_travel', 'spy_mission', 'spy_cancel', 'spy_escape')):
         from .contracts import espionage
@@ -90,6 +104,31 @@ def _validate_command(value, observation=None):
             world_congress.validate_action(value['requested_action'])
         except ValueError as exc:
             raise ProtocolError('Invalid requested Congress action: ' + str(exc)) from exc
+    if (value['requested_action'] is not None
+            and value['requested_action'].get('kind') in ('recruit_great_person', 'patronize_great_person', 'reject_great_person')):
+        from .contracts.great_people_actions import validate_action
+        try:
+            validate_action(value['requested_action'])
+        except ValueError as exc:
+            raise ProtocolError('Invalid requested Great Person action: ' + str(exc)) from exc
+    if value['requested_action'] is not None and value['requested_action'].get('kind') == 'found_custom_religion':
+        from .contracts.religion_custom_names import validate_action
+        try:
+            validate_action(value['requested_action'], expanded=True)
+        except ValueError as exc:
+            raise ProtocolError('Invalid requested custom religion action: ' + str(exc)) from exc
+    if value['requested_action'] is not None and value['requested_action'].get('kind') == 'activate_great_person':
+        from .contracts.great_person_activation import validate_action
+        try:
+            validate_action(value['requested_action'])
+        except ValueError as exc:
+            raise ProtocolError('Invalid requested Great Person activation: ' + str(exc)) from exc
+    if value['requested_action'] is not None and value['requested_action'].get('kind') in ('spread_religion', 'evangelize_belief', 'launch_inquisition', 'remove_heresy'):
+        from .contracts.religious_unit_operations import validate_action
+        try:
+            validate_action(value['requested_action'])
+        except ValueError as exc:
+            raise ProtocolError('Invalid requested religious unit operation: ' + str(exc)) from exc
     return copy.deepcopy(value)
 
 
@@ -178,26 +217,30 @@ class SessionClient:
             raise ProtocolError('Invalid session outcome')
         if result.get('reason') is not None and type(result.get('reason')) is not str:
             raise ProtocolError('Invalid session outcome reason')
-        if result['terminated']:
-            try:
+        result_player = session['local_player_id'] if requested_player is None else requested_player
+        inactive_player = None
+        try:
+            if result['terminated']:
                 project_terminal_result(result, episode_id=episode, game_generation=generation,
-                    player_id=session['local_player_id'] if requested_player is None else requested_player,
-                    turn=session['turn'])
-            except ValueError as exc:
-                raise ProtocolError(str(exc)) from exc
-        if operation != 'reset':
-            try:
+                    player_id=result_player, turn=session['turn'])
+            else:
+                inactive_player = project_inactive_player(result, episode_id=episode,
+                    game_generation=generation, player_id=result_player, turn=session['turn'])
+            if operation != 'reset':
                 require_same_terminal_result(self._reply['outcome'], result)
-            except ValueError as exc:
-                raise ProtocolError(str(exc)) from exc
+        except ValueError as exc:
+            raise ProtocolError(str(exc)) from exc
         # Command completion and the global winner are independent. Another
         # player may win while this actor's command is refused or pending.
         # The applied_action check below must still forbid invented success.
         observation, decisions = response['observation'], response['decisions']
+        if inactive_player is not None and (observation is not None or decisions is not None
+                or result_player in session['active_human_player_ids']):
+            raise ProtocolError('Inactive player cannot have an active or live LAN view')
         if (observation is None) != (decisions is None):
             raise ProtocolError('LAN response contains only half of the actor view')
         if observation is None or decisions is None:
-            if result['terminated'] is not True and result['truncated'] is not True:
+            if not (result['terminated'] or result['truncated'] or inactive_player is not None):
                 raise ProtocolError('Live LAN response lost its player view')
         else:
             if (type(observation) is not dict or type(decisions) is not dict
@@ -266,12 +309,11 @@ class SessionClient:
             chosen = next(row['action'] for row in prior_view['decisions']['candidates']
                           if row['candidate_id'] == request['selection']['candidate_id'])
             if chosen.get('kind') == 'policies':
+                schema = network_turn.xp2_great_person_base_schema(prior_view['decisions'].get('schema'))
                 candidate = policies.choose(chosen['slots'], request['selection']['parameters']['assignments'],
                                             requested_player, prior_view['decisions']['turn'],
-                                            allow_relocation=(prior_view['decisions'].get('schema') in
-                                                network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS),
-                                            allow_unchanged=(prior_view['decisions'].get('schema') in
-                                                network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS))
+                                            allow_relocation=schema in network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS,
+                                            allow_unchanged=schema in network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS)
                 if _digest(requested_action) != _digest(dict(kind='policies', candidate=candidate)):
                     raise ProtocolError('Policy choice was substituted')
             elif (type(chosen.get('kind')) is str and chosen.get('kind').startswith('congress_')):
@@ -280,10 +322,20 @@ class SessionClient:
                     chosen, request['selection'].get('parameters'))
                 if _digest(requested_action) != _digest(selected):
                     raise ProtocolError('Congress choice was substituted')
+            elif chosen.get('kind') == 'found_custom_religion':
+                selected = network_turn.select_capability(prior_view['decisions'], request['selection'])
+                if _digest(requested_action) != _digest(selected):
+                    raise ProtocolError('Custom religion name or icon was substituted')
             elif chosen.get('kind') == 'confirm_dedications':
                 selected = network_turn.select_capability(prior_view['decisions'], request['selection'])
                 if _digest(requested_action) != _digest(selected):
                     raise ProtocolError('Dedication choice was substituted')
+            elif chosen.get('kind') == 'diplomacy_response':
+                from .contracts.diplomacy_decisions import resolve_gold_amount
+                selected = resolve_gold_amount(
+                    prior_view['decisions'], chosen, request['selection'].get('parameters'))
+                if _digest(requested_action) != _digest(selected):
+                    raise ProtocolError('Native diplomacy command differs from requested parameters')
             elif _digest(requested_action) != _digest(chosen):
                 raise ProtocolError('Requested action differs from the selected actor choice')
 
@@ -314,9 +366,12 @@ class SessionClient:
         if result['terminated'] or result['truncated']:
             # A terminal reply can legitimately have no board. Never return a
             # stale live catalogue, including one cached for another human.
-            pid = session['local_player_id'] if requested_player is None else requested_player
-            self._views = {pid: copy.deepcopy(response)}
-            self._last_player_id = pid
+            self._views = {result_player: copy.deepcopy(response)}
+            self._last_player_id = result_player
+        elif inactive_player is not None:
+            self._views[result_player] = copy.deepcopy(response)
+            self._display_views.pop(result_player, None)
+            self._last_player_id = result_player
         elif observation is not None:
             self._views[observation['player_id']] = copy.deepcopy(response)
             self._last_player_id = observation['player_id']
@@ -333,6 +388,21 @@ class SessionClient:
             self._abort_failed()
             raise
 
+    @property
+    def controllable_player_ids(self):
+        """Return the backend's declared actor routes, or None if unspecified."""
+        self._check_owner()
+        if self._session is None or self._closed:
+            return ()
+        humans = self._session['human_player_ids']
+        actors = getattr(self._backend, 'controllable_player_ids', None)
+        if actors is None:
+            return None
+        if (type(actors) is not tuple or any(type(pid) is not int or pid not in humans for pid in actors)
+                or len(set(actors)) != len(actors)):
+            raise ProtocolError('Invalid backend actor routing declaration')
+        return actors
+
     def _send(self, operation, player_id, selection=None, prior_view=None):
         self._check_owner()
         pid = _player_id(player_id)
@@ -342,6 +412,15 @@ class SessionClient:
             raise RuntimeError('Session ended; close or reset required')
         if pid not in self._session['human_player_ids']:
             raise ProtocolError('Requested actor is not a captured human player')
+        pending = network_turn.borrowed_dialogue_player(self._reply['decisions'], self._session['local_player_id'])
+        if pending is not None and (pid != pending or operation not in ('observe', 'act')):
+            raise ProtocolError('Resolve the secondary player\'s pending diplomacy dialogue first')
+        routed = self.controllable_player_ids
+        if routed is not None and pid not in routed:
+            raise ProtocolError('This LAN backend cannot route the requested captured human player')
+        session_owner = getattr(self._backend, 'session_operations_player_id', None)
+        if operation in ('poll', 'close') and session_owner is not None and pid != session_owner:
+            raise ProtocolError('LAN poll and close require the session owner')
         if operation == 'act' and pid not in self._session['active_human_player_ids']:
             offers = prior_view['decisions']['candidates'] if prior_view else []
             chosen = [row['action'] for row in offers
@@ -372,6 +451,29 @@ class SessionClient:
 
     def poll(self, player_id):
         return self._send('poll', player_id)
+
+    def player_view(self, player_id):
+        """Read an opted-in human perspective from the latest accepted boundary."""
+        self._check_owner()
+        from .player_view import validate_player_view
+
+        pid = _player_id(player_id)
+        response = self._reply
+        if (response is None or self._closed or response['observation'] is None
+                or any(response['outcome'][key] for key in ('terminated', 'truncated'))):
+            raise InformationUnavailable('A live LAN observation is required for a public player view')
+        if pid not in self._session['human_player_ids']:
+            raise InformationUnavailable('The requested seat is not a captured human')
+        reader = getattr(self._backend, 'read_player_view', None)
+        if not callable(reader):
+            raise InformationUnavailable('The LAN backend does not provide public player views')
+        try:
+            value = reader(copy.deepcopy(response), pid)
+            return validate_player_view(value, episode_id=response['episode_id'],
+                game_generation=response['game_generation'], sequence=response['sequence'],
+                player_id=pid, turn=response['observation']['turn'])
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise ProtocolError(str(exc)) from exc
 
     def view(self, player_id=None):
         self._check_owner()
@@ -414,29 +516,32 @@ class SessionClient:
             raise InformationUnavailable('Observe this player before querying information')
         response = self._views[pid]
         observation, decisions = response['observation'], response['decisions']
+        if observation is None and decisions is None:
+            raise InformationUnavailable('The player has no board at this decision boundary')
         if (observation is None or decisions is None
                 or any(response[key] != self._reply[key]
                        for key in ('episode_id', 'game_generation'))
                 or observation['turn'] != self._session['turn']):
             raise InformationUnavailable('Cached information is from another episode or turn')
-        required = set() if group == 'turn_horizon' else set(required_fields(group, decisions.get('schema')))
+        schema = network_turn.xp2_great_person_base_schema(decisions.get('schema'))
+        required = set() if group == 'turn_horizon' else set(required_fields(group, schema))
         if group == 'economy' and channel == 'administrative':
             required.add('research_progress')
         if any(field not in decisions or decisions[field] is None for field in required):
-            if (decisions.get('schema') in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS
+            if (schema in network_turn.NATIVE_COMMAND_PERMISSIONS_SCHEMAS
                     and not decisions['native_command_permissions']['allow_strategic']
                     and group in ('production', 'combat')):
                 raise InformationUnavailable(group + ' information is unavailable: '
                     + network_turn.NATIVE_STRATEGIC_READER_UNAVAILABLE)
             raise InformationUnavailable(group + ' information is unavailable at this waiting/modal boundary')
         if group=='combat':
-            if decisions.get('schema') not in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
+            if schema not in network_turn.PUBLIC_COMBAT_CAPABILITY_SCHEMAS:
                 raise InformationUnavailable('This historical catalogue lacks the qualified combat projection')
         if group == 'trade_overview' and decisions['trade_overview'] is None:
             raise InformationUnavailable('Public trade overview is unavailable: ' + decisions['trade_overview_status'])
         if group == 'production':
             from .contracts.production_inputs import CURRENT_SCHEMA
-            if (decisions.get('schema') in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS
+            if (schema in network_turn.CURRENT_PRODUCTION_CAPABILITY_SCHEMAS
                     and channel == 'administrative'):
                 raise InformationUnavailable('Administrative production is unavailable for this profile')
             production = decisions.get('production_current', decisions.get('production'))
@@ -475,12 +580,32 @@ class SessionClient:
             'turn_horizon': (),
             'economy': ('treasury','yield_display','research_info','research_progress'),
             'production': ('production','production_info','production_current'),
+            'purchase_quotes': (),
             'growth': ('city_growth',),
             'strategic_resources': ('strategic_resources',),
             'diplomacy': ('diplomacy_overview',),
+            'city_state_envoys': ('city_state_envoys',),
+            'city_buildings': ('city_buildings',),
+            'city_loyalty': ('city_loyalty',),
+            'captured_city': ('captured_city',),
+            'national_parks': ('national_parks',),
+            'rock_bands': ('rock_bands',),
+            'city_religion': ('city_religion',),
+            'pantheon': ('pantheon',),
+            'religion_beliefs': ('religion_beliefs',),
+            'religion_founding': ('religion_founding',),
+            'religion_custom_names': ('religion_custom_names',),
+            'great_person_activation': ('great_person_activation',),
+            'religious_unit_operations': ('religious_unit_operations',),
+            'great_people': ('great_people',),
+            'prophet_activation': ('prophet_activation',),
+            'city_state_levies': ('city_state_levies',),
+            'unit_levies': ('unit_levies',),
             'trade': ('trade_routes', 'trade_origins'),
             'trade_overview': ('trade_overview', 'trade_routes'),
             'unit_formations': ('unit_formations',),
+            'unit_promotions': ('unit_promotions',),
+            'unit_upgrades': ('unit_upgrades',),
             'dedications': ('dedications',),
             'espionage': ('espionage',),
             'spy_completion': ('spy_completion',),
@@ -488,11 +613,15 @@ class SessionClient:
             'world_congress_review': ('world_congress_review',),
             'native_command_permissions': ('native_command_permissions',),
             'world_congress_active_effects': ('world_congress_active_effects',),
+            'world_score': ('world_score',),
+            'archaeology': ('archaeology',),
             'combat': ('unit_attacks','queued_orders'),
             'unit_work': ('unit_work_state','unit_work_info','unit_work'),
         }[group]
         # Some native subcatalogues (notably unit_work) are versioned by their
         # enclosing decision catalogue, not by a fabricated nested schema.
+        if group == 'archaeology' and 'museum_artifacts' in data:
+            source_fields += ('city_buildings',)
         sources = {key: decisions[key]['schema'] for key in source_fields
                    if isinstance(decisions.get(key), dict) and 'schema' in decisions[key]}
         if group == 'display':
@@ -539,11 +668,18 @@ class SessionClient:
     @staticmethod
     def _legacy_actor_view(response):
         result = response['outcome']
+        native = result.get('native_victory')
         public_outcome = {key: result[key] for key in ('terminated', 'truncated', 'reason')}
         if result['terminated']:
             public_outcome['result'] = project_terminal_result(result,
                 episode_id=response['episode_id'], game_generation=response['game_generation'],
-                player_id=result['native_victory']['player_id'], turn=response['session']['turn'])
+                player_id=native['player_id'], turn=response['session']['turn'])
+        elif response['observation'] is None and type(native) is dict:
+            inactive_player = project_inactive_player(result, episode_id=response['episode_id'],
+                game_generation=response['game_generation'], player_id=native.get('player_id'),
+                turn=response['session']['turn'])
+            if inactive_player is not None:
+                public_outcome['player_status'] = inactive_player
         return copy.deepcopy(dict(episode_id=response['episode_id'],
             game_generation=response['game_generation'], sequence=response['sequence'],
             turn_mode='simultaneous', observation=response['observation'],
@@ -561,27 +697,40 @@ class SessionClient:
         if prior_view is None:
             raise ProtocolError('No cached catalogue for this actor')
         decisions = prior_view['decisions']
+        if decisions is None:
+            raise ProtocolError('This actor has no current action catalogue')
         if type(decision_id) is not str or decisions['decision_id'] != decision_id:
             raise ProtocolError('Stale decision catalogue for this actor')
         matches = [row for row in decisions['candidates'] if row['candidate_id'] == candidate_id]
         if len(matches) != 1:
             raise ProtocolError('Candidate is absent from this actor catalogue')
         action = matches[0]['action']
-        if action.get('kind') == 'policies':
+        if action.get('kind') == 'diplomacy_response':
+            from .contracts.diplomacy_decisions import resolve_gold_amount
+            try:
+                resolve_gold_amount(decisions, action, parameters)
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+        elif action.get('kind') == 'policies':
             if type(parameters) is not dict or set(parameters) != {'assignments'}:
                 raise ProtocolError('Explicit policy assignments required')
             try:
+                schema = network_turn.xp2_great_person_base_schema(decisions.get('schema'))
                 policies.choose(action['slots'], parameters['assignments'], pid, decisions['turn'],
-                    allow_relocation=(decisions.get('schema') in
-                        network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS),
-                    allow_unchanged=(decisions.get('schema') in
-                        network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS))
+                    allow_relocation=schema in network_turn.POLICY_RELOCATION_CAPABILITY_SCHEMAS,
+                    allow_unchanged=schema in network_turn.POLICY_RECONFIRM_CAPABILITY_SCHEMAS)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
         elif (type(action.get('kind')) is str and action.get('kind').startswith('congress_')):
             from .contracts import world_congress
             try:
                 world_congress.choose(decisions['world_congress'], action, parameters)
+            except ValueError as exc:
+                raise ProtocolError(str(exc)) from exc
+        elif action.get('kind') == 'found_custom_religion':
+            from .contracts import religion_custom_names
+            try:
+                religion_custom_names.choose(decisions['religion_custom_names'], action, parameters)
             except ValueError as exc:
                 raise ProtocolError(str(exc)) from exc
         elif action.get('kind') == 'confirm_dedications':
@@ -602,7 +751,7 @@ class SessionClient:
         self._check_owner()
         pid = _player_id(player_id)
         view = self._views.get(pid)
-        if self._closed or view is None:
+        if self._closed or view is None or view['decisions'] is None:
             raise ProtocolError('No current Congress view for this actor')
         from .contracts import world_congress
         value = view['decisions'].get('world_congress')
@@ -643,6 +792,8 @@ class SessionClient:
         if self._closed:
             return None
         if player_id is None:
+            player_id = getattr(self._backend, 'session_operations_player_id', None)
+        if player_id is None:
             player_id = self._last_player_id
         if player_id is None:
             player_id = self._session['local_player_id']
@@ -657,4 +808,12 @@ class SessionClient:
         return self
 
     def __exit__(self, kind, exc, traceback):
-        self.close() if kind is None else self.abort()
+        if kind is not None:
+            self.abort()
+            return
+        try:
+            self.close()
+        except BaseException:
+            if not self._closed:
+                self.abort()
+            raise

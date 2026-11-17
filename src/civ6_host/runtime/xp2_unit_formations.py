@@ -4,6 +4,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
+from struct import pack
 
 from civ6_host.contracts import unit_formations as contract
 from .execution_images import ExecutionImageProfile
@@ -20,6 +21,15 @@ SOURCE = ('evidence/host-xp2-stock-formation-source.json',
           'ec81971ac909043b08a4ef310616adc4dd57bc69fe33d60456f11809e5c15bf9')
 CORE = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
 LIMIT = 1024 * 1024
+
+
+def borrowed_enabled(saved, requested=None):
+    enabled = getattr(saved, 'unit_formations', False) is True
+    if requested is None:
+        return enabled
+    if type(requested) is not bool or (requested and not enabled):
+        raise ValueError('Borrowed formations require the admitted stock Gathering Storm option')
+    return requested
 
 
 def source_dependencies(reference, execution_image):
@@ -129,31 +139,59 @@ def _native_catalogue(prefix, observation):
     return state, contract.validate(public, pid, turn, observation=observation)
 
 
-def _bound(saved, observation, *, active):
+def _bound(saved, observation, *, active, borrowed=False):
+    if borrowed:
+        from .xp1_session_view import _borrowed_xp2_reference
+
+        _borrowed_xp2_reference(saved, observation['player_id'])
     owner = _owner(saved, active=active)
     b, c, _, _ = owner
     image = getattr(b.core, '_civ6_host_execution_image', None)
     if (getattr(saved, 'unit_formations', False) is not True or b.captured_bundle.reference != REFERENCE
             or type(image) is not ExecutionImageProfile or image.image_sha256 != CORE
-            or c.observation != observation or observation['player_id'] != 0):
+            or (not borrowed and (c.observation != observation or observation['player_id'] != 0))):
         raise ValueError('Formation query requires the exact live stock player perspective')
     return owner
 
 
 def catalogue(saved, observation):
-    b, c, p, identity = _bound(saved, observation, active=False)
-    c.explicit_unit_formations = None
+    return _catalogue(saved, observation, borrowed=False)[2]
+
+
+def _catalogue(saved, observation, *, borrowed):
+    b, c, p, identity = _bound(saved, observation, active=borrowed, borrowed=borrowed)
+    if not borrowed:
+        c.explicit_unit_formations = None
     sequence = c.sequence
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     state, public = _native_catalogue(p, observation)
-    actual = _bound(saved, observation, active=False)
+    actual = _bound(saved, observation, active=borrowed, borrowed=borrowed)
     if any(a is not b for a, b in zip(actual, (b, c, p, identity))) or sequence != c.sequence:
         raise ValueError('Formation catalogue crossed its native decision boundary')
     c.transport.require_empty_native_queue()
     b.control(empty=True)
-    c.explicit_unit_formations = (identity, sequence, deepcopy(observation), state, public)
-    return deepcopy(public)
+    if not borrowed:
+        c.explicit_unit_formations = (identity, sequence, deepcopy(observation), state, public)
+    return (b, c, p, identity), state, deepcopy(public)
+
+
+def read_borrowed(saved, observation):
+    return _catalogue(saved, observation, borrowed=True)[2]
+
+
+def apply_borrowed(saved, action, observation, *, expected, available):
+    refusal = dict(status='refused', requested_action=action)
+    if not available:
+        return dict(refusal, reason='native_unit_formation_boundary_unavailable'), None
+    owner, state, public = _catalogue(saved, observation, borrowed=True)
+    if expected != public:
+        return dict(refusal, reason='native_unit_formation_choice_changed'), None
+    if action not in contract.actions(public):
+        return dict(refusal, reason='native_unit_formation_choice_unavailable'), None
+    effect = _apply(saved, action, observation, owner, state, borrowed=True)
+    return dict(status=effect['status'], reason=effect['refusal_code'], requested_action=action), (
+        effect['observation'] if effect['status'] == 'completed' else None)
 
 
 def _request_source(action, state):
@@ -190,6 +228,17 @@ def _effect(action, before, after):
                  or previous['formation_id'] != previous_partner['formation_id']))
 
 
+def verify_borrowed_archive(payload, player_id, action):
+    contract.validate_action(action)
+    head = (0x493830af, player_id, 1, action['unit_id'])
+    if action['command'] == 'enter':
+        expected = pack('<IHH4IHH2I', *head, 3, 0, 1, player_id, 1, action['partner_id'], 0)
+    else:
+        expected = pack('<IHH3I', *head, 4, 0)
+    if type(payload) is not bytes or payload != expected:
+        raise RuntimeError('Formation archive differs from its sender, unit or partner')
+
+
 def apply(saved, action, observation):
     contract.validate_action(action)
     b, c, p, identity = _bound(saved, observation, active=True)
@@ -198,7 +247,11 @@ def apply(saved, action, observation):
             or record[2] != observation or action not in contract.actions(record[4])):
         raise ValueError('Formation action was not offered at this decision')
     c.explicit_unit_formations = None
-    before = record[3]
+    return _apply(saved, action, observation, (b, c, p, identity), record[3], borrowed=False)
+
+
+def _apply(saved, action, observation, owner, before, *, borrowed):
+    b, c, p, _ = owner
     c.transport.require_empty_native_queue()
     b.control(empty=True)
     count = c.publication_count
@@ -206,6 +259,8 @@ def apply(saved, action, observation):
                                   b'@stock_unit_formation_request', capacity=32)
     if raw != b'submitted' or len(p.actions.pending) != 1:
         raise RuntimeError('Formation command did not enqueue one native archive')
+    if borrowed:
+        verify_borrowed_archive(p.actions.pending[0], observation['player_id'], action)
     digest = sha256(p.actions.pending[0]).hexdigest()
     p.actions.deliver_one()
     p.deferred_events.drain_empty_receivers()
@@ -214,6 +269,8 @@ def apply(saved, action, observation):
     b.control(empty=True)
     from .native.native_player_observation import observe_player
     observed = observe_player(p.runtime, p.ui_child, observation['player_id'])
+    if (observed['player_id'], observed['turn']) != (observation['player_id'], observation['turn']):
+        raise RuntimeError('Formation effect crossed its requested player or turn')
     after, public = _native_catalogue(p, observed)
     if c.publication_count != count + 1:
         raise RuntimeError('Formation command publication count differs')

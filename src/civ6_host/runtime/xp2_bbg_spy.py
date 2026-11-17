@@ -13,6 +13,8 @@ SOURCE = ('evidence/host-xp2-bbg-spy-ui-preparation.json',
           '7feb03a36a715b072401131012e73beff1ff7be9b6fea403855b3f6f2ef2bbf8')
 FIFO_SOURCE = ('evidence/host-xp2-bbg-spy-owned-fifo-source.json',
                '2c422bcc782f9a72a92e2d85dbe4259144f6e3425218d207fa93087209f74b15')
+EVENT_PLAYER_SOURCE = ('evidence/host-xp2-spy-event-player-lookup-source.json',
+                       '62343707bfc620f8ac77ecb294d2bd3be1aa753bdc86e124d9cc910d6e85a2c4')
 SELECTOR = 0x81c5bd7e
 _SCALAR_RECORD = dict(callback_shape_group='two_value_three_key', payload_value_count=2,
                       writer_record_type=hex(RECORD_TYPE))
@@ -48,7 +50,8 @@ def _proof(image):
 
 def source_dependencies(*, execution_image):
     _proof(execution_image)
-    return {resource_root() / path: digest for path, digest in (SOURCE, FIFO_SOURCE)}
+    return {resource_root() / path: digest for path, digest in (
+        SOURCE, FIFO_SOURCE, EVENT_PLAYER_SOURCE)}
 
 
 def verify_live(image, core_base, read):
@@ -59,10 +62,28 @@ def verify_live(image, core_base, read):
             raise ValueError('Live BBG spy producer differs at ' + span['rva'])
 
 
+def verify_event_player_lookup(image, core_base, read):
+    _require_image(image)
+    proof = _source(EVENT_PLAYER_SOURCE)
+    if (proof['schema'] != 'civ6-host.xp2-spy-event-player-lookup.static.v1'
+            or proof['image_sha256'] != CURRENT_CORE_SHA256 or len(proof['spans']) != 11):
+        raise ValueError('Unknown BBG spy event-player lookup')
+    for name, span in proof['spans'].items():
+        raw = read(core_base + span['rva'], span['length'])
+        if len(raw) != span['length'] or hashlib.sha256(raw).hexdigest() != span['sha256']:
+            raise ValueError('Live BBG spy event-player lookup differs: ' + name)
+
+
 _BRIDGE = b"""
-assert(Civ6HostBBGSpy == nil, 'Existing BBG spy feedback owner')
+assert(Civ6HostBBGSpy == nil and Civ6HostBBGSpyForSeat == nil, 'Existing BBG spy feedback owner')
 local OnSpyMissionCompleted
 local request
+local function native_local_player() return Game.GetLocalPlayer() end
+local event_player
+local Game = {GetLocalPlayer = function()
+    if event_player ~= nil then return event_player end
+    return native_local_player()
+end}
 local PlayerOperations = {EXECUTE_SCRIPT = 0xc665ad08}
 local UI = {DataError = function(message) error(message) end}
 function UI.RequestPlayerOperation(player, operation, params)
@@ -81,11 +102,29 @@ function UI.RequestPlayerOperation(player, operation, params)
 end
 """
 _DISPATCH = b"""
-Civ6HostBBGSpy = function(...)
+local function dispatch(...)
     assert(request == nil, 'Pending BBG spy request')
     OnSpyMissionCompleted(...)
     local result = request or ''
     request = nil
+    return result
+end
+Civ6HostBBGSpy = dispatch
+Civ6HostBBGSpyForSeat = function(player, mission)
+    assert(event_player == nil and type(player) == 'number' and player % 1 == 0
+        and player >= 0 and player < 64 and type(mission) == 'number'
+        and mission % 1 == 0 and mission >= 0 and mission <= 2147483647,
+        'Invalid BBG spy event seat')
+    local native_player = Players[player]
+    assert(native_player and native_player:IsHuman() and native_player:GetID() == player,
+        'BBG spy event does not belong to a human seat')
+    event_player = player
+    local ok, result = pcall(dispatch, player, mission)
+    event_player = nil
+    if not ok then
+        request = nil
+        error(result)
+    end
     return result
 end
 """
@@ -132,12 +171,16 @@ def parse_request(raw, *, local_player, event_player, mission):
             b'iMissionID': mission, b'State': state}
 
 
-def capacity_source(player):
+def capacity_source(player, *, event_seat=False):
     if type(player) is not int or not 0 <= player < 64:
         raise ValueError('Invalid BBG spy capacity player')
+    check = ("assert(player and player:IsHuman() and player:GetID()==pid,'Foreign BBG spy event seat')"
+             if event_seat else "assert(Game.GetLocalPlayer()==pid,'Stale BBG spy perspective')")
     return f"""
-assert(Game.GetLocalPlayer() == {player}, 'Stale BBG spy perspective')
-local capacity = Players[{player}]:GetDiplomacy():GetSpyCapacity()
+local pid = {player}
+local player = Players[pid]
+{check}
+local capacity = player:GetDiplomacy():GetSpyCapacity()
 assert(type(capacity) == 'number' and capacity % 1 == 0 and capacity >= 0 and capacity <= 2147483647,
     'BBG spy capacity exceeds XP2 integer profile')
 return string.format('%d', capacity)

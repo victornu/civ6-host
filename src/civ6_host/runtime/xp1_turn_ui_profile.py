@@ -283,19 +283,20 @@ def classify(readback, timer_elapsed, *,core_sha256=XP1_CORE_SHA256):
         source_sha256=source_reference(core_sha256)[1], core_sha256=core_sha256)
 
 
-def read(saved, player_id, expected_turn, *, active=False):
+def read(saved, player_id, expected_turn, *, active=False, borrowed_xp2=False):
     """Fresh UI predicates; active=True borrows the executing continuation only."""
     from .xp1_saved_load_owner import SavedLoadOwner
-    from .xp1_session_view import _reference
+    from .xp1_session_view import _borrowed_xp2_reference, _reference
     from .network_timer import read as read_timer
-    if type(saved) is not SavedLoadOwner or type(active) is not bool:
+    if (type(saved) is not SavedLoadOwner or type(active) is not bool
+            or type(borrowed_xp2) is not bool or (borrowed_xp2 and not active)):
         raise TypeError('Human turn read requires the exact saved owner and phase')
     if active:
         saved._check_active()
     else:
         saved._check('commands', requested='unit_commands_candidate')
         saved.continuation.check(active=False)
-    _, ids = _reference(saved, player_id)
+    _, ids = (_borrowed_xp2_reference if borrowed_xp2 else _reference)(saved, player_id)
     b, p = saved.backend, saved.prefix
     bind_owner(b)
     saved.continuation.transport.require_empty_native_queue()

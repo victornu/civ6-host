@@ -1,4 +1,5 @@
-"""Stock XP2 dedications through the current player cache and native request queue."""
+"""Era dedications through the current player cache and native request queue."""
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
@@ -7,7 +8,7 @@ import struct
 
 from civ6_host.contracts import dedications as contract
 from .a0_policy_unlock_current import _require_image
-from .configuration_profiles import XP2_CORE_SHA256, _source
+from .configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
 from .source_verification import file_sha256
@@ -23,6 +24,15 @@ BLOCKER = 0x31782ea7
 _ARCHIVE_PREFIX = struct.pack('<I', 3294486831)
 _LIMIT = 262144
 _SEAL = object()
+
+def borrowed_enabled(saved, requested=None):
+    enabled = getattr(saved, 'stock_dedications', False) is True
+    if requested is None:
+        return enabled
+    if type(requested) is not bool or (requested and not enabled):
+        raise ValueError('Borrowed dedications require the admitted stock Gathering Storm option')
+    return requested
+
 
 _QUERY = br'''
 local function boundary()
@@ -108,32 +118,46 @@ def source_dependencies(reference, *, execution_image):
     return pins
 
 
-def _bound(saved, observation, *, active):
+def _bound(saved, observation, *, active, borrowed=False):
+    if borrowed:
+        from .xp1_session_view import _borrowed_xp2_reference
+
+        _borrowed_xp2_reference(saved, observation['player_id'])
     b, c, p, identity = _owner(saved, active=active)
-    if (getattr(saved, 'stock_dedications', False) is not True
-            or b.load_abi.core_sha256 != XP2_CORE_SHA256 or b.captured_bundle.reference != REFERENCE
-            or c.observation != observation):
-        raise ValueError('Dedication query requires its exact stock XP2 player boundary')
-    _require_image(getattr(b.core, '_civ6_host_execution_image', None))
-    lifetime = getattr(saved, '_xp2_dedication_binding', None)
+    core_sha256 = b.load_abi.core_sha256
+    image = getattr(b.core, '_civ6_host_execution_image', None)
+    if not borrowed and c.observation != observation:
+        raise ValueError('Dedication query requires its exact player observation')
+    xp1 = core_sha256 == XP1_CORE_SHA256
+    if xp1:
+        from . import xp1_dedications_source
+        if (getattr(saved, 'xp1_dedications_enabled', False) is not True
+                or not xp1_dedications_source.supports(b.captured_bundle.reference, image)):
+            raise ValueError('Dedication query requires its exact Rise and Fall capture')
+    else:
+        if (getattr(saved, 'stock_dedications', False) is not True
+                or core_sha256 != XP2_CORE_SHA256 or b.captured_bundle.reference != REFERENCE):
+            raise ValueError('Dedication query requires its exact stock XP2 capture')
+        _require_image(image)
+    lifetime = getattr(saved, '_dedication_binding', None)
     if lifetime is None or lifetime[0] is not b.core or lifetime[1] is not p:
         from .session_configuration import read_saved_settings
 
-        proof = source()
+        proof = xp1_dedications_source.source(image) if xp1 else source()
         rows = list(proof['paths'].values())
         for group in ('bindings', 'enums'):
             for entry in proof[group].values():
-                rows.extend(row for row in entry.values() if type(row) is dict)
+                rows.extend(row for row in entry.values() if isinstance(row, Mapping))
         for row in rows:
             raw = b.runtime.read(b.core._handle + int(row['rva'], 16), row['bytes'])
             if len(raw) != row['bytes'] or sha256(raw).hexdigest() != row['sha256']:
-                raise ValueError('Live XP2 dedication binding differs at ' + row['rva'])
+                raise ValueError('Live dedication binding differs at ' + row['rva'])
         setting = read_saved_settings(b.inputs.configuration)['turn_horizon']['start_turn']
         start_turn = setting['value']
         if (setting['present'] is not True or setting['variant_tag'] != 2
                 or type(start_turn) is not int or not 0 <= start_turn < 2**31):
             raise ValueError('Dedication query requires the exact saved GAME_START_TURN integer')
-        lifetime = saved._xp2_dedication_binding = b.core, p, start_turn
+        lifetime = saved._dedication_binding = b.core, p, start_turn
     return b, c, p, identity, lifetime[2]
 
 
@@ -174,13 +198,36 @@ def _query(prefix, observation, *, start_turn):
 def catalogue(saved, observation):
     b, c, p, identity, start_turn = _bound(saved, observation, active=False)
     c.explicit_dedications = None
-    c.transport.require_empty_native_queue()
-    b.control(empty=True)
-    state = _query(p, observation, start_turn=start_turn)
-    c.transport.require_empty_native_queue()
-    b.control(empty=True)
+    state = _read(b, c, p, observation, start_turn)
     c.explicit_dedications = identity, c.sequence, deepcopy(observation), state
     return deepcopy(state)
+
+
+def _read(backend, continuation, prefix, observation, start_turn):
+    continuation.transport.require_empty_native_queue()
+    backend.control(empty=True)
+    state = _query(prefix, observation, start_turn=start_turn)
+    continuation.transport.require_empty_native_queue()
+    backend.control(empty=True)
+    return state
+
+
+def read_borrowed(saved, observation):
+    b, c, p, _, start_turn = _bound(saved, observation, active=True, borrowed=True)
+    return _read(b, c, p, observation, start_turn)
+
+
+def apply_borrowed(saved, action, observation, *, expected, available):
+    refusal = dict(status='refused', requested_action=action)
+    if not available:
+        return dict(refusal, reason='native_dedication_acting_boundary_unavailable'), None
+    owner = _bound(saved, observation, active=True, borrowed=True)
+    b, c, p, _, start_turn = owner
+    state = _read(b, c, p, observation, start_turn)
+    if state != expected:
+        return dict(refusal, reason='native_dedication_choices_changed'), None
+    result = _apply(saved, action, owner, state, borrowed=True)
+    return dict(status='completed', reason=None, requested_action=action), result['observation']
 
 
 @dataclass(frozen=True)
@@ -197,9 +244,16 @@ def authorize_request(permit, core, context, player, operation, parameters, *,
     if (type(permit) is not _Permit or permit.seal is not _SEAL or core is not permit.core
             or context != permit.context or player != permit.player or operation != OPERATION
             or type(parameters) is not dict or parameters != {PARAMETER: permit.index}
-            or core_sha256 != XP2_CORE_SHA256 or submit is not True or allow_empty is not False):
-        raise ValueError('Missing exact XP2 dedication request permit')
-    _require_image(getattr(core, '_civ6_host_execution_image', None))
+            or submit is not True or allow_empty is not False):
+        raise ValueError('Missing exact dedication request permit')
+    image = getattr(core, '_civ6_host_execution_image', None)
+    if core_sha256 == XP1_CORE_SHA256:
+        from . import xp1_dedications_source
+        xp1_dedications_source.source(image)
+    elif core_sha256 == XP2_CORE_SHA256:
+        _require_image(image)
+    else:
+        raise ValueError('Unknown dedication request engine')
     return 'COMMEMORATE'
 
 
@@ -212,32 +266,48 @@ def verify_effect(before, after, action):
         raise RuntimeError('Native dedication application differs from the confirmed selections')
 
 
+def verify_borrowed_archive(payload, player_id, index):
+    """Authenticate one ordered COMMEMORATE request before delivering the batch."""
+    expected = struct.pack('<7IHH10xI', 3294486831, player_id, OPERATION,
+                           2, 0x80000001, 1, PARAMETER, 0, 2, index)
+    if type(payload) is not bytes or payload != expected:
+        raise RuntimeError('Dedication archive differs from its native sender or index')
+
+
 def apply(saved, action, observation):
-    from .native.native_player_observation import observe_player
-    from .native.native_player_operation_request import request_player_operation
     contract.validate_action(action)
-    b, c, p, identity, start_turn = _bound(saved, observation, active=True)
+    owner = _bound(saved, observation, active=True)
+    b, c, p, identity, start_turn = owner
     record = getattr(c, 'explicit_dedications', None)
     if record is None or record[0] is not identity or record[1:3] != (c.sequence, observation):
         raise ValueError('Dedication confirmation does not belong to this decision')
     c.explicit_dedications = None
-    c.transport.require_empty_native_queue()
-    b.control(empty=True)
-    fresh = _query(p, observation, start_turn=start_turn)
+    fresh = _read(b, c, p, observation, start_turn)
     if fresh != record[3]:
         raise ValueError('Native dedication choices changed since the decision')
+    return _apply(saved, action, owner, fresh, borrowed=False)
+
+
+def _apply(saved, action, owner, fresh, *, borrowed):
+    from .native.native_player_observation import observe_player
+    from .native.native_player_operation_request import request_player_operation
+
+    b, c, p, _, start_turn = owner
     contract.choose(fresh, contract.CANDIDATE, {'indices': action['indices']})
 
     count = c.publication_count
+    core_sha256 = b.load_abi.core_sha256
     hashes = []
     for index in action['indices']:
         permit = _Permit(_SEAL, b.core, b.context, fresh['player_id'], index)
         result = request_player_operation(b.core, b.context, fresh['player_id'], OPERATION,
-            {PARAMETER: index}, core_sha256=XP2_CORE_SHA256, dedication_permit=permit)
+            {PARAMETER: index}, core_sha256=core_sha256, dedication_permit=permit)
         pending = p.actions.pending
         if (result.get('request_invoked') is not True or result.get('can_start') is not None
                 or len(pending) != len(hashes) + 1 or pending[-1][:4] != _ARCHIVE_PREFIX):
             raise RuntimeError('Dedication request did not enqueue its native operation archive')
+        if borrowed:
+            verify_borrowed_archive(pending[-1], fresh['player_id'], index)
         hashes.append(sha256(pending[-1]).hexdigest())
     for expected in hashes:
         if not p.actions.pending or sha256(p.actions.pending[0]).hexdigest() != expected:
@@ -255,5 +325,6 @@ def apply(saved, action, observation):
     verify_effect(fresh, after, action)
     receipt = dict(action=deepcopy(action), native_archive_delivered=True,
                    native_archive_sha256=hashes, native_effect_readback=True, dedications_after=after)
-    saved.emit('xp2_dedications_confirmed', **receipt)
+    stage = 'xp1_dedications_confirmed' if core_sha256 == XP1_CORE_SHA256 else 'xp2_dedications_confirmed'
+    saved.emit(stage, **receipt)
     return dict(status='completed', observation=observed, receipt=receipt)

@@ -1,8 +1,8 @@
 """Current-actor public facts, without an RL termination or reward policy.
 
 Run build_source() through the protected Lua evaluator after public native cache
-publication. IsAlive=false is readable; an actor that is no longer both local
-player and observer is outside this profile. No native pointers are retained.
+publication. An expansion LAN outcome reader can opt in to the neutral observer
+for a still-local, formerly alive actor. No board or native pointers are retained.
 """
 from civ6_host.runtime.provenance import historical_source_file as _historical_source_file, historical_module_file as _historical_module_file, worker_path as _worker_path, pin_key as _pin_key, installed_source_pins as _installed_source_pins
 from civ6_host.runtime.resource_resolution import resolve_path as _resolve_resource_path
@@ -41,13 +41,91 @@ def _integer(raw, label, minimum, maximum):
         raise ValueError('Out-of-range ' + label)
     return value
 
-def build_source(player_id, expected_turn, *, core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'):
+def build_source(player_id, expected_turn, *,
+                 core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3',
+                 allow_inactive_observer=False):
     """Build a read-only chunk; this function itself executes no Lua/native call."""
     pid = _bounded(player_id, 'current actor ID', 63)
     turn = _bounded(expected_turn, 'expected turn', 2147483647)
+    from civ6_host.runtime.saved_load_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
+    if (type(allow_inactive_observer) is not bool
+            or allow_inactive_observer and core_sha256 not in (XP1_CORE_SHA256, XP2_CORE_SHA256)):
+        raise ValueError('Neutral observer facts require an expansion reader')
     verify_source(core_sha256=core_sha256)
-    return f'local pid,expectedTurn={pid},{turn}\n'.encode('ascii') + _READ_LUA
-_READ_LUA = "\nlocal function one(label,...)\n assert(select('#',...)==1,'episode facts invalid '..label..' arity')\n return ...\nend\nlocal function integer(value,label,low,high)\n assert(type(value)=='number' and value%1==0 and value>=low and value<=high,\n        'episode facts invalid '..label)\n return value\nend\nlocal function boolean(value,label)\n assert(type(value)=='boolean','episode facts invalid '..label)\n return value\nend\nassert(Game and type(Game.GetLocalPlayer)=='function' and\n type(Game.GetLocalObserver)=='function' and type(Game.GetCurrentGameTurn)=='function' and\n type(Game.GetWinningTeam)=='function','episode facts Game API unavailable')\nlocal function context()\n local localID=integer(one('local player',Game.GetLocalPlayer()),'local player',0,63)\n local observer=integer(one('observer',Game.GetLocalObserver()),'observer',0,63)\n local turn=integer(one('turn',Game.GetCurrentGameTurn()),'turn',0,2147483647)\n assert(localID==pid and observer==pid and turn==expectedTurn,\n        'episode facts foreign actor or stale context')\nend\ncontext()\nlocal function readPlayer()\n local player=Players and Players[pid]\n assert(player and type(player.GetID)=='function' and type(player.GetTeam)=='function' and\n  type(player.IsAlive)=='function' and type(player.WasEverAlive)=='function',\n  'episode facts Player API unavailable')\n local id=integer(one('player ID',player:GetID()),'player ID',0,63)\n assert(id==pid,'episode facts player identity mismatch')\n -- 0..63 is this adapter's admitted team-ID profile, not a native enum rewrite.\n local team=integer(one('team',player:GetTeam()),'team',0,63)\n local ever=boolean(one('WasEverAlive',player:WasEverAlive()),'WasEverAlive')\n assert(ever==true,'episode facts actor was never alive or cache is invalid')\n local alive=boolean(one('IsAlive',player:IsAlive()),'IsAlive')\n return id,team,ever,alive\nend\nlocal function winner(...)\n local arity=select('#',...)\n if arity==0 then return 0,nil,nil end\n assert(arity==2,'episode facts invalid winner arity')\n local team,victory=...\n integer(team,'winning team',-2147483648,2147483647)\n assert(team~=-1,'episode facts invalid present-winner sentinel')\n integer(victory,'victory type',-2147483648,2147483647)\n return 2,team,victory\nend\nlocal id,team,ever,alive=readPlayer()\nlocal arity,winningTeam,victory=winner(Game.GetWinningTeam())\ncontext()\nlocal idAgain,teamAgain,everAgain,aliveAgain=readPlayer()\nassert(idAgain==id and teamAgain==team and everAgain==ever and aliveAgain==alive,\n       'episode facts player snapshot changed')\nlocal arityAgain,teamWinnerAgain,victoryAgain=winner(Game.GetWinningTeam())\nassert(arityAgain==arity and teamWinnerAgain==winningTeam and victoryAgain==victory,\n       'episode facts winner snapshot changed')\ncontext()\nlocal function dec(value) return string.format('%.0f',value) end\nlocal out={'episode-facts-v1',dec(id),dec(expectedTurn),dec(team),\n alive and '1' or '0',ever and '1' or '0',dec(arity)}\nif arity==2 then\n out[#out+1]=dec(winningTeam);out[#out+1]=dec(victory)\nend\nreturn table.concat(out,'|')\n".encode('ascii')
+    allow = 'true' if allow_inactive_observer else 'false'
+    prefix = f'local pid,expectedTurn={pid},{turn}\nlocal allowInactiveObserver={allow}\n'
+    return prefix.encode('ascii') + _READ_LUA
+_READ_LUA = br"""
+local function one(label,...)
+ assert(select('#',...)==1,'episode facts invalid '..label..' arity')
+ return ...
+end
+local function integer(value,label,low,high)
+ assert(type(value)=='number' and value%1==0 and value>=low and value<=high,
+        'episode facts invalid '..label)
+ return value
+end
+local function boolean(value,label)
+ assert(type(value)=='boolean','episode facts invalid '..label)
+ return value
+end
+assert(Game and type(Game.GetLocalPlayer)=='function' and
+ type(Game.GetLocalObserver)=='function' and type(Game.GetCurrentGameTurn)=='function' and
+ type(Game.GetWinningTeam)=='function','episode facts Game API unavailable')
+local function context()
+ local localID=integer(one('local player',Game.GetLocalPlayer()),'local player',0,63)
+ local observer=integer(one('observer',Game.GetLocalObserver()),'observer',-2147483648,2147483647)
+ local turn=integer(one('turn',Game.GetCurrentGameTurn()),'turn',0,2147483647)
+ local neutral=allowInactiveObserver and PlayerTypes and
+  type(PlayerTypes.OBSERVER)=='number' and observer==PlayerTypes.OBSERVER
+ assert(localID==pid and turn==expectedTurn and (observer==pid or neutral),
+        'episode facts foreign actor or stale context')
+ return observer
+end
+local observer=context()
+local function readPlayer()
+ local player=Players and Players[pid]
+ assert(player and type(player.GetID)=='function' and type(player.GetTeam)=='function' and
+  type(player.IsAlive)=='function' and type(player.WasEverAlive)=='function',
+  'episode facts Player API unavailable')
+ local id=integer(one('player ID',player:GetID()),'player ID',0,63)
+ assert(id==pid,'episode facts player identity mismatch')
+ -- 0..63 is this adapter's admitted team-ID profile, not a native enum rewrite.
+ local team=integer(one('team',player:GetTeam()),'team',0,63)
+ local ever=boolean(one('WasEverAlive',player:WasEverAlive()),'WasEverAlive')
+ assert(ever==true,'episode facts actor was never alive or cache is invalid')
+ local alive=boolean(one('IsAlive',player:IsAlive()),'IsAlive')
+ return id,team,ever,alive
+end
+local function winner(...)
+ local arity=select('#',...)
+ if arity==0 then return 0,nil,nil end
+ assert(arity==2,'episode facts invalid winner arity')
+ local team,victory=...
+ integer(team,'winning team',-2147483648,2147483647)
+ assert(team~=-1,'episode facts invalid present-winner sentinel')
+ integer(victory,'victory type',-2147483648,2147483647)
+ return 2,team,victory
+end
+local id,team,ever,alive=readPlayer()
+assert(observer==pid or not alive,'episode facts neutral observer for living actor')
+local arity,winningTeam,victory=winner(Game.GetWinningTeam())
+assert(context()==observer,'episode facts observer changed')
+local idAgain,teamAgain,everAgain,aliveAgain=readPlayer()
+assert(idAgain==id and teamAgain==team and everAgain==ever and aliveAgain==alive,
+       'episode facts player snapshot changed')
+local arityAgain,teamWinnerAgain,victoryAgain=winner(Game.GetWinningTeam())
+assert(arityAgain==arity and teamWinnerAgain==winningTeam and victoryAgain==victory,
+       'episode facts winner snapshot changed')
+assert(context()==observer,'episode facts observer changed')
+local function dec(value) return string.format('%.0f',value) end
+local out={'episode-facts-v1',dec(id),dec(expectedTurn),dec(team),
+ alive and '1' or '0',ever and '1' or '0',dec(arity)}
+if arity==2 then
+ out[#out+1]=dec(winningTeam);out[#out+1]=dec(victory)
+end
+return table.concat(out,'|')
+"""
 
 def parse_facts(payload, player_id, expected_turn, *, core_sha256='d7ed520e1334947fc7b3be50b00c78eea55e69eb079583f24d87742e90f2a5c3'):
     from civ6_host.runtime.xp1_session_result import bind_facts_provenance

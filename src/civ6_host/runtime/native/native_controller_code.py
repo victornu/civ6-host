@@ -35,15 +35,36 @@ def source_profile():
 def _verify_captured_exe_identity(source, execution_image):
     if execution_image is None:
         return False
-    from civ6_host.runtime.execution_images import identity
+    from civ6_host.runtime.execution_images import _BASE_PROFILE, identity, verify_base_context_correspondence
     from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_SHA256
     selected = identity(execution_image)
-    if selected['reference_core_sha256'] not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
-        raise ValueError('Controller capture requires a registered expansion execution profile')
     if (source.get('image', {}).get('path') != _CAPTURED_EXE_PATH
             or source.get('image', {}).get('sha256') != EXE_SHA):
         raise ValueError('Pinned controller capture executable identity differs')
+    if execution_image is _BASE_PROFILE:
+        # The saved route imports the controller from the authenticated
+        # capture producer. The installed EXE still has a different image.
+        producer = verify_base_context_correspondence(execution_image)['executable']['reference']
+        if producer['sha256'] != EXE_SHA:
+            raise ValueError('Base controller source differs from the retained capture producer')
+        _verify_source_file(source, producer['path'], expected_size=producer['bytes'])
+    elif selected['reference_core_sha256'] not in (XP1_CORE_SHA256, XP2_CORE_SHA256):
+        raise ValueError('Controller capture requires a registered execution profile')
     return True
+
+def _verify_source_file(source, path, *, expected_size=None):
+    executable = _resolve_resource_path(Path(path))
+    with executable.open('rb') as stream:
+        if (expected_size is not None and os.fstat(stream.fileno()).st_size != expected_size
+                or hashlib.file_digest(stream, 'sha256').hexdigest() != EXE_SHA):
+            raise ValueError('Controller source EXE hash or size changed')
+        for rows, field in ((source['functions'].values(), 'raw_hex'), (source['unwind_rows'], 'unwind_hex')):
+            for row in rows:
+                raw = bytes.fromhex(row[field])
+                stream.seek(row['file_offset'])
+                if stream.read(len(raw)) != raw:
+                    raise ValueError('Controller source code or unwind differs')
+
 
 def build_image(source, imports):
     """Small closed island: code RX, unwind/imports RO, clock-frequency cache RW."""
@@ -118,19 +139,7 @@ class NativeControllerCode:
         self.source = source_profile()
         selected_current = _verify_captured_exe_identity(self.source, execution_image)
         if not selected_current:
-            original = _resolve_resource_path(_resolve_resource_path(Path(self.source['image']['path']))).read_bytes()
-            if hashlib.sha256(original).hexdigest() != EXE_SHA:
-                raise ValueError('Installed EXE hash changed')
-            for row in self.source['functions'].values():
-                raw = bytes.fromhex(row['raw_hex'])
-                offset = row['file_offset']
-                if original[offset:offset + len(raw)] != raw:
-                    raise ValueError('Original controller instructions differ')
-            for row in self.source['unwind_rows']:
-                raw = bytes.fromhex(row['unwind_hex'])
-                offset = row['file_offset']
-                if original[offset:offset + len(raw)] != raw:
-                    raise ValueError('Original controller unwind differs')
+            _verify_source_file(self.source, self.source['image']['path'])
         k = self.kernel = C.WinDLL('kernel32', use_last_error=True)
         n = self.ntdll = C.WinDLL('ntdll', use_last_error=True)
         imports = {name: C.cast(getattr(k, name), C.c_void_p).value for name in IMPORT_OFFSETS}

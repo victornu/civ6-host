@@ -447,7 +447,9 @@ def read(owner, observation: dict, prompt: dict) -> dict:
     if prefix.ui_child is None or prefix.runtime.registry.validate(prefix.ui_child) is None:
         raise RuntimeError('XP2 war display requires the retained owned UI child')
     owner.control(empty=True)
-    before_jobs = backend.jobs.query_snapshot(owner.saved,'before')
+    snapshot = (backend.jobs_snapshot if getattr(owner, 'active', False)
+                else lambda phase: backend.jobs.query_snapshot(owner.saved, phase))
+    before_jobs = snapshot('before')
     require_quiescent(before_jobs)
     if prefix.actions.pending or prefix.deferred_events.pending:
         raise RuntimeError('XP2 war display read requires empty native transports')
@@ -460,7 +462,7 @@ def read(owner, observation: dict, prompt: dict) -> dict:
         b'@xp2_official_world_war_display', capacity=MAX_BYTES + 1)
     result = parse_display(raw, pid, turn, [defender], war)
     owner.control(empty=True)
-    after_jobs = backend.jobs.query_snapshot(owner.saved,'after')
+    after_jobs = snapshot('after')
     require_quiescent(after_jobs)
     if prefix.actions.pending or prefix.deferred_events.pending:
         raise RuntimeError('XP2 war display read left native transports pending')

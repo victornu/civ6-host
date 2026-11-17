@@ -855,9 +855,14 @@ def validate_fixture(bundle, path):
 
 def validate_inputs(inputs, *, _input_only=False):
     from civ6_host.runtime.capture_profiles import LAN_PROFILE
+    from civ6_host.runtime.native.native_official_load import HOTSEAT_FOUR_PROFILE
     if inputs.profile is LAN_PROFILE and inputs.checkpoint is not None:
         from civ6_host.runtime.network_checkpoint import validate_inputs as validate_lan_checkpoint
         return validate_lan_checkpoint(inputs)
+    if inputs.profile is HOTSEAT_FOUR_PROFILE and inputs.checkpoint is not None:
+        from civ6_host.runtime.base_capture_inputs import validate_resumed_inputs
+        validate_resumed_inputs(inputs)
+        return
     from civ6_host.runtime.native.official_save import inspect_save
     require(inputs.checkpoint is None, 'Checkpoint and official bundle are mutually exclusive')
     reference, m = _manifest(inputs.official_bundle)
@@ -888,10 +893,22 @@ def validate_closure_profile(closure):
         from civ6_host.runtime.network_checkpoint import validate_closure as validate_lan_checkpoint_closure
         return validate_lan_checkpoint_closure(closure)
     explicit = closure.get('official_bundle')
+    if closure.get('hotseat_checkpoint') is not None:
+        from civ6_host.runtime.execution_images import _BASE_PROFILE, identity
+        require(closure.get('input_profile') == 'hotseat-four'
+                and closure.get('execution_image') == identity(_BASE_PROFILE)
+                and explicit is not None, 'Checkpoint is outside its installed Base Hotseat session')
     if explicit is None:
         require(closure.get('database_profile') == 'official-cache-phase23-diagnostic', 'Historical database profile differs')
     else:
-        require(closure.get('database_profile') == DATABASE_PROFILE and closure.get('resume_checkpoint') is None and (closure.get('checkpoint_on_close', False) is False), 'Explicit bundle cannot fall back to historical databases or checkpoints')
+        if closure.get('input_profile') == 'hotseat-four':
+            from civ6_host.runtime.base_capture_inputs import checkpoint_enabled
+            checkpoint_enabled(closure)
+        else:
+            require(closure.get('checkpoint_on_close', False) is False,
+                    'Unsupported checkpoint for the explicit bundle')
+        require(closure.get('database_profile') == DATABASE_PROFILE and closure.get('resume_checkpoint') is None,
+                'Explicit bundle cannot fall back to historical databases or checkpoints')
         normalize_reference(explicit)
         require(type(closure.get('initial_turn')) is int and 1 <= closure['initial_turn'] <= 100000, 'Captured initial turn is required')
 

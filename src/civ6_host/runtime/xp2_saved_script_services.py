@@ -13,7 +13,7 @@ from .configuration_profiles import _source,configuration_abi
 from .saved_load_profiles import XP2_CORE_SHA256,profile_for_sha
 from .paths import resource_root
 from .resource_resolution import resolve_path
-from .native.native_source_cache import load_pinned_json
+from .source_verification import verify_pinned_json_bytes
 
 SOURCE=('work/host-extensions/xp2-saved-script-services/source-profile-v1.json','a285f3b28885d7b3f4323991e2c359afe900d7c6ccfc1d38c323cf4f6c7f668f')
 
@@ -43,7 +43,7 @@ def source():
         path=resolve_path(root/row['path']).resolve(strict=True)
         _require(path.is_relative_to(root) and 0<path.stat().st_size==row['bytes']<=8*1024*1024,
                  'XP2 saved-script source left its bounded root')
-        load_pinned_json(path,row['sha256'])
+        verify_pinned_json_bytes(path,row['sha256'])
     _require(0<len(proof['bodies'])<=128,'XP2 saved-script body inventory differs')
     for body in proof['bodies']:
         raw=bytes.fromhex(body['raw_hex'])

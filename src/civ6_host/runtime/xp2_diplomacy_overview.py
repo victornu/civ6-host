@@ -1,28 +1,52 @@
 """Initial diplomacy queries and explicit requests on the retained XP2 owner."""
+from contextlib import nullcontext
 from copy import deepcopy
 
+from civ6_host.contracts import diplomacy_overview as contract
 from .configuration_profiles import XP2_CORE_SHA256
 from . import xp2_diplomacy_overview_source as ui
 from . import xp2_initial_query_source as queries
 from . import xp2_initial_statement_factory as factories
+from . import xp2_diplomatic_relationships as relationships
+from . import xp2_city_state_peace as peace
+from . import xp2_major_deals as deals
+from . import xp2_deal_draft as draft
+from . import xp2_deal_peace as treaty
 
 
-def source_dependencies(*, execution_image):
+def source_dependencies(*, execution_image, stock=False):
     from .xp2_diplomacy_display_source import source_dependencies as display_dependencies
     from .xp2_statement_source import source_dependencies as statement_dependencies
     from .xp2_world_configuration import source_dependencies as configuration_dependencies
     pins = {}
-    for group in (ui.source_dependencies(execution_image=execution_image),
-                  queries.source_dependencies(execution_image=execution_image),
-                  factories.source_dependencies(execution_image=execution_image),
-                  display_dependencies(execution_image=execution_image),
-                  statement_dependencies(execution_image=execution_image),
-                  configuration_dependencies()):
+    common = (
+        ui.source_dependencies(execution_image=execution_image, stock=stock),
+        queries.source_dependencies(execution_image=execution_image),
+        factories.source_dependencies(execution_image=execution_image),
+        display_dependencies(execution_image=execution_image),
+        statement_dependencies(execution_image=execution_image),
+        relationships.source_dependencies(ui._load_profile()['official_files']['xp2_view']['path']),
+        configuration_dependencies(),
+        deals.source_dependencies(execution_image=execution_image, stock=stock),
+        draft.source_dependencies(execution_image=execution_image),
+        treaty.dependencies(execution_image),
+        peace.source_dependencies(stock=stock),
+    )
+    for group in common:
         for path, digest in group.items():
             if path in pins and pins[path] != digest:
                 raise ValueError("Initial diplomacy source closure has conflicting pins")
             pins[path] = digest
     return pins
+
+
+def require_stock_capture(reference):
+    from .xp2_bundle_inputs import REFERENCE
+    from .native.native_official_bundle import normalize_reference
+    if type(reference) is tuple and len(reference) == 2:
+        reference = dict(zip(('path', 'sha256'), reference))
+    if normalize_reference(reference) != REFERENCE:
+        raise ValueError('Initial stock diplomacy requires the registered unmodded Gathering Storm capture')
 
 
 def _bind(saved, *, active):
@@ -35,11 +59,14 @@ def _bind(saved, *, active):
     else:
         saved._check_query()
     b, p = saved.backend, saved.prefix
+    stock = getattr(saved, "standard_trade", False) is True
+    if stock:
+        require_stock_capture(b.captured_bundle.reference)
     if (getattr(saved, "diplomacy_overview_diagnostic", False) is not True
-            or getattr(saved, "governors_diagnostic", False) is not True
+            or (not stock and (getattr(saved, "governors_diagnostic", False) is not True
+                or not xp2_bbg_inputs.is_reference(saved.inputs.official_bundle)))
             or getattr(saved, "war_source_sha256", None) is None
             or b.load_abi.core_sha256 != XP2_CORE_SHA256
-            or not xp2_bbg_inputs.is_reference(saved.inputs.official_bundle)
             or getattr(saved, "_xp2_diplomacy", None) is not None
             or p.deferred_events.pending_diplomacy_statements
             or saved.continuation.world_input_prompts.get(saved.continuation.observation["player_id"]) is not None):
@@ -54,7 +81,7 @@ def _bind(saved, *, active):
         from .network_dialogue import attach_database
         attach_database(b)
         saved._xp2_initial_diplomacy_lifetime = lifetime
-    return b, p, image
+    return b, p, image, stock
 
 
 def _configuration(b, p, pid):
@@ -73,8 +100,8 @@ def _configuration(b, p, pid):
     return dict(initiator=initiator, players=players, paused=queries.read_pause(b))
 
 
-def catalogue(saved, observation, *, active=False, sequence=None):
-    b, p, image = _bind(saved, active=active)
+def catalogue(saved, observation, *, active=False, sequence=None, public_relationships=False):
+    b, p, image, stock = _bind(saved, active=active)
     pid, turn = observation["player_id"], observation["turn"]
     if (pid, turn) != (saved.continuation.observation["player_id"],
                        saved.continuation.observation["turn"]):
@@ -97,6 +124,21 @@ def catalogue(saved, observation, *, active=False, sequence=None):
         ui.source(pid, turn, configuration=configuration, execution_image=image),
         b"@xp2_initial_diplomacy_overview", capacity=262144)
     value = ui.parse(raw, pid, turn)
+    if stock or public_relationships:
+        value = relationships.read(p, value)
+        lifetime = b.core, p
+        if getattr(saved, '_xp2_major_deals_lifetime', None) != lifetime:
+            deals.verify_live(b.core._handle, b.runtime.read, execution_image=image)
+            saved._xp2_major_deals_lifetime = lifetime
+        if stock:
+            value = deals.read_stock_negotiation(p, value)
+            value = dict(value, schema=contract.STOCK_CITY_STATE_PEACE_SCHEMA,
+                         city_state_peace=peace.panel(p, pid, turn))
+            contract.validate(value, pid, turn)
+        else:
+            value = dict(value, schema=contract.CITY_STATE_PEACE_SCHEMA,
+                         city_state_peace=peace.panel(p, pid, turn))
+            value = deals.read(p, value, draft=True, open_borders=True, demand=True, major_peace=True)
     saved._xp2_initial_diplomacy_catalogue = deepcopy(value)
     saved.emit("native_xp2_initial_diplomacy_overview",
         episode_id=saved.continuation.identity.episode_id,
@@ -110,13 +152,20 @@ def catalogue(saved, observation, *, active=False, sequence=None):
 
 def initiate(saved, action, observation):
     """Requery availability, dispatch official Lua, and deliver its native archive."""
-    from civ6_host.contracts.diplomacy_overview import validate_action
     from .a0_diplomacy_statement import require_receiver
     from .native.native_diplomacy_choices import deliver_statement_request
-    validate_action(action)
-    b, p, image = _bind(saved, active=True)
-    current = catalogue(saved, observation, active=True)
-    if action not in ui.candidates(current):
+    contract.validate_action(action)
+    b, p, image, stock = _bind(saved, active=True)
+    making_peace = action['choice'] == contract.MAKE_PEACE
+    demand = action['choice'] == contract.OPEN_DEMAND
+    opening_deal = action['choice'] == contract.OPEN_DEAL or demand or making_peace
+    current = catalogue(saved, observation, active=True, public_relationships=opening_deal)
+    target = action['target_player_id']
+    if (making_peace and current['schema'] in contract.CITY_STATE_SCHEMAS
+            and not any(row['player_id'] == target for row in current['targets'])):
+        return peace.apply(saved, b, p, action, current)
+    choices = contract.candidates(current) if opening_deal or stock else ui.candidates(current)
+    if action not in choices:
         return dict(status="refused", refusal_code="native_diplomacy_availability_changed",
                     requested_action=action, pending_statement_retained=False)
     if not require_receiver(saved):
@@ -125,19 +174,33 @@ def initiate(saved, action, observation):
     if p.actions.pending:
         raise RuntimeError("Initial diplomacy overlaps a native command")
     pid, turn = observation["player_id"], observation["turn"]
-    name = ui.REQUEST_STATEMENT_TYPES[action["choice"]]
-    factory = factories.verify_request(b.core._handle, b.runtime.read, name,
-                                       execution_image=image)
+    if opening_deal:
+        name = 'MAKE_DEMAND' if demand else 'MAKE_DEAL'
+        factory = draft.verify_request(saved, image, demand=demand)
+        if making_peace:
+            treaty.verify(b.core._handle, b.runtime.read, image)
+    else:
+        name = ui.REQUEST_STATEMENT_TYPES[action['choice']]
+        factory = factories.verify_request(b.core._handle, b.runtime.read, name,
+                                           execution_image=image)
     war_request = name.startswith("DECLARE_") and name != "DECLARE_FRIEND"
     war_before = None
     if war_request:
         from .xp2_world_war import _read_state
         war_before = _read_state(p, pid, turn, action["target_player_id"])
     configuration = _configuration(b, p, pid)
-    raw = p.runtime.evaluate_text(p.ui_child,
-        ui.request_source(pid, turn, action["target_player_id"], action["choice"],
-                          configuration=configuration, execution_image=image),
-        b"@xp2_initial_diplomacy_request", capacity=64)
+    request_options = {'deal_draft': True} if opening_deal else {}
+    scope = (draft.statement_scope(saved.continuation, pid, action['target_player_id'], demand=demand)
+             if opening_deal else nullcontext())
+    with scope:
+        raw = p.runtime.evaluate_text(p.ui_child,
+            ui.request_source(pid, turn, action["target_player_id"], action["choice"],
+                              configuration=configuration, execution_image=image, **request_options),
+            b"@xp2_initial_diplomacy_request", capacity=64)
+        if raw == b"requested" and factory["expected_registration"] is True:
+            deliver_statement_request(p.actions)
+            p.deferred_events.drain()
+            p.view_publisher.publish()
     if raw == b"not_requested":
         if p.actions.pending or p.deferred_events.pending_diplomacy_statements:
             raise RuntimeError("Native RequestSession refused but produced pending work")
@@ -149,13 +212,22 @@ def initiate(saved, action, observation):
                     requested_action=action, pending_statement_retained=False)
     if raw != b"requested" or factory["expected_registration"] is not True:
         raise RuntimeError("Initial diplomacy returned an unqualified request receipt")
-    deliver_statement_request(p.actions)
-    p.deferred_events.drain()
-    p.view_publisher.publish()
     ledger = p.deferred_events.pending_diplomacy_statements
     if len(ledger) > 1:
         raise RuntimeError("Initial diplomacy produced multiple unqualified pending statements")
     pending = bool(ledger)
+    if opening_deal:
+        if not pending:
+            raise RuntimeError('Native deal request produced no statement')
+        fields = ledger[0]['fields']
+        if (fields['StatementType'] != factory['statement_hash']
+                or {fields['FromPlayer'], fields['ToPlayer']} != {pid, target}):
+            raise RuntimeError('Native deal request produced a different statement')
+        saved._xp2_requested_deal = (pid, target, turn)
+        if demand:
+            saved._xp2_demand = True
+        if making_peace:
+            saved._xp2_major_peace = True
     war_after = None
     if war_request and not pending:
         war_after = _read_state(p, pid, turn, action["target_player_id"])

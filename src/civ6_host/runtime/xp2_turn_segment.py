@@ -23,15 +23,15 @@ def source_dependencies(*, execution_image):
             str(module): hashlib.sha256(module.read_bytes()).hexdigest()}
 
 
-def read(saved, player_id, turn):
+def read(saved, player_id, turn, *, borrowed_xp2=False):
     """Return the native hash, preserving the absent marker as uint32 0xffffffff."""
     from .xp1_world_input import _owner
-    from .xp1_session_view import _reference
-    if (type(player_id) is not int or not 0 <= player_id <= 63
+    from .xp1_session_view import _borrowed_xp2_reference, _reference
+    if (type(borrowed_xp2) is not bool or type(player_id) is not int or not 0 <= player_id <= 63
             or type(turn) is not int or not 0 <= turn <= 100000):
         raise ValueError('Invalid turn-segment perspective')
     b, c, p, identity = _owner(saved, active=True)
-    _reference(saved, player_id)
+    (_borrowed_xp2_reference if borrowed_xp2 else _reference)(saved, player_id)
     if (b.load_abi.core_sha256 != XP2_CORE_SHA256
             or (getattr(saved, 'world_congress_diagnostic', False) is not True
                 and getattr(saved, 'stock_dedications', False) is not True)):

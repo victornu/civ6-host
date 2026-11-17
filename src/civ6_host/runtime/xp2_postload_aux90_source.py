@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 import struct
 
+from .source_verification import file_sha256
 from .configuration_profiles import _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
@@ -108,7 +109,7 @@ def source_dependencies():
         digest = row['sha256']
         if type(digest) is not str or len(digest) != 64:
             raise ValueError('XP2 AUX90 source dependency digest is invalid')
-        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        if file_sha256(path) != digest:
             raise ValueError('XP2 AUX90 source dependency changed: ' + str(path))
         key = str(path)
         if key in pins and pins[key] != digest:

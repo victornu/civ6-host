@@ -37,12 +37,16 @@ local function adjacentOffers(add,u,x,y,source,remaining)
   local targets=UnitManager.GetOperationTargets(u,operation,{[op.PARAM_IMPROVEMENT_TYPE]=row.Hash})
   assert(type(targets)=='table','adjacent improvement targets')
   local plots=targets[UnitOperationResults.PLOTS] or {}
-  local plotCount,seenPlots=0,{}
+  local plotCount,seenPlots,ordered=0,{},{}
   for _,id in pairs(plots) do
    plotCount=plotCount+1
    integer(id,'target plot',0,4294967295)
    assert(plotCount<=32 and Map.IsPlot(id) and id~=source:GetIndex() and not seenPlots[id],'invalid adjacent target')
    seenPlots[id]=true
+   ordered[#ordered+1]=id
+  end
+  table.sort(ordered)
+  for _,id in ipairs(ordered) do
    local plot=Map.GetPlotByIndex(id)
    local tx,ty=plot:GetX(),plot:GetY()
    assert(visiblePlot(tx,ty):GetIndex()==id,'adjacent target identity')

@@ -6,6 +6,8 @@ current ownership/activity; saved mode tokens never prove scheduling parity.
 import hashlib
 from pathlib import Path
 
+from .configuration_profiles import XP2_CORE_SHA256
+
 
 def source_dependencies(*,execution_image=None):
     if execution_image is not None:
@@ -22,7 +24,7 @@ def source_dependencies(*,execution_image=None):
 def bind(saved):
     """Bind once, after the real Load/UI/continuation stages have returned."""
     from .xp1_saved_load_owner import SavedLoadOwner
-    from .captured_session_profile import for_backend
+    from .captured_session_profile import for_backend, saved_geometry
     from .lan_load import _parse_roster, _LAN_MODE, _SIMULTANEOUS_PHASE
     from .session_configuration import read_saved_settings
     if type(saved) is not SavedLoadOwner:
@@ -31,8 +33,9 @@ def bind(saved):
     if hasattr(saved, 'network_reference'):
         raise ValueError('XP1 session reference was already bound')
     b = saved.backend
+    bundle = b.captured_bundle
     selected = for_backend(b)
-    selected.candidate.validate_inputs(saved.inputs, b.captured_bundle)
+    selected.candidate.validate_inputs(saved.inputs, bundle)
     settings = read_saved_settings(saved.inputs.configuration)
     mode, phase = settings['game_mode'], settings['turn_phase']
     if (mode['value'] != _LAN_MODE or mode['name'] != 'LAN'
@@ -41,13 +44,22 @@ def bind(saved):
         raise ValueError('XP1 captured configuration is not the qualified LAN phase')
     turn, width, height, ids = _parse_roster(b.loaded_roster)
     observed = saved.view_result['observation']
+    if b.load_abi.core_sha256 == XP2_CORE_SHA256:
+        geometry = saved_geometry(bundle)
+        expected_roster = (geometry['turn'], geometry['width'], geometry['height'],
+                           geometry['major_player_ids'])
+        local_player = geometry['local_player_id']
+        humans = geometry['taken_player_ids']
+    else:
+        expected_roster = (bundle.initial_turn, selected.width, selected.height, selected.major_ids)
+        local_player = 0
+        humans = selected.human_ids
     # The retained raw-Load adapter already executed validate_loaded_roster
     # against exactly this capture. The live view repeats human reads before
     # exposing anything; these IDs are not substituted for runtime results.
-    if ((turn, width, height, ids) != (b.captured_bundle.initial_turn,
-            selected.width, selected.height, selected.major_ids)
+    if ((turn, width, height, ids) != expected_roster
             or tuple(observed[k] for k in ('turn', 'width', 'height', 'player_id'))
-                != (turn, width, height, 0)
+                != (turn, width, height, local_player)
             or b.host.configured_local_player_id != observed['player_id']
             or saved.continuation.view is not saved.player_view
             or saved.player_view.result is not saved.view_result):
@@ -58,6 +70,6 @@ def bind(saved):
         configuration_sha256=hashlib.sha256(saved.inputs.configuration).hexdigest(),
         state=dict(player_id=observed['player_id'], observer_id=observed['player_id'],
                    game_mode_u32=mode['value'], turn_phase_u32=phase['value']),
-        major_player_ids=ids, human_player_ids=selected.human_ids)
+        major_player_ids=ids, human_player_ids=humans)
     saved.network_reference = reference
     return reference

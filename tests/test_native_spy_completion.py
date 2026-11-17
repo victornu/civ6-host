@@ -118,6 +118,17 @@ class SpyCompletionTests(unittest.TestCase):
         self.assertEqual(self.renew(value)['unit_id'], 7)
         self.assertEqual(self.lua.execute(native.request_source(self.renew(value), value)), b'submitted')
 
+    def test_waiting_renewal_reads_only_the_selected_own_unit_order(self):
+        self.lua.execute(b'state.active=false;state.complete=false;state.moves=0')
+        action = self.renew(self.query())
+        self.lua.execute(b'state.noMissionReads=true')
+        order = native.renewal_unit_state(self.prefix, action, 0, 8)
+        self.assertEqual(order['expected_operation'], 1)
+        self.assertEqual(order['unit_id'], action['unit_id'])
+        self.lua.execute(b'state.observer=1')
+        with self.assertRaisesRegex(LuaError, 'foreign renewal observation'):
+            native.renewal_unit_state(self.prefix, action, 0, 8)
+
     def test_counterspy_renew_has_historical_district_params_and_no_moves_gate(self):
         self.lua.execute(b'state.moves=0')
         value = self.query();action = self.renew(value)

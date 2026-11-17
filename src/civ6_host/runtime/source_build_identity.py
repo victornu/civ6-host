@@ -6,12 +6,51 @@ Only reviewed immutable build records in the registry can be admitted.
 from pathlib import Path
 import hashlib
 import json
+from os import fstat
 from .configuration_profiles import _source
 from .resource_resolution import resolve_path
+from .source_verification import file_sha256
 
 XP2_HOST_COMPONENT_SHA='268a43bc7e06b383adfa13d2c084d2d7966ca8ffc9782044a0103ca36967f4f7'
 
+BASE_CURRENT_HOST_REFERENCE = (
+    'work/base-current-image/host-build02/civ6rl-native-python.exe',
+    '99b42c5b1da0ba2465efe5d15d0536e9ed3f6fc94d0b6889664add7e170b44ae',
+)
+BASE_CURRENT_HOST_PROOF = (
+    'evidence/host-base-current-havok-build.json',
+    'd62e9f5731cde8c22b433dda103829ff5250959569db93b3022d6b033822eccc',
+)
+BASE_CURRENT_HOST_COMPONENTS = {
+    'gamecore_python_host.c': '78ea84decfe2a20c540c53e7683cf19e6fb77167959285adce2b965c2450b39e',
+    'script_game_event_aggregators.inc': '62ada8288b9bc96689364730e10330b094e13dfca915839caa49e8e6da5b1bb9',
+}
+
+
+def verify_base_current_host_transition():
+    """Authenticate the compiled Base overlay's exact delta from retained Host41."""
+    proof = _source(BASE_CURRENT_HOST_PROOF)
+    artifact = proof['candidate_executable']
+    comparison = proof['checks']['binary_differences']
+    if (proof['schema'] != 'civ6-host.base-current-havok-build.v1'
+            or (artifact['path'], artifact['sha256']) != BASE_CURRENT_HOST_REFERENCE
+            or comparison['exports_unchanged'] != 68
+            or comparison['address_constants_changed'] != 49
+            or comparison['code_bytes_changed'] != 105
+            or tuple(comparison['other_changes_only_pe_timestamps']) != (
+                'COFF.TimeDateStamp', 'DebugDirectory[0].TimeDateStamp',
+                'ExportDirectory.TimeDateStamp')):
+        raise ValueError('Installed Base host changed beyond its Havok addresses')
+    return proof
+
+
 SOURCE_BUILDS = {
+    BASE_CURRENT_HOST_REFERENCE[1]: {
+        'reference': ('work/base-current-image/host-build02/build.json',
+                      '7312a610ef7bc6a73e4826ff83b1c4d7cebb9d880b07f368651076bac099cc88'),
+        'manifest_sha256': '7432c4df775f6b76717a41a9557d2cdac55769616133294052de79054465f4d8',
+        'profile': 'base-current-havok-201979',
+    },
     'd5f15e2c314831234b5056dd041d253ab6e542bfa6070ee7327f8e17b3c3f3c8': {
         'reference': ('work/native-host-xp2-current-strings-unsigned-log-build01/build.json',
                       '60956421113f7e6c9781e1cb84af55e8f5610047bed01d70576ad32e04e55ecd'),
@@ -98,9 +137,12 @@ def verify_source_build(executable, *, required_components):
         if receipt.resolve(strict=True) != receipt:
             raise ValueError('Native build record is redirected')
         with receipt.open('rb') as stream:
-            receipt_bytes = stream.read(8 * 1024 * 1024 + 1)
-        if len(receipt_bytes) > 8 * 1024 * 1024:
-            raise ValueError('Native build record is oversized')
+            size = fstat(stream.fileno()).st_size
+            if size > 8 * 1024 * 1024:
+                raise ValueError('Native build record is oversized')
+            receipt_bytes = stream.read(size + 1)
+            if len(receipt_bytes) != size:
+                raise ValueError('Native build record changed size while being read')
         receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
         if receipt_sha != reference[1]:
             reference = (str(receipt), receipt_sha)
@@ -129,7 +171,7 @@ def verify_source_build(executable, *, required_components):
                       or not component.is_relative_to(path.parent / 'inputs')
                       or '..' in component.parts or component.resolve(strict=True) != component):
             raise ValueError('Local native source must be its canonical staged input')
-        if key in sources or hashlib.sha256(component.read_bytes()).hexdigest()!=row['sha256']:
+        if key in sources or file_sha256(component) != row['sha256']:
             raise ValueError('Native build input differs or is duplicated')
         sources[key]=row['sha256']
         dependencies[row['path']] = row['sha256']

@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from .configuration_profiles import XP2_CORE_SHA256, _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from .source_verification import verify_pinned_json_bytes
 
 SOURCE=('work/host-extensions/xp2-unit-attacks-static/source-profile-v1.json',
         '94562a3ba9e6988fde63a146dd1228b2454b5b1dbee93ffc12a25d83756d95e2')
@@ -109,7 +110,8 @@ def _contracts(proof):
             or facade['tables']!=selected['query_tables']
             or len(selected['query_operations'])!=35):
         raise ValueError('XP2 attack EXE facade source correspondence changed')
-    enums=proof['enum_selection'];parent=_source((enums['body_reference']['path'],enums['body_reference']['sha256']))
+    from .xp2_initial_choice_source import referenced_source
+    enums=proof['enum_selection'];parent=referenced_source(enums['body_reference'])
     enum_body=parent['functions'][enums['body_key']]
     if enum_body['sha256']!=enums['body_sha256'] or len(enums['enums'])!=22:
         raise ValueError('XP2 attack enum closure changed')
@@ -169,7 +171,8 @@ def verify_source(core_sha256=XP2_CORE_SHA256):
                 readiness_is_presentation=True,war_confirmation_admitted=False,arbitrary_routes_admitted=False,
                 native_defender_selection=True,missing_effect_is_unqualified=True)):
         raise ValueError('XP2 public attack source identity changed')
-    for row in p['references']:_source((row['path'],row['sha256']))
+    for row in p['references']:
+        verify_pinned_json_bytes(resolve_path(resource_root()/row['path']), row['sha256'])
     _contracts(p);_official_route(p)
     return p
 

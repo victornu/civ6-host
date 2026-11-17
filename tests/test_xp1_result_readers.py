@@ -101,6 +101,38 @@ class ResultReaderTests(unittest.TestCase):
         self.assertFalse(result['native_write_before_notification_qualified'])
         self.assertFalse(result['native_terminal_transition_qualified'])
 
+    def test_neutral_observer_can_only_read_the_still_local_inactive_actor(self):
+        from lupa.lua51 import LuaError, LuaRuntime
+
+        lua = LuaRuntime(encoding=None)
+        lua.execute(b"""
+localID,observer,turn,alive,ever=0,64,1,false,true
+PlayerTypes={OBSERVER=64}
+Players=setmetatable({[0]={
+ GetID=function() return 0 end, GetTeam=function() return 4 end,
+ IsAlive=function() return alive end, WasEverAlive=function() return ever end}},
+ {__index=function() error('read another player') end})
+Game={GetLocalPlayer=function() return localID end,GetLocalObserver=function() return observer end,
+ GetCurrentGameTurn=function() return turn end,GetWinningTeam=function() end}
+""")
+        for core in (XP1_CORE_SHA256, XP2_CORE_SHA256):
+            with self.subTest(core=core):
+                code = self.facts.build_source(0, 1, core_sha256=core, allow_inactive_observer=True)
+                payload = lua.execute(code)
+                self.assertEqual(payload, b'episode-facts-v1|0|1|4|0|1|0')
+                self.assertFalse(self.facts.parse_facts(payload, 0, 1, core_sha256=core)['is_alive'])
+                with self.assertRaises(LuaError):
+                    lua.execute(self.facts.build_source(0, 1, core_sha256=core))
+                for key, bad, old in ((b'localID', 1, 0), (b'observer', 1, 64),
+                                      (b'alive', True, False), (b'ever', False, True),
+                                      (b'turn', 2, 1)):
+                    lua.globals()[key] = bad
+                    with self.assertRaises(LuaError):
+                        lua.execute(code)
+                    lua.globals()[key] = old
+        with self.assertRaises(ValueError):
+            self.facts.build_source(0, 1, allow_inactive_observer=True)
+
     def test_existing_policy_tracks_observed_transition_without_source_transition_claim(self):
         policy=self.policy()
         first=policy.observe(b'episode-facts-v1|0|1|4|1|1|0',0,1)

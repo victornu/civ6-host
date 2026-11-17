@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .configuration_profiles import XP2_CORE_SHA256
 from .action_transport_profiles import ActionTransportProfile
+from .source_verification import file_sha256
 
 SOURCE = ('work/host-extensions/xp2-action-transport/source-profile-v1.json',
           '33e31b96dfd8f751b81479565216aa1cb68295e607c6cfd2947638621ee30ef4')
@@ -26,14 +27,11 @@ def _root(root):
     return Path(root).resolve()
 
 
-def _pinned(root, relative, expected):
+def _source_path(root, relative):
     path = (root / relative).resolve(strict=True)
     if not path.is_relative_to(root):
         raise ValueError('XP2 action source left its private root')
-    raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != expected:
-        raise ValueError('XP2 action source identity changed: ' + str(path))
-    return path, raw
+    return path
 
 
 def source(root=None):
@@ -42,9 +40,13 @@ def source(root=None):
 
 
 def _profile_and_pins(root):
-    profile_path, raw = _pinned(root, *SOURCE)
+    profile_path = _source_path(root, SOURCE[0])
+    raw = profile_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != SOURCE[1]:
+        raise ValueError('XP2 action source identity changed: ' + str(profile_path))
     pins = {str(profile_path): SOURCE[1]}
     p = json.loads(raw)
+    del raw
     expected = {k: v for k, v in vars(ABI).items() if k != 'core_sha256'}
     if (p['schema'] != 'civ6-host.xp2-action-transport.source.v1'
             or p['native_execution'] is not False
@@ -76,9 +78,11 @@ def _profile_and_pins(root):
                 from .resource_resolution import resolve_path
                 pins[str(resolve_path(root / name))] = expected_sha
             continue
-        path, raw = _pinned(root, *reference)
-        if len(raw) != row['bytes']:
+        path = _source_path(root, row['path'])
+        if path.stat().st_size != row['bytes']:
             raise ValueError('XP2 action reference extent changed')
+        if file_sha256(path) != row['sha256']:
+            raise ValueError('XP2 action source identity changed: ' + str(path))
         pins[str(path)] = row['sha256']
     for body in p['functions'].values():
         if body['all_conditional_targets_captured'] is not True:
@@ -100,7 +104,7 @@ def source_dependencies(root=None, *, execution_image=None):
     from .execution_images import runtime_source_pins
     pins = runtime_source_pins(pins, execution_image=execution_image)
     expected_image_sha256 = pins[str(image)]
-    if hashlib.sha256(image.read_bytes()).hexdigest() != expected_image_sha256:
+    if file_sha256(image) != expected_image_sha256:
         if execution_image is None:
             raise ValueError('XP2 action image changed')
         raise ValueError('XP2 action image differs from its explicit source/runtime pin')

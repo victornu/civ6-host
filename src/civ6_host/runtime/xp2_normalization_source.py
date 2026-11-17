@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 
+from .source_verification import file_sha256
 from .configuration_profiles import _source
 from .saved_load_profiles import XP2_CORE_SHA256
 from .paths import resource_root
@@ -69,7 +70,7 @@ def verify_source():
         raise ValueError('XP2 provider iterator omits a reachable branch')
     for reference in proof['references'].values():
         path = resolve_path(resource_root()/reference['path'])
-        if hashlib.sha256(path.read_bytes()).hexdigest() != reference['sha256']:
+        if file_sha256(path) != reference['sha256']:
             raise ValueError('XP2 normalization source dependency differs: ' + str(path))
     return proof
 

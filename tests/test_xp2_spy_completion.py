@@ -152,6 +152,32 @@ class CompletionAdapterTests(unittest.TestCase):
             runtime.apply(self.s.saved, self.renew, self.s.observation)
         self.assertEqual(self.s.delivered, [])
 
+    def test_waiting_primary_renewal_ignores_stale_strategic_cache(self):
+        s = self.s
+        s.backend.stage, s.backend.busy = 'xp1-continuation-ready', False
+        runtime.catalogue(s.saved, s.observation, waiting=True)
+        s.continuation.explicit_espionage = {'stale': True}
+        s.activate()
+        lookup = dict(player_id=0, turn=17, unit_id=9, expected_operation=12)
+        original = s.prefix.runtime.evaluate_text
+
+        def evaluate(child, source, name, **options):
+            if name == b'@xp2_spy_completion_request':
+                s.prefix.actions.pending.append(s.archive)
+                return b'submitted'
+            return original(child, source, name, **options)
+
+        with (patch.object(s.prefix.runtime, 'evaluate_text', side_effect=evaluate),
+              patch.object(native, 'request_source', return_value=b'fixture_request'),
+              patch.object(native, 'renewal_unit_state', side_effect=(
+                  dict(lookup, operation=-1, turns_remaining=0),
+                  dict(lookup, operation=12, turns_remaining=4))) as read):
+            result = runtime.apply(s.saved, self.renew, s.observation)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(result['receipt']['renewal_order_after']['operation'], 12)
+        self.assertIsNone(self.q.visible())
+
 
 if __name__ == '__main__':
     unittest.main()

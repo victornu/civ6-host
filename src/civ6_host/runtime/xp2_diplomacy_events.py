@@ -1,4 +1,4 @@
-"""Current installed XP2 war/peace notifications on the owned empty FIFO."""
+"""Current installed XP2 diplomacy notifications on the owned empty FIFO."""
 import hashlib
 from pathlib import Path
 import struct
@@ -9,6 +9,7 @@ from .a0_policy_unlock_current import CURRENT_CORE_SHA256, CURRENT_EXE_SHA256, _
 from .configuration_profiles import _source
 from .paths import resource_root
 from .resource_resolution import resolve_path
+from . import xp2_deal_history as deal_history
 
 
 SOURCE = ('evidence/host-xp2-diplomacy-war-peace-event-source.json',
@@ -43,6 +44,7 @@ def source_dependencies(execution_image):
     if pins.get(str(Path(execution_image.path).resolve())) != execution_image.image_sha256:
         raise ValueError('Diplomacy notification belongs to another XP2 image')
     pins[str((resource_root() / SOURCE[0]).resolve())] = SOURCE[1]
+    pins.update(deal_history.source_dependencies(execution_image))
     return pins
 
 
@@ -52,9 +54,12 @@ def event_profile(core):
     if getattr(core, '_civ6_host_execution_image', None) is not _PROFILE:
         return None
     source()
+    deal_history.source()
     return A0FamilyProfile(
-        MappingProxyType({k: frozenset((row[0],)) for k, row in RECORDS.items()}),
-        MappingProxyType({row[0]: RECORD_SIZE for row in RECORDS.values()}), SOURCE[1])
+        MappingProxyType({**{k: frozenset((row[0],)) for k, row in RECORDS.items()},
+                          deal_history.KIND: frozenset((deal_history.RECORD,))}),
+        MappingProxyType({**{row[0]: RECORD_SIZE for row in RECORDS.values()},
+                          deal_history.RECORD: deal_history.SIZE}), SOURCE[1])
 
 
 def receiver_row(record_type):
@@ -91,16 +96,26 @@ def dispatch(owner, kind, raw_fields, *, core):
             or owner.writer_metadata_callback_present is not False
             or type(owner.entity_listener_count) is not int or owner.entity_listener_count != 0):
         raise ValueError('XP2 diplomacy notification has unqualified native callbacks')
-    proof = source()
-    for span in (proof['routes'][str(kind)]['producer'], proof['common_producer']):
-        raw = owner.read(core._handle + span['rva'], span['bytes'])
-        if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
-            raise ValueError('Live XP2 diplomacy notification producer differs')
-    record = encode_record(kind, owner._sequence + 1, raw_fields)
-    validate_empty_profile_record(record, execution_image=image, **owner.empty_receiver_state)
+    if kind == deal_history.KIND:
+        deal_history.verify_live(core._handle, owner.read)
+        record = deal_history.encode_record(owner._sequence + 1, raw_fields)
+        source_sha256 = deal_history.SOURCE[1]
+        record_type = deal_history.RECORD
+    else:
+        proof = source()
+        for span in (proof['routes'][str(kind)]['producer'], proof['common_producer']):
+            raw = owner.read(core._handle + span['rva'], span['bytes'])
+            if type(raw) is not bytes or hashlib.sha256(raw).hexdigest() != span['sha256']:
+                raise ValueError('Live XP2 diplomacy notification producer differs')
+        record = encode_record(kind, owner._sequence + 1, raw_fields)
+        source_sha256 = SOURCE[1]
+        record_type = RECORDS[kind][0]
+    receiver = validate_empty_profile_record(record, execution_image=image, **owner.empty_receiver_state)
+    if kind == deal_history.KIND and receiver['event_name'] != deal_history.source()['event_name']:
+        raise ValueError('Installed deal history differs from the shared empty receiver')
     owner._enqueue(record)
     owner.emit('native_deferred_host_event_enqueued', dispatch_kind=hex(kind),
-               queue_type=hex(RECORDS[kind][0]), record_hex=record.hex(),
-               source_proof_sha256=SOURCE[1], payload_exposed_to_learner=False,
+               queue_type=hex(record_type), record_hex=record.hex(),
+               source_proof_sha256=source_sha256, payload_exposed_to_learner=False,
                eligible_for_training=False)
     return 0

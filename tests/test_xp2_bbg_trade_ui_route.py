@@ -193,11 +193,35 @@ class BBGTradeReceiverTests(unittest.TestCase):
 
         profile = 'xp2-gamecore-current-092abfbb'
         sources = spy.source_dependencies(execution_image=select(profile, core_path=known_path(profile)))
-        self.assertEqual(set(sources.values()), {spy.SOURCE[1], spy.FIFO_SOURCE[1]})
+        self.assertEqual(set(sources.values()), {
+            spy.SOURCE[1], spy.FIFO_SOURCE[1], spy.EVENT_PLAYER_SOURCE[1]})
         fields = {0xa1e5a149: shared.scalar(3, 0), 0xd6fcf3e4: shared.scalar(2, 0),
                   0xa1fbc372: shared.scalar(2, 12)}
         with self.assertRaisesRegex(ValueError, 'selector'):
             spy.encode_event(fields, 1)
+
+    def test_event_player_lookup_matches_the_installed_core_and_refuses_changed_bytes(self):
+        import pefile
+        from civ6_host.runtime.execution_images import known_path, select
+
+        profile = 'xp2-gamecore-current-092abfbb'
+        image = select(profile, core_path=known_path(profile))
+        with pefile.PE(image.path, fast_load=True) as core:
+            base = core.OPTIONAL_HEADER.ImageBase
+
+            def read(address, length):
+                return core.get_data(address - base, length)
+
+            spy.verify_event_player_lookup(image, base, read)
+
+            def modified(address, length):
+                raw = read(address, length)
+                if address == base + 0xb5a30:
+                    return bytes((raw[0] ^ 1,)) + raw[1:]
+                return raw
+
+            with self.assertRaisesRegex(ValueError, 'mission_by_diplomacy_receiver'):
+                spy.verify_event_player_lookup(image, base, modified)
 
     def test_active_table_converter_accepts_only_its_auxiliary_slot_on_its_lease(self):
         from civ6_host.runtime.xp2_trade_table_variant import (
@@ -527,3 +551,69 @@ class BBGTradeLuaTests(unittest.TestCase):
             self.assertEqual(amani.status, status)
             self.assertEqual(plots, {11: (bool(established), True)})
             self.assertEqual(positions, {11: (1, 2)})
+
+    def test_spy_feedback_uses_the_native_event_owner_even_when_another_human_is_local(self):
+        from civ6_host.runtime import xp2_script_operation
+
+        self.lua.execute(b'''
+            Game = { GetLocalPlayer = function() return 0 end }
+            EspionageResultTypes = { CAPTURED = 7, KILLED = 8 }
+            capacity = { [0]=2, [1]=7, [2]=9 }
+            mission_reads = { [0]=0, [1]=0, [2]=0 }
+            for id=0,2 do
+                local player = id
+                Players[player] = {
+                    IsHuman = function() return player ~= 2 end,
+                    GetID = function() return player end,
+                    GetDiplomacy = function() return {
+                        GetMission = function(_, owner, mission)
+                            assert(owner == player)
+                            mission_reads[player] = mission_reads[player]+1
+                            if mission == 14 then return nil end
+                            return {InitialResult=3, EscapeResult=7}
+                        end,
+                        GetSpyCapacity = function() return capacity[player] end,
+                    } end,
+                }
+            end
+            Players[0].AttachModifierByID = function(_, _)
+                capacity[0]=capacity[0]+1
+            end
+            Players[1].AttachModifierByID = function(_, _)
+                capacity[1]=capacity[1]+1
+            end
+        ''')
+        self.lua.execute(self.spy_bridge)
+        self.lua.execute(self.spy_gameplay)
+        seen, delivered = [], []
+        continuation = SimpleNamespace(
+            check=lambda **_: None, publishing=False, observation={'player_id': 0},
+            prefix=SimpleNamespace(deferred_events=SimpleNamespace(pending=[], _draining_empty_receivers=False)),
+            ui_child=object(), runtime=SimpleNamespace(evaluate_text=lambda _, source, *args, **kw: self.lua.execute(source)),
+            owner=SimpleNamespace(emit=lambda stage, **data: seen.append((stage, data))))
+        feedback = TradeFeedback(continuation, None, None, spy_event_players=(0, 1))
+
+        def deliver(token, player, parameters):
+            self.assertIs(token, continuation)
+            self.assertEqual(parameters[b'iPlayerID'], player)
+            self.assertTrue(encode_script_request_table(parameters))
+            delivered.append((player, parameters[b'iMissionID']))
+            if parameters[b'iMissionID'] == 15:
+                return {'native_archive_delivered': False, 'native_request_filtered': True}
+            self.lua.globals()[b'OnGameplaySpyMissionCompleted'](player, self.lua.table_from(parameters))
+            return {'native_archive_delivered': True}
+
+        for seq, owner, mission in ((1, 1, 12), (2, 2, 12), (3, 0, 13), (4, 1, 15)):
+            feedback.spy(seq, owner, mission)
+        with patch.object(xp2_script_operation, 'deliver_listener_script_operation', side_effect=deliver):
+            feedback.flush()
+        self.assertEqual(delivered, [(1, 12), (0, 13), (1, 15)])
+        self.assertEqual(self.lua.eval(b'capacity[0]'), 3)
+        self.assertEqual(self.lua.eval(b'capacity[1]'), 8)
+        self.assertEqual(self.lua.eval(b'mission_reads[2]'), 0)
+        self.assertEqual(self.lua.eval(b'Game.GetLocalPlayer()'), 0)
+        self.assertEqual(seen[-1][0], 'xp2_bbg_spy_request_filtered')
+        self.assertFalse(seen[-1][1]['native_archive_delivered'])
+        self.assertEqual(self.lua.eval(b'Civ6HostBBGSpy(1,12)'), b'')
+        self.assertFalse(self.lua.eval(b'pcall(Civ6HostBBGSpyForSeat,1,14)')[0])
+        self.assertEqual(self.lua.eval(b'Civ6HostBBGSpy(1,12)'), b'')

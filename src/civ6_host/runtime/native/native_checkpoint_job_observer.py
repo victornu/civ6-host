@@ -57,7 +57,8 @@ class JobObserver:
     never a callback, query, job, drain or arbitrary threaded caller.
     """
 
-    def __init__(self, read, *, expected_executable_path, owner_thread_id, profile, exclusive_owner_entry, os_api=None, read_image=None):
+    def __init__(self, read, *, expected_executable_path, owner_thread_id, profile,
+                 exclusive_owner_entry, os_api=None, read_image=None, execution_image=None):
         if not callable(read) or not callable(exclusive_owner_entry):
             raise ValueError('Safe reader and explicit checkpoint entry predicate required')
         if profile != jobs.PROFILE:
@@ -70,6 +71,10 @@ class JobObserver:
         if not callable(self.read_image):
             raise ValueError('Image reader must be callable')
         self.expected_path = _path(expected_executable_path)
+        pinned_path, self.host_sha256 = jobs.host_reference(execution_image)
+        if execution_image is not None and self.expected_path != _path(pinned_path):
+            raise ValueError('Base job observer executable differs from the registered build path')
+        self.execution_image = execution_image
         self.owner_thread_id, self.profile = (owner_thread_id, profile)
         self.exclusive_owner_entry = exclusive_owner_entry
         self.busy = False
@@ -90,8 +95,8 @@ class JobObserver:
 
     def _image_bytes(self):
         data = self.read_image(self.expected_path)
-        if type(data) is not bytes or hashlib.sha256(data).hexdigest() != jobs.HOST_SHA256:
-            raise RuntimeError('Actual executable file is not pinned Host41')
+        if type(data) is not bytes or hashlib.sha256(data).hexdigest() != self.host_sha256:
+            raise RuntimeError('Actual executable file differs from the selected Base job host')
         return data
 
     def __call__(self):
@@ -102,8 +107,10 @@ class JobObserver:
             identity = self._identity()
             if identity != self.identity:
                 raise RuntimeError('Actual executable identity changed')
-            snapshot = jobs.capture_snapshot(self.read, identity['host_base'], self._image_bytes(), identity['os_thread_id'], profile=self.profile, exclusive_owner_entry=True)
-            jobs.require_quiescent(snapshot)
+            snapshot = jobs.capture_snapshot(self.read, identity['host_base'], self._image_bytes(),
+                identity['os_thread_id'], profile=self.profile, exclusive_owner_entry=True,
+                execution_image=self.execution_image)
+            jobs.require_quiescent(snapshot, execution_image=self.execution_image)
             if self._identity() != identity or self.exclusive_owner_entry() is not True:
                 raise RuntimeError('Checkpoint identity or admission changed during snapshot')
             return dict(snapshot, current_executable=identity)

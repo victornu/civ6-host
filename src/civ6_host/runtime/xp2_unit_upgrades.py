@@ -1,6 +1,7 @@
 """Reuse the native upgrade command with Gathering Storm's resource quote."""
 from pathlib import Path
 import struct
+from types import SimpleNamespace
 
 from civ6_host.contracts import unit_upgrades as contract
 from .configuration_profiles import XP2_CORE_SHA256
@@ -164,9 +165,13 @@ def _query(saved, observation):
 
 
 def catalogue(saved, observation):
-    _bind(saved, active=False)
-    saved.explicit_unit_upgrades, saved.xp2_unit_upgrades = _query(saved, observation)
+    saved.explicit_unit_upgrades, saved.xp2_unit_upgrades = snapshot(saved, observation)
     return saved.xp2_unit_upgrades
+
+
+def snapshot(saved, observation, *, active=False):
+    _bind(saved, active=active)
+    return _query(saved, observation)
 
 
 def _stockpile(saved, observation, resource):
@@ -186,18 +191,26 @@ def _stockpile(saved, observation, resource):
     return amount
 
 
-def apply(saved, action, observation):
+def apply(saved, action, observation, *, borrowed_state=None, archive_validator=None):
+    if (borrowed_state is None) != (archive_validator is None):
+        raise ValueError('Borrowed upgrade requires its fresh state and archive check')
     _bind(saved, active=True)
     contract.validate_action(action)
     fresh_base, fresh = _query(saved, observation)
-    if (fresh_base != saved.explicit_unit_upgrades or fresh != saved.xp2_unit_upgrades
+    expected_base, expected = ((saved.explicit_unit_upgrades, saved.xp2_unit_upgrades)
+                               if borrowed_state is None else borrowed_state)
+    if (fresh_base != expected_base or fresh != expected
             or action not in contract.actions(fresh)):
         raise RuntimeError('XP2 upgrade quote is stale or unavailable')
     resource = action['resource_type']
     balance = None if resource is None else _stockpile(saved, observation, resource)
     base_action = {key: action[key] for key in upgrades.FIELDS}
-    after = upgrades.apply(saved, saved.prefix, base_action, observation['turn'], observation,
-                           player_id=observation['player_id'])
+    owner, options = saved, {}
+    if borrowed_state is not None:
+        owner = SimpleNamespace(explicit_unit_upgrades=expected_base, emit=saved.emit)
+        options['archive_validator'] = archive_validator
+    after = upgrades.apply(owner, saved.prefix, base_action, observation['turn'], observation,
+                           player_id=observation['player_id'], **options)
     previous_ids = {unit['id'] for unit in observation['units']}
     replacement = [unit for unit in after['units'] if unit['id'] not in previous_ids
                    and unit['owner'] == observation['player_id'] and unit['type'] == action['target_type']]

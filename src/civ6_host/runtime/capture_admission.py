@@ -40,6 +40,10 @@ _XP1_CURRENT_READER_PINS=(
     'work/trade-common-client/xp1-installed-prepared-reader-with-response-pins.json',
     '390b500d1f1c0fe51b1f822ee021a722f8be6517e68f9723edeb08eb59905f9d',
 )
+_BASE_HOTSEAT_READER_REVIEW=(
+    'work/trade-common-client/base-hotseat-shared-reader-review-v2.json',
+    '44658ed5d534c208805fa267bf24c87da6f59ab75bcc6e243442010160205e19',
+)
 _XP1_HANDOFF_CANDIDATE_DELTA=(
     '7a8cb86925f740aadb49e47e68ed4c0cb09811183024dd9265347da643e1ef75',
     'f7c0a56af6edfa32c8e5ed8327e249c55447eebba7ae78a43b1946a961d2cdf4',
@@ -223,6 +227,21 @@ def _prepared_current_execution(execution_image, reference, origin):
     return True
 
 
+def _matches_expansion_reader(name, expected, current):
+    if expected == current:
+        return True
+    if name not in (_OFFICIAL_BUNDLE_READER, 'runtime/native/native_localization.py'):
+        return False
+    from .native.native_source_cache import load_pinned_json
+    from .paths import resource_root
+
+    path, digest = _BASE_HOTSEAT_READER_REVIEW
+    proof = load_pinned_json(resource_root() / path, digest)
+    if proof['schema'] != 'civ6-host.base-hotseat-shared-reader-review.v1':
+        raise ValueError('Unexpected Base reader review schema')
+    return proof['reader_pairs'][name] == (expected, current)
+
+
 def _review_xp1_current_reader(producer,consumer,manifest,execution_image):
     """Check the reader identity before the full current input revalidation."""
     from .execution_images import identity
@@ -244,7 +263,8 @@ def _review_xp1_current_reader(producer,consumer,manifest,execution_image):
             or consumer['original_validator_sources']!={name:pair[1] for name,pair in tools.items()}):
         raise ValueError('Current XP1 original input tool differs from its reviewed identity')
     for name,pair in proof['input_reader_pairs'].items():
-        if (producer['runtime_sources'].get(name),consumer['runtime_sources'].get(name))!=tuple(pair):
+        if (producer['runtime_sources'].get(name) != pair[0]
+                or not _matches_expansion_reader(name, pair[1], consumer['runtime_sources'].get(name))):
             raise ValueError('Current XP1 input reader differs from its reviewed identity: '+name)
     return dict(mode='exact_xp1_current_input_revalidation',producer_identity_sha256=digest,
                 reader_pins_sha256=_XP1_CURRENT_READER_PINS[1],producer_identity_substituted=False)
@@ -331,7 +351,7 @@ def _check_stock_xp2_prepared_reader(producer,consumer):
             raise ValueError('Stock XP2 package reader has no exact XP1-only transition')
         readers[module]=current
     if expected!=consumer['original_validator_sources'] or any(
-            consumer['runtime_sources'].get(key)!=expected_hash
+            not _matches_expansion_reader(key, expected_hash, consumer['runtime_sources'].get(key))
             for key,expected_hash in readers.items()):
         raise ValueError('Stock XP2 current input reader changed')
     functions=_current_bbg_functions(Path(__file__).read_bytes())
@@ -448,6 +468,17 @@ def _check_xp2_prepared_reader(producer,consumer,admission,manifest,reference,*,
             raise ValueError('Prepared XP2 current input validator changed: '+key)
         previous=producer['runtime_sources'].get(key)
         if previous==digest:continue
+        if native_session_qualified and key in (_OFFICIAL_BUNDLE_READER,
+                                                  'runtime/native/native_localization.py'):
+            before_base = previous
+            if key == _OFFICIAL_BUNDLE_READER and previous == _STOCK_RESPONSE_ARCHIVE_READER_TRANSITION[0]:
+                before_base = _STOCK_RESPONSE_ARCHIVE_READER_TRANSITION[1]
+            if before_base != digest and _matches_expansion_reader(key, before_base, digest):
+                reader_transitions.append(dict(module=key, producer_sha256=previous, consumer_sha256=digest,
+                    transition='reviewed_base_hotseat_branch', prior_reader_sha256=before_base,
+                    source_review_sha256=_BASE_HOTSEAT_READER_REVIEW[1],
+                    expansion_input_unchanged=True, producer_identity_substituted=False))
+                continue
         if (native_session_qualified
                 and key==_OFFICIAL_BUNDLE_READER
                 and (previous,digest)==_STOCK_RESPONSE_ARCHIVE_READER_TRANSITION):

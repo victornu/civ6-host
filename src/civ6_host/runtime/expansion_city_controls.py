@@ -64,27 +64,32 @@ def catalogue_snapshot(saved):
     return deepcopy((catalogue.focus,catalogue.citizens))
 
 
+def query_native_catalogues(prefix, observation, *, management, core_sha256):
+    from .native import native_saved_city_focus1000 as focus,native_saved_citizens as citizens
+
+    pid,turn=observation['player_id'],observation['turn']
+    focus_values=[];citizen_values=[] if management else None
+    for city in sorted(observation['cities'],key=lambda c:c['id']):
+        focus_values.append(focus.catalog(prefix,city['id'],turn,player_id=pid,
+            diagnostic_ui_enabled=True,core_sha256=core_sha256))
+        if management:
+            citizen_values.append(citizens.catalog(prefix,city['id'],turn,player_id=pid,
+                diagnostic_ui_enabled=True,core_sha256=core_sha256))
+    from civ6_host.contracts.capability_city_controls import validate_catalogs
+    offers=validate_catalogs(focus_values,citizen_values,pid,turn,observation=observation)
+    return focus_values,citizen_values,offers
+
+
 def read(saved,observation):
     b,t,p,identity,flags=_check(saved,active=False)
     if type(observation) is not dict or observation!=t.observation:
         raise ValueError('City controls require the exact continuation observation')
     t._expansion_city_controls_catalogue=None
     t.transport.require_empty_native_queue();b.control(empty=True)
-    from .native import native_saved_city_focus1000 as focus,native_saved_citizens as citizens
     before=deepcopy(observation);sequence=t.sequence
-    focus_values=[];citizen_values=[] if flags[1] else None;actions=[]
-    for city in sorted(before['cities'],key=lambda c:c['id']):
-        value=focus.catalog(p,city['id'],before['turn'],player_id=before['player_id'],
-            diagnostic_ui_enabled=True,core_sha256=b.load_abi.core_sha256)
-        focus_values.append(value);actions.extend(focus.actions(value))
-        if flags[1]:
-            value=citizens.catalog(p,city['id'],before['turn'],player_id=before['player_id'],
-                diagnostic_ui_enabled=True,core_sha256=b.load_abi.core_sha256)
-            citizen_values.append(value);actions.extend(citizens.actions(value))
-    from civ6_host.contracts.capability_city_controls import validate_catalogs
-    expected=validate_catalogs(focus_values,citizen_values,before['player_id'],before['turn'],observation=before)
-    # Family ordering is stable and does not sample native targets.
-    actions=expected['city_focus']+expected['city_citizen']
+    focus_values,citizen_values,offers=query_native_catalogues(
+        p,before,management=flags[1],core_sha256=b.load_abi.core_sha256)
+    actions=offers['city_focus']+offers['city_citizen']
     actual=_check(saved,active=False)
     if (any(a is not e for a,e in zip(actual[:4],(b,t,p,identity)))
             or t.sequence!=sequence or t.observation!=before):

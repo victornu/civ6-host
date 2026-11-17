@@ -311,6 +311,9 @@ def check_model_admission(saved):
 
 def check_checkpoint(saved):
     from .xp2_world_congress_popup import check_checkpoint as check_popup
+    from .xp2_lan_congress import check_checkpoint as check_secondary
+
+    check_secondary(saved)
     check_popup(saved)
     from .xp2_congress_cycle import enabled, check_checkpoint as check_cycles
     if enabled(saved.backend):

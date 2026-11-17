@@ -7,6 +7,7 @@ strict native effect readback before it can be reported as completed.
 """
 from pathlib import Path
 
+from .source_verification import file_sha256
 from .configuration_profiles import XP2_CORE_SHA256, _source as pinned_source
 from .paths import resource_root
 from .resource_resolution import resolve_path
@@ -75,7 +76,6 @@ def application_source():
 
 
 def source_dependencies(*, execution_image=None):
-    from hashlib import sha256
     from civ6_host.contracts import envoys
     from . import xp2_envoys
     from .native import native_envoy_actions as native
@@ -87,7 +87,7 @@ def source_dependencies(*, execution_image=None):
               for p,h in (SOURCE, UI_SOURCE, APPLICATION, RUNTIME)}
     for row in (*query['parents'].values(),query['generator']):
         path=resolve_path(resource_root()/row['path'])
-        if sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+        if file_sha256(path)!=row['sha256']:
             raise ValueError('XP2 envoy projection source dependency changed')
         result[str(path.resolve())]=row['sha256']
     for row in (query['image'], *ui['files'].values()):
@@ -98,7 +98,7 @@ def source_dependencies(*, execution_image=None):
         # runtime hash. All UI rows remain live-hash checked as before.
         is_core_provenance = row is query['image'] and execution_image is not None
         if not is_core_provenance:
-            if sha256(path.read_bytes()).hexdigest() != row['sha256']:
+            if file_sha256(path) != row['sha256']:
                 raise ValueError('XP2 envoy pinned UI/image dependency changed')
             result[str(path.resolve())] = row['sha256']
     if (ui['schema'] != 'civ6-host.xp2-envoys-ui-source.v1'
@@ -111,9 +111,9 @@ def source_dependencies(*, execution_image=None):
         (native.PROOF_SHA256+'.json')).resolve())] = native.PROOF_SHA256
     for module in (envoys, native, xp2_envoys):
         path = Path(module.__file__).resolve()
-        result[str(path)] = sha256(path.read_bytes()).hexdigest()
+        result[str(path)] = file_sha256(path)
     path = Path(__file__).resolve()
-    result[str(path)] = sha256(path.read_bytes()).hexdigest()
+    result[str(path)] = file_sha256(path)
     from .runtime_source_dependencies import materialize_runtime_source_pins
     return materialize_runtime_source_pins(
         result, execution_image=execution_image,

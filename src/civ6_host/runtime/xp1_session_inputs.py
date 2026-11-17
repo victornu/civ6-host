@@ -223,6 +223,10 @@ def _prepare_xp2_sources(captured, package, unit_commands):
     from .stdout_transport_profiles import source_dependencies as stdout_dependencies
     for name, expected in stdout_dependencies(core_sha256=XP2_CORE_SHA256).items():
         saved_load_pin(pins, name, expected)
+    if execution is not None:
+        from .xp2_local_player_changed import source_dependencies as perspective_dependencies
+        for name, expected in perspective_dependencies().items():
+            saved_load_pin(pins, name, expected)
     if unit_commands:
         execution_options = ({'execution_image': execution}
                              if execution is not None else {})
@@ -302,10 +306,10 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
     for name, expected in publication_event_dependencies().items():
         saved_load_pin(pins, name, expected)
     from civ6_host.runtime.a0_notification_scope_source import source_dependencies as notification_dependencies
-    for name, expected in notification_dependencies().items():
+    image = getattr(captured, 'execution_image', None)
+    for name, expected in notification_dependencies(execution_image=image).items():
         saved_load_pin(pins, name, expected)
     from civ6_host.runtime.xp1_absent_event_families import source_dependencies as absent_event_dependencies
-    image = getattr(captured, 'execution_image', None)
     for name, expected in absent_event_dependencies(execution_image=image).items():
         saved_load_pin(pins, name, expected)
     if postload160:
@@ -350,9 +354,37 @@ def prepare_sources(captured, package, *, postload160, publish_cache,
             for name,expected in dependencies.items():saved_load_pin(pins,name,expected)
         from .execution_images import _XP1_PROFILE
         if image is _XP1_PROFILE:
+            from .a0_district_removed import current_xp1_source_dependencies as district_removal_dependencies
             from .control_input_source import reactivation_source_pins
-            for name,expected in reactivation_source_pins().items():
+            from .xp1_capture_followup import source_dependencies as capture_followup_dependencies
+            from .xp1_city_transfer import source_dependencies as city_transfer_dependencies
+            from .xp1_great_work_source import source_dependencies as great_work_dependencies
+            from .xp1_great_work_move_source import source_dependencies as great_work_move_dependencies
+            from .foundation_event_profile import xp1_project_source_dependencies
+            from .game_era_score_event_profile import installed_short_source_dependencies as era_score_dependencies
+            from .xp1_host_slot20_source import source_dependencies as achievement_dependencies
+            for name,expected in (*reactivation_source_pins().items(),
+                                  *district_removal_dependencies(image).items(),
+                                  *capture_followup_dependencies(image).items(),
+                                  *city_transfer_dependencies(image).items(),
+                                  *great_work_dependencies(image).items(),
+                                  *great_work_move_dependencies(image).items(),
+                                  *xp1_project_source_dependencies(image).items(),
+                                  *era_score_dependencies(image).items(),
+                                  *achievement_dependencies(execution_image=image).items()):
                 saved_load_pin(pins,name,expected)
+            from . import xp1_captured_city, xp1_city_shot, xp1_dedications_source
+            from . import xp1_governors_source, xp1_wmd_fallout_source
+            from .xp1_wmd_fallout_visibility import source_dependencies as fallout_visibility_dependencies
+            for name, expected in fallout_visibility_dependencies(image).items():
+                saved_load_pin(pins, name, expected)
+            if xp1_captured_city.supports(captured.reference, image):
+                for module in (xp1_captured_city, xp1_city_shot, xp1_governors_source,
+                               xp1_dedications_source):
+                    for name, expected in module.source_dependencies(image).items():
+                        saved_load_pin(pins, name, expected)
+                for name, expected in xp1_wmd_fallout_source.source_dependencies().items():
+                    saved_load_pin(pins, name, expected)
     saved_load_pin(pins, package['path'], package['sha256'])
     if image is None:
         return pins, saved_load_build_pins(pins, ui=observe_player)
@@ -424,7 +456,9 @@ def command_source_dependencies(core_sha256, *, execution_image=None):
             from .xp2_congress_presentation import source_dependencies as congress_dependencies
             collect(congress_dependencies())
             from .xp2_wmd_fallout_source import source_dependencies as fallout_dependencies
+            from .xp2_rock_concert_source import source_dependencies as concert_dependencies
             collect(fallout_dependencies())
+            collect(concert_dependencies())
             from .xp2_congress_notice_source import source_dependencies as congress_notice_dependencies
             collect(congress_notice_dependencies())
         from .district_damage_profile import source_dependencies as district_dependencies

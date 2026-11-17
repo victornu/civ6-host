@@ -3,6 +3,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 import json
 import re
+from struct import pack
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
@@ -124,7 +125,7 @@ class ResponseTests(unittest.TestCase):
             request.assert_not_called()
             saved.prefix.actions.deliver_one.assert_not_called()
 
-    def major_fixture(self,stack,*,statements=1,is_open=True):
+    def major_fixture(self,stack,*,statements=1,is_open=True,archive=None,delivered_session=77):
         obs,saved,source,config,request=self.fixture(stack,major=True)
         prefix=saved.prefix
         saved.backend.control=Mock(wraps=saved.backend.control)
@@ -137,10 +138,12 @@ class ResponseTests(unittest.TestCase):
         stack.enter_context(patch('civ6_host.runtime.xp2_statement_factory.verify_request',
             return_value=dict(registry_entry_verified=True,native_factory_invoked=False)))
         source.side_effect=None;source.return_value=b'fixture-major-request'
+        if archive is None:
+            archive = self.major_archive()
         def evaluate(child,code,name,**kwargs):
             if name==b'@xp2_war_target_kind':return b'true'
             if name==b'@xp2_official_world_war_response':
-                prefix.actions.pending.append((0xa4172391).to_bytes(4,'little')+b'native-fixture')
+                prefix.actions.pending.append(archive)
                 return b'fixture-response'
             if name==b'@xp2_world_war_pending_session':return b'fixture-open-session'
             raise AssertionError(name)
@@ -154,8 +157,16 @@ class ResponseTests(unittest.TestCase):
         send=stack.enter_context(patch('civ6_host.runtime.native.native_diplomacy_choices.deliver_statement_request',side_effect=deliver))
         stack.enter_context(patch('civ6_host.runtime.native.native_pending_diplomacy.source',return_value=b'fixture-session-read'))
         stack.enter_context(patch('civ6_host.runtime.native.native_pending_diplomacy.parse',return_value=dict(
-            player_id=0,session_id=77,from_player=0,to_player=2,is_open=is_open,statement_type='DECLARE_SURPRISE_WAR')))
+            player_id=0,session_id=delivered_session,from_player=0,to_player=2,
+            is_open=is_open,statement_type='DECLARE_SURPRISE_WAR')))
         return obs,saved,request,send
+
+    @staticmethod
+    def major_archive(*, sender=0, target=2, statement=0xeabd49ad, session_id=77):
+        fields = ((0xbaef29be, 3, statement), (0x9c594aff, 2, sender),
+                  (0x18383f56, 2, target), (0x7f30e862, 3, session_id))
+        return (pack('<4I', 0xa4172391, sender, session_id, len(fields))
+                + b''.join(pack('<II8xI', key, tag, value) for key, tag, value in fields))
 
     def test_major_delivers_one_native_request_and_retains_explicit_statement(self):
         with ExitStack() as stack:
@@ -185,6 +196,25 @@ class ResponseTests(unittest.TestCase):
                 for call in saved.prefix.runtime.evaluate_text.call_args_list))
             self.assertEqual(saved.continuation.world_input_prompts[0],PROMPT)
             self.assertEqual(saved.prefix.actions.pending,[])
+
+    def test_major_rejects_foreign_or_malformed_archive_before_delivery(self):
+        invalid = (self.major_archive(sender=1), self.major_archive(target=7),
+                   self.major_archive(statement=0), self.major_archive()[:-1])
+        for archive in invalid:
+            with self.subTest(archive=archive), ExitStack() as stack:
+                obs, saved, _, send = self.major_fixture(stack, archive=archive)
+                with self.assertRaisesRegex(RuntimeError, 'Major-war archive'):
+                    war.respond(saved, dict(kind='world_war_response', accept=True), obs)
+                send.assert_not_called()
+                self.assertEqual(saved.continuation.world_input_prompts[0], PROMPT)
+
+    def test_major_rejects_a_different_delivered_session(self):
+        with ExitStack() as stack:
+            obs, saved, _, send = self.major_fixture(stack, delivered_session=19)
+            with self.assertRaisesRegex(RuntimeError, 'another or closed native dialogue'):
+                war.respond(saved, dict(kind='world_war_response', accept=True), obs)
+            send.assert_called_once_with(saved.prefix.actions)
+            self.assertEqual(saved.continuation.world_input_prompts[0], PROMPT)
 
     def test_major_does_not_invent_a_closed_or_ambiguous_dialogue(self):
         for count,is_open in ((0,True),(2,True),(1,False)):
@@ -305,6 +335,33 @@ class WorkerRoutingTests(unittest.TestCase):
         self.assertEqual(result['status'], 'refused')
         fast.assert_not_called()
         saved.execute.assert_not_called()
+
+    def test_worker_yields_to_the_new_dialogue_before_polling_congress(self):
+        from civ6_host.runtime.workers import network_worker
+        from test_world_war_decisions import make_catalogue, OBSERVATION
+
+        case = make_catalogue()
+        action = next(row['action'] for row in case['candidates']
+                      if row['action'] == dict(kind='world_war_response', accept=True))
+        current = NS(explicit_world_input=deepcopy(case['world_input']), observation=deepcopy(OBSERVATION),
+                     world_input_prompts={0: dict(PROMPT)})
+        for retained in (True, False):
+            with self.subTest(retained=retained):
+                saved = NS(backend=NS(load_abi=NS(core_sha256=XP2_CORE_SHA256)),
+                           continuation=current, emit=Mock(), world_congress_diagnostic=True,
+                           advance_congress_empty=Mock(return_value=None),
+                           execute=Mock(return_value=dict(action=action, effect=dict(
+                               status='completed', refusal_code=None,
+                               pending_statement_retained=retained))))
+                with patch('civ6_host.runtime.xp1_session_view.read', return_value=(None, OBSERVATION, case)), \
+                     patch('civ6_host.runtime.xp1_session_inputs._write_once'), \
+                     patch.object(network_worker, '_retain_xp2_diplomacy_if_ready', return_value=retained):
+                    result = network_worker._execute_xp1(saved, action, 0, 8, 'fixture/session.json')
+                self.assertEqual(result, dict(status='completed', reason=None, requested_action=action))
+                if retained:
+                    saved.advance_congress_empty.assert_not_called()
+                else:
+                    saved.advance_congress_empty.assert_called_once_with(9)
 
 
 if __name__ == '__main__':

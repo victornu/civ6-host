@@ -8,14 +8,17 @@ from civ6_host.runtime.session_limits import standard_lifetime_limit
 class LifetimeTests(unittest.TestCase):
     def test_constructor_and_worker_closure_share_exact_scoped_bound(self):
         with Fixture() as f:
-            s=f.session(lifetime_seconds=1500)
-            self.assertEqual(s.lifetime_seconds,1500)
+            s=f.session(lifetime_seconds=1800)
+            self.assertEqual(s.lifetime_seconds,1800)
             self.assertIsNone(s.episode_budget)
-            for bad in (0,1501,True,1500.0):
+            long_replay=f.session(lifetime_seconds=3600)
+            self.assertEqual(long_replay.lifetime_seconds,3600)
+            self.assertIsNone(long_replay.episode_budget)
+            for bad in (0,3601,True,3600.0):
                 with self.subTest(bad=bad),self.assertRaises(ValueError):f.session(lifetime_seconds=bad)
             self.assertFalse(f.spawns)
         self.assertEqual(MEMORY_LIMIT,512*1024*1024)
-        for profile,limit in (('xp1-lan',1500),('xp2-lan',1800),('lan',180),('single',180),('hotseat-four',180)):
+        for profile,limit in (('xp1-lan',3600),('xp2-lan',1800),('lan',180),('single',180),('hotseat-four',180)):
             self.assertEqual(standard_lifetime_limit(profile),limit)
             self.assertIsNone(validate_episode_budget_closure(dict(input_profile=profile,lifetime_seconds=limit)))
             for bad in (limit+1,0,True,float(limit)):

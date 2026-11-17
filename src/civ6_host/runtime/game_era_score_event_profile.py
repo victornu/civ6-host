@@ -7,8 +7,13 @@ from . import game_history_event_profile as history
 
 SOURCE=('work/host-extensions/xp1-production-placement-static/history-score-source-supplement-v1.json',
         '3f43fe7d4631122f6c0eb786722fab1ec71001febd369c200ffceeb4be3f8d03')
+INSTALLED_SHORT_SOURCE = ('evidence/host-xp1-installed-era-score-short-source.json',
+                          '1d097d6f04fb8242b5984d3abfd0cd1ea834d4746e83b3129b198998e2e40318')
 EVENT_KIND=0x788b7534
 SPEC=(0x10a,6,0x14b8d0,0x120000,0xc6220,0xd4ed0)
+SELECTOR_KEY = 0xA1E5A149
+VALUE_KEY = 0xD6FCF3E4
+SHORT_KEYS = frozenset((SELECTOR_KEY, VALUE_KEY))
 
 
 def _normalized(body,writer=None):
@@ -104,6 +109,63 @@ def source_dependencies(*,execution_image=None):
     return pins
 
 
+def uses_installed_short_shape(kind, fields, execution_image):
+    from .execution_images import _XP1_PROFILE
+    return (execution_image is _XP1_PROFILE and kind == EVENT_KIND
+            and type(fields) is dict and set(fields) == SHORT_KEYS)
+
+
+def decode_missing_second(fields):
+    from .native.native_scalar_event_encoder import _read_u32_variant
+    from .native.native_two_value_event_family import verify_missing_b_source_evidence
+
+    if type(fields) is not dict or set(fields) != SHORT_KEYS:
+        raise ValueError('Era-score short Core argument keys differ')
+    verify_missing_b_source_evidence()
+    selector = _read_u32_variant(fields[SELECTOR_KEY], 3, 'selector')
+    if selector != 0:
+        raise ValueError('Era-score requires the common selector-zero normalizer route')
+    # The EXE initializes both normalized DWORDs before applying the present
+    # keys. Only D6 is written by this producer. There is no raw second field.
+    return selector, _read_u32_variant(fields[VALUE_KEY], 2, 'value A'), 0
+
+
+@lru_cache(maxsize=1)
+def _installed_short_source():
+    from .execution_images import _XP1_PROFILE, identity
+    from .native.native_two_value_event_family import verify_missing_b_source_evidence
+
+    proof = _source(INSTALLED_SHORT_SOURCE)
+    if (proof['schema'] != 'civ6-host.xp1-era-score-short.static.v1'
+            or proof['image'] != identity(_XP1_PROFILE)
+            or proof['contract'] != {
+                'kind': EVENT_KIND, 'selector': 0, 'scalar_flags': 0,
+                'key_tags': {hex(SELECTOR_KEY): 3, hex(VALUE_KEY): 2},
+                'native_default_second': 0, 'normalizer_offsets': (0x50, 0x54),
+                'installed_writer_record': 0x109, 'retained_host_record': SPEC[0],
+                'record_size': 96, 'metadata_flag': SPEC[1]}):
+        raise ValueError('Installed XP1 era-score source identity changed')
+    verify_missing_b_source_evidence()
+    return proof
+
+
+def installed_short_source_dependencies(execution_image):
+    from pathlib import Path
+    from .execution_images import _XP1_PROFILE
+    from .native.native_two_value_event_family import MISSING_B_PROOF_SHA256, _MISSING_B_PROOF_PATH
+    from .paths import resource_root
+    from .resource_resolution import resolve_path
+
+    if execution_image is not _XP1_PROFILE:
+        raise ValueError('Short era-score sources require the exact installed XP1 image')
+    exe = _installed_short_source()['executable']
+    return {
+        str(resolve_path(resource_root() / INSTALLED_SHORT_SOURCE[0]).resolve()): INSTALLED_SHORT_SOURCE[1],
+        str(_MISSING_B_PROOF_PATH.resolve()): MISSING_B_PROOF_SHA256,
+        str(Path(exe['path']).resolve()): exe['sha256'],
+    }
+
+
 def receiver_row():
     body=verify_source()['functions']['exe']['0xd4ed0']
     return dict(record_sizes={96},event_name='GameCoreEvent::PlayerEraScoreChanged',handler_va='0x1400d4ed0',
@@ -123,6 +185,12 @@ def bind_owner(backend,core,read):
                 raise ValueError('XP1 era-score native source changed')
     table=p['functions']['xp1']['0x18ff70']['jump_table'];raw=bytes.fromhex(table['raw_hex'])
     if read(core._handle+int(table['rva'],16),len(raw))!=raw:raise ValueError('Era-score switch table changed')
+    from .execution_images import _XP1_PROFILE
+    if getattr(core, '_civ6_host_execution_image', None) is _XP1_PROFILE:
+        for span in _installed_short_source()['core'].values():
+            raw = read(core._handle + span['rva'], span['bytes'])
+            if hashlib.sha256(raw).hexdigest() != span['sha256']:
+                raise ValueError('Installed XP1 short era-score native source changed')
     from .native.native_deferred_empty_profile import resolve_empty_receiver_row
     if resolve_empty_receiver_row(SPEC[0])!=receiver_row():raise ValueError('Era-score receiver differs')
     return SOURCE[1]
