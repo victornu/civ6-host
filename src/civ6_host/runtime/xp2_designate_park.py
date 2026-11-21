@@ -19,14 +19,54 @@ REFUSED = 'native_park_designation_unavailable'
 SUBMITTED = 'native_park_designation_effect_unconfirmed'
 _FRAME_LIMIT = 128 * 1024
 
+# Native descriptor facts re-derived statically for the installed XP2 image
+# 4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8 (12,941,592 B,
+# ImageBase 0x180000000) — rea-civ6/evidence/designate_park-rea.md §2.1-2.6 and
+# designate_park-rea.json DP-02…DP-12. The staged artefact described the 324c51e9
+# build and every address in it is stale here: the two .text functions moved by
+# +0x40, the resolver is a 314-byte function rather than one 95-byte .pdata
+# fragment, and 0xa29110 is now a different pointer table. Only the operation hash
+# is unchanged. Anything the evidence does not prove stays refused.
+OPERATION = 0x3D7D2377
+RESOLVER_RVA = 0x668850                     # whole function, ret at 0x668989
+RESOLVER_BYTES = 314
+RESOLVER_SHA256 = 'b53124b6ec9fac6ef896497ac814a8e9ba2268917e07c04273ae7093ef89a38f'
+RESOLVER_OPERATION_SITE = 0x668871          # mov edx, OPERATION
+RESOLVER_CALLER_SITE = 0x4BEF6B             # call RESOLVER_RVA
+CONSTRUCTOR_RVA = 0x668990
+CONSTRUCTOR_BYTES = 122
+CONSTRUCTOR_SHA256 = 'd80322a55e8f6710ae2562a1d89c59d85287eeccb28f2f8789f78e6756a55448'
+CONSTRUCTOR_OPERATION_SITE = 0x6689DA       # mov dword ptr [rdx + 0xc], OPERATION
+CONSTRUCTOR_CALLER_SITE = 0x750A17          # call CONSTRUCTOR_RVA
+DESCRIPTOR_VTABLE = 0xA290B0                # installed by lea rax,[rip+0x3c06d6] @0x6689d3
+FAMILY_STRING_RVA = 0xA29170                # ...Unit_Operations_DesignatePark.cpp
+SLOTS = (                                   # ten descriptor slots the proof iterates
+    (DESCRIPTOR_VTABLE + 0x00, 0x668C30),
+    (DESCRIPTOR_VTABLE + 0x08, 0x683310),
+    (DESCRIPTOR_VTABLE + 0x10, 0x668600),
+    (DESCRIPTOR_VTABLE + 0x18, 0x9B10A0),
+    (DESCRIPTOR_VTABLE + 0x20, 0x3FA100),
+    (DESCRIPTOR_VTABLE + 0x28, 0x6648D0),
+    (DESCRIPTOR_VTABLE + 0x30, 0x3FA100),
+    (DESCRIPTOR_VTABLE + 0x38, 0x9B10A0),
+    (DESCRIPTOR_VTABLE + 0x40, 0x668A10),
+    (DESCRIPTOR_VTABLE + 0x48, 0x3FA100))
+SPANS = (
+    dict(rva=RESOLVER_RVA, bytes=RESOLVER_BYTES, sha256=RESOLVER_SHA256),
+    dict(rva=CONSTRUCTOR_RVA, bytes=CONSTRUCTOR_BYTES, sha256=CONSTRUCTOR_SHA256))
+_SPAN_ROWS = tuple((span['rva'], span['bytes'], span['sha256']) for span in SPANS)
+
 
 def _proof(image):
     proof = _source(SOURCE)
     if (image is not _PROFILE or proof['schema'] != 'civ6-host.xp2-designate-park.source.v1'
-            or proof['image_sha256'] != image.image_sha256 or proof['operation'] != 0x3d7d2377
+            or proof['image_sha256'] != image.image_sha256 or proof['operation'] != OPERATION
             or proof['parameterless_unit_panel'] is not True
             or (proof['plot_getters']['path'], proof['plot_getters']['sha256']) != expansion_national_parks.SOURCE):
         raise ValueError('Park designation requires the exact installed Gathering Storm source')
+    if (tuple(tuple(pair) for pair in proof['slots']) != SLOTS
+            or tuple((span['rva'], span['bytes'], span['sha256']) for span in proof['spans']) != _SPAN_ROWS):
+        raise ValueError('Park designation native descriptor differs from the re-derived spans and slots')
     return proof
 
 
