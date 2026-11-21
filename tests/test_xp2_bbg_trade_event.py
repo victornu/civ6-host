@@ -17,7 +17,7 @@ def _variant(pointer):
 class BBGTradeEventTests(unittest.TestCase):
     def _owner(self):
         owner = SimpleNamespace()
-        owner._bbg_trade_image_id = 'xp2-gamecore-current-092abfbb'
+        owner._bbg_trade_image_id = 'xp2-gamecore-current-4de40abf'
         owner.bbg_trade_event_profile = SimpleNamespace(
             record_types_by_kind={KIND: {RECORD_TYPE}, TURN_KIND: {TURN_RECORD_TYPE}},
             record_sizes={RECORD_TYPE: RECORD_SIZE, TURN_RECORD_TYPE: TURN_RECORD_SIZE})

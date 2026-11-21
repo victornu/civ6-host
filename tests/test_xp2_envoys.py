@@ -14,7 +14,7 @@ class Xp2EnvoySourceTests(unittest.TestCase):
     def test_source_dependencies_project_captured_core_to_selected_execution_image(self):
         from civ6_host.runtime import execution_images
         image = execution_images.select(
-            'xp2-gamecore-current-092abfbb',
+            'xp2-gamecore-current-4de40abf',
             core_path=execution_images._GAMECORE_PATH,
         )
         pins = adapter.source_dependencies(execution_image=image)

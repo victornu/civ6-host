@@ -47,7 +47,7 @@ def source_dependencies(*, execution_image=None):
     from .resource_resolution import resolve_path
     from .execution_images import ExecutionImageProfile
     if (type(execution_image) is not ExecutionImageProfile
-            or execution_image.image_sha256 != '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'):
+            or execution_image.image_sha256 != '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'):
         raise ValueError('XP2 trade accessors are pinned only for the current execution image')
     root = resource_root()
     accessor_path = resolve_path(root / _ACCESSORS[0]).resolve()

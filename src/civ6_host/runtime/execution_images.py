@@ -17,8 +17,18 @@ from typing import Mapping
 
 from .saved_load_profiles import BASE_CORE_SHA256
 
-_CURRENT_CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
-_CURRENT_CORE_SIZE_BYTES = 12941080
+# Re-anchored to the XP2 image that the 2026-11 Steam update installed (was
+# 092abfbb..., 12941080 bytes). This pin tracks the installed bytes, so
+# verification hashes the file on disk against it.
+#
+# The pinned source correspondence below (_SOURCE_PROOFS and the 1727 captured
+# spans of the comparison manifest) was derived against the previous installed
+# image. Nothing here re-derives it: `verify()` can only prove that the proof
+# files exist and hash as pinned, not that their spans still correspond to this
+# image. Those spans must be re-derived with REA/Ghidra for 4de40abf... before
+# any native admission is claimed on it.
+_CURRENT_CORE_SHA256 = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
+_CURRENT_CORE_SIZE_BYTES = 12941592
 _REFERENCE_CORE_SHA256 = '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
 _SHARED_INTERFACE_SHA256 = 'a4de406dfbbed460af4ed2b15b7cb4d75afc610e3f9268838b65a65fc9a069c9'
 _NATIVE_HOST_BUILD_ID = 'xp2-current-strings-source-v1'
@@ -226,7 +236,7 @@ _NATIVE_HOST_BUILD = NativeHostBuildReference(
 )
 
 _PROFILE = ExecutionImageProfile(
-    id='xp2-gamecore-current-092abfbb',
+    id='xp2-gamecore-current-4de40abf',
     image_sha256=_CURRENT_CORE_SHA256,
     image_size_bytes=_CURRENT_CORE_SIZE_BYTES,
     reference_core_sha256=_REFERENCE_CORE_SHA256,

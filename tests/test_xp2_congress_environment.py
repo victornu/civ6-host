@@ -20,7 +20,7 @@ from civ6_host.runtime.native.native_game_configuration import game_configuratio
 from civ6_host.runtime.native.native_script_namespaces import ScriptNamespaces
 from test_xp2_world_configuration import Fixture as ConfigurationFixture
 
-PROFILE = 'xp2-gamecore-current-092abfbb'
+PROFILE = 'xp2-gamecore-current-4de40abf'
 IMAGE = select(PROFILE, core_path=known_path(PROFILE))
 
 UI_NATIVE = r'''

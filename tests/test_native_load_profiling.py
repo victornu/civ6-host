@@ -15,9 +15,9 @@ from civ6_host.runtime.xp1_continuation import SavedContinuation
 from civ6_host.runtime.workers.network_worker import _emit_native_load_profile
 
 
-IMAGE = select('xp2-gamecore-current-092abfbb',
-               core_path=known_path('xp2-gamecore-current-092abfbb'))
-PROFILE = profile_for_core(known_path('xp2-gamecore-current-092abfbb'),
+IMAGE = select('xp2-gamecore-current-4de40abf',
+               core_path=known_path('xp2-gamecore-current-4de40abf'))
+PROFILE = profile_for_core(known_path('xp2-gamecore-current-4de40abf'),
     mode='context', execution_image=IMAGE)
 CORE_IDENTITY = dict(actual_core_sha256=PROFILE.core_sha256,
     reference_core_sha256=PROFILE.reference_core_sha256,

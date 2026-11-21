@@ -48,7 +48,7 @@ class SpySession:
         self.after = deepcopy(self.before)
         self.after['spies'][0].update(operation=12, turns_remaining=6)
         self.after['offers'] = []
-        image_id = 'xp2-gamecore-current-092abfbb'
+        image_id = 'xp2-gamecore-current-4de40abf'
         self.image = select(image_id, core_path=known_path(image_id))
         p = self.prefix = NS(runtime=NS(evaluate_text=self.evaluate), ui_child=object(),
                             quarantined=False)

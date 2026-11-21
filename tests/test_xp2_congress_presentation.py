@@ -20,7 +20,7 @@ class CongressPresentationTests(unittest.TestCase):
 
     def execution(self):
         from civ6_host.runtime.execution_images import select, known_path
-        name='xp2-gamecore-current-092abfbb'
+        name='xp2-gamecore-current-4de40abf'
         return select(name,core_path=known_path(name))
 
     def graph(self):

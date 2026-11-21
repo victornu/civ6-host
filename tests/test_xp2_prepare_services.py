@@ -98,8 +98,8 @@ class XP2PrepareServicesTests(unittest.TestCase):
         prepare._require_lifecycle(self.core,host,self.contract,live,self.profile)
 
         from civ6_host.runtime.execution_images import known_path,select
-        image=select('xp2-gamecore-current-092abfbb',
-            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        image=select('xp2-gamecore-current-4de40abf',
+            core_path=known_path('xp2-gamecore-current-4de40abf'))
         current=replace(self.profile,core_path=Path(image.path),
             core_sha256=image.image_sha256,
             reference_core_sha256=image.reference_core_sha256,

@@ -16,7 +16,7 @@ from civ6_host.runtime.native import native_host_capability_status as abi
 from civ6_host.runtime.native.native_session_resume import plain
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 STATUS_AST_SHA256 = 'd1f9a2b7aab7d2f3866772bbd47660453d72808e0d2ec9f7937053baaae98358'
 
 

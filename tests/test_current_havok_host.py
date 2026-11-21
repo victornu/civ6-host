@@ -22,8 +22,8 @@ class CurrentHavokHostTests(unittest.TestCase):
     def setUpClass(cls):
         cls.host = Path(__file__).resolve().parents[1]
         cls.lab = resource_root()
-        cls.profile = execution_images.select('xp2-gamecore-current-092abfbb',
-            core_path=execution_images.known_path('xp2-gamecore-current-092abfbb'))
+        cls.profile = execution_images.select('xp2-gamecore-current-4de40abf',
+            core_path=execution_images.known_path('xp2-gamecore-current-4de40abf'))
 
     def test_compiled_host_keeps_exact_parent_components_except_sdk_guards(self):
         before = json.loads((self.host/'native/profiles/xp2-bbg/source-manifest.json').read_bytes())

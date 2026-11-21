@@ -20,7 +20,7 @@ QUERY_SOURCE = ('evidence/host-xp2-installed-levy-query-source.json',
                 'c151463e6b4e9b3190a3bf7e4239161853267858ab1ad18cd729339bcb5d9a0d')
 OPERATION_SOURCE = ('evidence/host-xp2-installed-levy-operation-source.json',
                     '31be405d6061818f81ead0769118a44ce5609e5ab7a3bbc3b1e3dc5b02d9a9b1')
-INSTALLED_CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+INSTALLED_CORE_SHA256 = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 PLAYER_OPERATION_ARCHIVE = 3294486831
 OPERATION = 0xe6e2dbb2
 TARGET_PARAMETER = 0x0483191c

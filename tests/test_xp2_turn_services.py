@@ -77,7 +77,7 @@ class Fixture(action_fixture.Fixture):
     def __init__(self):
         with patch.object(action_fixture,'Memory',Memory):super().__init__()
         self.backend.core._civ6_host_execution_image = select(
-            'xp2-gamecore-current-092abfbb', core_path=self.backend.core._name)
+            'xp2-gamecore-current-4de40abf', core_path=self.backend.core._name)
         self.backend.busy=True
         self.backend._saved_load_candidate=True
         for slot in (0x58,0x60,0x78):
@@ -120,7 +120,7 @@ class XP2TurnServicesTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'slot'):
                     profiles.verify_live(m.base,m.context,m.read,core_sha256=XP2_CORE_SHA256)
                 m.bytes[at]^=1
-        execution_image=select('xp2-gamecore-current-092abfbb',
+        execution_image=select('xp2-gamecore-current-4de40abf',
             core_path=p['image']['path'])
         pins=source.source_dependencies(execution_image=execution_image)
         for path,digest in pins.items():self.assertEqual(hashlib.sha256(Path(path).read_bytes()).hexdigest(),digest)
@@ -144,7 +144,7 @@ class XP2TurnServicesTests(unittest.TestCase):
         source.require_prepared_owner(backend)
         selected=backend.core._civ6_host_execution_image
         self.assertEqual(selected.image_sha256,
-                         '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f')
+                         '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8')
         self.assertEqual(selected.reference_core_sha256,XP2_CORE_SHA256)
         del backend.core._civ6_host_execution_image
         with self.assertRaisesRegex(ValueError,'exact reference Core image'):

@@ -179,7 +179,7 @@ class CurrentBBGInputImageTests(unittest.TestCase):
 
         origin = ('work/official-capture/bbg751-world-A-ui/manifest.json',
                   '0438263e3e78b78233153afe0bc4e1ace6ac8e315aed21e4507f738bae8b285d')
-        profile_id = 'xp2-gamecore-current-092abfbb'
+        profile_id = 'xp2-gamecore-current-4de40abf'
         image = select(profile_id, core_path=known_path(profile_id))
         process = dict(exe_sha256=stock.CURRENT_EXE_SHA256,
                        gamecore_module=dict(sha256=CURRENT_XP2_CORE_SHA256, path=image.path))

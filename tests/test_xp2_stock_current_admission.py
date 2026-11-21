@@ -18,8 +18,8 @@ PACKAGE = {
     "path": str(LAB / "work/host-prepared-captures/xp2-gs-lan-rows-20261102/manifest.json"),
     "sha256": "6468bf13145fa712438bd276896273630789ca4afb6003d904b66a8aa29e2020",
 }
-IMAGE = select("xp2-gamecore-current-092abfbb",
-               core_path=known_path("xp2-gamecore-current-092abfbb"))
+IMAGE = select("xp2-gamecore-current-4de40abf",
+               core_path=known_path("xp2-gamecore-current-4de40abf"))
 
 
 class XP2StockCurrentAdmissionTests(unittest.TestCase):

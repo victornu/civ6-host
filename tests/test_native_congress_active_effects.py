@@ -110,7 +110,7 @@ class ActiveEffectsReaderTests(unittest.TestCase):
 
     def test_shared_pipeline_uses_real_configuration_conversions_and_scoped_bindings(self):
         f=provider.Fixture(multiplayer=True)
-        profile='xp2-gamecore-current-092abfbb'
+        profile='xp2-gamecore-current-4de40abf'
         f.backend.core._civ6_host_execution_image=select(profile,core_path=known_path(profile))
         f.set_text(f.player,'LEADER_NAME','')
         lua=self.lua();lua.execute(b'PlayerConfigurations=nil;GameConfiguration=nil')
@@ -161,7 +161,7 @@ class ActiveEffectsReaderTests(unittest.TestCase):
         self.assertEqual(lua.globals().state.emergencyReads,0)
 
     def test_proposal_title_uses_actual_provider_scope_without_exposing_unmet_id(self):
-        f=provider.Fixture(multiplayer=True);profile='xp2-gamecore-current-092abfbb'
+        f=provider.Fixture(multiplayer=True);profile='xp2-gamecore-current-4de40abf'
         f.backend.core._civ6_host_execution_image=select(profile,core_path=known_path(profile))
         f.set_text(f.player,'LEADER_NAME','')
         lua=self.lua();self.proposals(lua,1)
@@ -177,7 +177,7 @@ class ActiveEffectsReaderTests(unittest.TestCase):
         self.assertIn((f.player,game_configuration_hash('LEADER_NAME')),f.calls)
 
     def test_shared_query_keeps_default_review_and_private_sidecar_behavior(self):
-        f=provider.Fixture(multiplayer=True);profile='xp2-gamecore-current-092abfbb'
+        f=provider.Fixture(multiplayer=True);profile='xp2-gamecore-current-4de40abf'
         f.backend.core._civ6_host_execution_image=select(profile,core_path=known_path(profile))
         f.set_text(f.player,'LEADER_NAME','')
         lua=LuaRuntime(encoding=None,max_memory=12*1024*1024);lua.execute(setup.REVIEW_SETUP.encode())

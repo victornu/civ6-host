@@ -14,7 +14,7 @@ SOURCE = ("work/bbg751-turn-source-scope/war-confirmation/initial-diplomacy-inte
 
 def source(*, execution_image):
     selected = identity(execution_image)
-    if selected["profile_id"] != "xp2-gamecore-current-092abfbb":
+    if selected["profile_id"] != "xp2-gamecore-current-4de40abf":
         raise ValueError("Initial statement factories require the selected current XP2 image")
     proof = load_pinned_json(resolve_path(resource_root()/SOURCE[0]), SOURCE[1])
     from .xp2_diplomacy_overview_source import REQUEST_STATEMENT_TYPES

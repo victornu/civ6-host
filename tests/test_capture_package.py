@@ -166,7 +166,7 @@ class CapturePackageTests(unittest.TestCase):
         self.bundle.inputs.profile = SimpleNamespace(mode_name="LAN", config_sha="c" * 64,
             game_sha="d" * 64, config_start=0, config_end=5, game_bytes=17)
         self.bundle.execution_image = object()
-        core_sha = "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+        core_sha = "4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8"
         exe_sha = "d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe"
         self.bundle.engine_path.write_bytes(b"current092")
         self.bundle.dependencies[str(self.bundle.engine_path.resolve())] = core_sha
@@ -185,7 +185,7 @@ class CapturePackageTests(unittest.TestCase):
             "limitations": ["Opaque current manager headers are retained as raw bytes and are not persistent content identifiers."],
             "opaque_manager_headers": {"manager_plus_0x1d8": "a" * 48},
         }
-        selected = {"profile_id": "xp2-gamecore-current-092abfbb", "image_sha256": core_sha,
+        selected = {"profile_id": "xp2-gamecore-current-4de40abf", "image_sha256": core_sha,
                     "reference_core_sha256": "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c",
                     "path": str(self.bundle.engine_path)}
         candidate = SimpleNamespace(family="xp2-lan", reference=self.bundle.reference,

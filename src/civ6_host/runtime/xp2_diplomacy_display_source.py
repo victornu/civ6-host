@@ -17,7 +17,7 @@ NAMES=frozenset(('RequestSession','AddResponse','CloseSession','HasQueuedSession
 
 def source(*,execution_image):
     identity(execution_image)
-    if execution_image.id!='xp2-gamecore-current-092abfbb':
+    if execution_image.id!='xp2-gamecore-current-4de40abf':
         raise ValueError('XP2 dialogue display runtime is not admitted')
     value=load_pinned_json(resolve_path(resource_root()/SOURCE[0]),SOURCE[1])
     if (value['schema']!='civ6-host.xp2-dialogue-lua-boundary-source.v1'

@@ -157,7 +157,7 @@ class ReviewIntegrationTests(unittest.TestCase):
 
     def test_source_closure_includes_projection_environment_and_cycle_proof(self):
         from civ6_host.runtime.execution_images import known_path,select
-        profile='xp2-gamecore-current-092abfbb';image=select(profile,core_path=known_path(profile))
+        profile='xp2-gamecore-current-4de40abf';image=select(profile,core_path=known_path(profile))
         pins=review.source_dependencies(execution_image=image)
         self.assertIn(reader.SOURCE[1],pins.values())
         self.assertIn(reader.PRIVATE_SOURCE[1],pins.values())

@@ -8,7 +8,7 @@ from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
 from civ6_host.runtime import xp1_session_view, xp1_session_result, xp1_session_admission
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 
 
 class XP2SessionViewExecutionImageSourceTests(unittest.TestCase):

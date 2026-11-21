@@ -11,7 +11,7 @@ class XP2CheckpointExecutionPinTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.profile = select(
-            'xp2-gamecore-current-092abfbb',
+            'xp2-gamecore-current-4de40abf',
             core_path=(r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI"
                        r"\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll"),
         )

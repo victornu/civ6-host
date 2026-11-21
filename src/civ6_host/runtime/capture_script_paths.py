@@ -44,7 +44,7 @@ PATH_METHOD_VA = 0x140F1C820
 PATH_VTABLE_ENTRIES = (0x140F1C730, 0x140F1C7D0, PATH_METHOD_VA)
 CURRENT_PROFILE_ID = "xp2-exe-current-d1a0-core-092abfbb"
 CURRENT_EXE_SHA256 = "d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe"
-CURRENT_CORE_SHA256 = "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+CURRENT_CORE_SHA256 = "4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8"
 CURRENT_SELECTION_SOURCE_SHA256 = "b7a84db116b87f28890f89622553768c8024c2def153cf935df155ea09b7e0ca"
 CURRENT_REFERENCE_CORE_SHA256 = XP2_SHA256
 CURRENT_EXE_IMAGE_BASE = 0x140000000
@@ -1672,7 +1672,7 @@ def observe_process_cwd(expected_identity: Any) -> Mapping[str, Any]:
                          and isinstance(m.get("name"), str)
                          and m["name"].casefold().startswith("gamecore_")
                          and m["name"].casefold().endswith(".dll")]
-                if len(cores) != 1 or _image_digest(Path(cores[0].get("path", ""))) != (12941080, CURRENT_CORE_SHA256):
+                if len(cores) != 1 or _image_digest(Path(cores[0].get("path", ""))) != (12941592, CURRENT_CORE_SHA256):
                     raise ScriptPathError("loaded current GameCore differs from its pinned image")
                 singleton_rva = CURRENT_SINGLETON_GLOBAL_RVA
                 vtable_rva = CURRENT_VTABLE_RVA

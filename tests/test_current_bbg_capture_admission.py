@@ -15,8 +15,8 @@ from civ6_host.runtime.paths import resource_root
 
 ORIGIN = ('work/official-capture/bbg751-world-A-ui/manifest.json',
           '0438263e3e78b78233153afe0bc4e1ace6ac8e315aed21e4507f738bae8b285d')
-IMAGE = select('xp2-gamecore-current-092abfbb',
-               core_path=known_path('xp2-gamecore-current-092abfbb'))
+IMAGE = select('xp2-gamecore-current-4de40abf',
+               core_path=known_path('xp2-gamecore-current-4de40abf'))
 PACKAGE = dict(path=str(resource_root() / 'work/current-bbg-fixture/manifest.json'), sha256='e' * 64)
 
 

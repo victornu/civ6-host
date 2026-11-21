@@ -306,7 +306,7 @@ class CaptureScriptPathsTests(unittest.TestCase):
             if str(path) == exe_path:
                 return path_module.CURRENT_EXE_SIZE_BYTES, path_module.CURRENT_EXE_SHA256
             if str(path) == core_path:
-                return 12941080, path_module.CURRENT_CORE_SHA256
+                return 12941592, path_module.CURRENT_CORE_SHA256
             raise AssertionError(f"unexpected image path {path}")
 
         with patch.object(path_module.importlib, "import_module", side_effect=import_module), \
@@ -391,7 +391,7 @@ class CaptureScriptPathsTests(unittest.TestCase):
             if str(path) == exe_path:
                 return path_module.CURRENT_EXE_SIZE_BYTES, path_module.CURRENT_EXE_SHA256
             if str(path) == core_path:
-                return 12941080, path_module.CURRENT_CORE_SHA256
+                return 12941592, path_module.CURRENT_CORE_SHA256
             raise AssertionError(f"unexpected image path {path}")
 
         with patch.object(path_module.importlib, "import_module", side_effect=import_module), \

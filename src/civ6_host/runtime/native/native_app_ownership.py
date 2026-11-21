@@ -29,8 +29,8 @@ BASE_CONFIGURATION_SHA = 'abe7c77954f598bcc63d24c75c83fad4362ebdb8fc45677ea500ef
 CURRENT_XP2_INVENTORY_PATH = 'evidence/native-app-ownership-current-inventory/092abfbb.json'
 CURRENT_XP2_INVENTORY_SHA256 = '5b2b319ba96f3bf8041019a66284cd6bf9896b2e091f93ff05e0f4d5d937b625'
 CURRENT_XP2_IMAGE_IDENTITY = {
-    'profile_id': 'xp2-gamecore-current-092abfbb',
-    'image_sha256': '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f',
+    'profile_id': 'xp2-gamecore-current-4de40abf',
+    'image_sha256': '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8',
     'reference_core_sha256': '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c',
     'path': r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll",
 }

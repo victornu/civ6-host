@@ -19,7 +19,7 @@ from .xp2_bundle_inputs import REFERENCE
 
 SOURCE = ('evidence/host-xp2-stock-formation-source.json',
           'ec81971ac909043b08a4ef310616adc4dd57bc69fe33d60456f11809e5c15bf9')
-CORE = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+CORE = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 LIMIT = 1024 * 1024
 
 

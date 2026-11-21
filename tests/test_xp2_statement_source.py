@@ -14,8 +14,8 @@ class XP2StatementSourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.execution_image = execution_images.select(
-            'xp2-gamecore-current-092abfbb',
-            core_path=execution_images.known_path('xp2-gamecore-current-092abfbb'))
+            'xp2-gamecore-current-4de40abf',
+            core_path=execution_images.known_path('xp2-gamecore-current-4de40abf'))
         raw = Path(cls.execution_image.path).read_bytes()
         if hashlib.sha256(raw).hexdigest() != cls.execution_image.image_sha256:
             raise AssertionError('Installed XP2 PE differs from its selected execution image')
@@ -65,7 +65,7 @@ class XP2StatementSourceTests(unittest.TestCase):
                 source.verify_live(self.base, self.read, execution_image=image)
         with self.assertRaises(ValueError):
             source.source(execution_image=execution_images.select(
-                'xp2-gamecore-current-092abfbb', core_path='C:/foreign/GameCore.dll'))
+                'xp2-gamecore-current-4de40abf', core_path='C:/foreign/GameCore.dll'))
 
     def test_source_and_dependency_hash_audit_is_complete(self):
         pins = source.source_dependencies(execution_image=self.execution_image)

@@ -12,7 +12,7 @@ class EmergencySourceTests(unittest.TestCase):
         original=configuration_profiles._source
         proof=original(native.UI_SOURCE)
         self.assertIsInstance(proof['direct_dependency_inventory']['other_indirect_calls'],tuple)
-        name='xp2-gamecore-current-092abfbb'
+        name='xp2-gamecore-current-4de40abf'
         image=select(name,core_path=known_path(name))
         self.assertIn(native.UI_SOURCE[1],native.source_dependencies(execution_image=image).values())
         changed=dict(proof)

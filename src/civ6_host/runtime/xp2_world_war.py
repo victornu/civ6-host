@@ -205,7 +205,7 @@ def verify_close_writer(backend):
 
     image = getattr(backend.core, '_civ6_host_execution_image', None)
     identity(image)
-    if image.id != 'xp2-gamecore-current-092abfbb':
+    if image.id != 'xp2-gamecore-current-4de40abf':
         raise ValueError('Surprise-war CloseSession requires its selected XP2 image')
     base, read = backend.core._handle, backend.runtime.read
     _verify_spans(backend, _CLOSE_WRITER_SPANS, 'Native surprise-war CloseSession writer differs')

@@ -32,7 +32,7 @@ def selected_ui_host(execution_image=None):
         return UI_HOST
     from .execution_images import identity
     selected = identity(execution_image)
-    if (selected['profile_id'] != 'xp2-gamecore-current-092abfbb'
+    if (selected['profile_id'] != 'xp2-gamecore-current-4de40abf'
             or selected['reference_core_sha256'] != xp2.XP2_CORE_SHA256):
         raise ValueError('No compiled BBG host for this execution image')
     return CURRENT_STRINGS_HOST_REFERENCE

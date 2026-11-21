@@ -173,8 +173,8 @@ def _stock_xp2_execution(execution_image,reference=None,origin=None):
         'xp2-gs-lan-rows-20261102/manifest.json').resolve()),
         '6468bf13145fa712438bd276896273630789ca4afb6003d904b66a8aa29e2020')
     configured=configured_reference()
-    if (selected['profile_id']!='xp2-gamecore-current-092abfbb'
-            or selected['image_sha256']!='092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+    if (selected['profile_id']!='xp2-gamecore-current-4de40abf'
+            or selected['image_sha256']!='4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
             or selected['reference_core_sha256']!='324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
             or selected['path']!=r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll"
             or configured is None or configured!={'path':expected_package[0],'sha256':expected_package[1]}
@@ -207,7 +207,7 @@ def _prepared_xp2_execution(execution_image, reference=None, origin=None):
     from .execution_images import identity
     selected = identity(execution_image)
     configured = configured_reference()
-    if (selected['profile_id'] != 'xp2-gamecore-current-092abfbb'
+    if (selected['profile_id'] != 'xp2-gamecore-current-4de40abf'
             or selected['reference_core_sha256'] != bbg.xp2.XP2_CORE_SHA256
             or configured is None or reference is not None and reference != configured):
         raise ValueError('Current BBG execution requires its exact registered origin and prepared package')

@@ -15,7 +15,7 @@ from civ6_host.runtime import xp2_diplomacy_overview_source as overview_source
 from civ6_host.runtime.execution_images import known_path, select
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 IMAGE = select(PROFILE_ID, core_path=known_path(PROFILE_ID))
 BASE = 0x180000000
 CONFIG = 0x300000000

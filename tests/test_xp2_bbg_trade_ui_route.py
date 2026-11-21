@@ -91,7 +91,7 @@ class BBGTradeReceiverTests(unittest.TestCase):
         from civ6_host.runtime.execution_images import known_path, select
         from civ6_host.runtime.xp2_trade_table_variant import source_dependencies
 
-        profile = 'xp2-gamecore-current-092abfbb'
+        profile = 'xp2-gamecore-current-4de40abf'
         deps = source_dependencies(execution_image=select(profile, core_path=known_path(profile)))
         library = next(path for path in deps if path.suffix == '.dll')
         self.assertEqual(hashlib.sha256(library.read_bytes()).hexdigest(), deps[library])
@@ -191,7 +191,7 @@ class BBGTradeReceiverTests(unittest.TestCase):
     def test_spy_source_and_selector_match_the_current_producer(self):
         from civ6_host.runtime.execution_images import known_path, select
 
-        profile = 'xp2-gamecore-current-092abfbb'
+        profile = 'xp2-gamecore-current-4de40abf'
         sources = spy.source_dependencies(execution_image=select(profile, core_path=known_path(profile)))
         self.assertEqual(set(sources.values()), {
             spy.SOURCE[1], spy.FIFO_SOURCE[1], spy.EVENT_PLAYER_SOURCE[1]})
@@ -204,7 +204,7 @@ class BBGTradeReceiverTests(unittest.TestCase):
         import pefile
         from civ6_host.runtime.execution_images import known_path, select
 
-        profile = 'xp2-gamecore-current-092abfbb'
+        profile = 'xp2-gamecore-current-4de40abf'
         image = select(profile, core_path=known_path(profile))
         with pefile.PE(image.path, fast_load=True) as core:
             base = core.OPTIONAL_HEADER.ImageBase

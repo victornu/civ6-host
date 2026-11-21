@@ -26,8 +26,8 @@ _CURRENT_LOCALIZATION_SOURCE_PROFILE = ('work/actual-core-092-integration/locale
     'cc6326899b99bfb54c92845ed368e51b88efbbce9bdf8cf4dab9a334f7a9645d')
 _CURRENT_SHARED_BINDINGS_PROOF = ('work/official-capture/current-localization-shared-bindings.json',
     '2907bbb5b41e8c015c4779e1c49c3940b06b6a719ca815cec61eac41c1340823')
-_CURRENT_EXECUTION_PROFILE_ID = 'xp2-gamecore-current-092abfbb'
-_CURRENT_CORE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+_CURRENT_EXECUTION_PROFILE_ID = 'xp2-gamecore-current-4de40abf'
+_CURRENT_CORE_SHA256 = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 _REFERENCE_CORE_SHA256 = '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
 _CTOR_CSTR = '??0String@Localization@@QEAA@PEBD@Z'
 _CTOR_SIZED = '??0String@Localization@@QEAA@PEBDI@Z'

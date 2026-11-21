@@ -137,7 +137,7 @@ class PlacementSourceTests(unittest.TestCase):
     def test_saved_owner_projects_selected_execution_image_through_all_three_binders(self):
         from civ6_host.runtime.execution_images import known_path, select
         from civ6_host.runtime import xp2_production_queue_source as queue
-        image=select('xp2-gamecore-current-092abfbb',core_path=known_path('xp2-gamecore-current-092abfbb'))
+        image=select('xp2-gamecore-current-4de40abf',core_path=known_path('xp2-gamecore-current-4de40abf'))
         f,b,c=self.graph();b.core._civ6_host_execution_image=image
         with patch.object(queue,'source_dependencies',wraps=queue.source_dependencies) as queue_pins, \
              patch.object(placement,'source_dependencies',wraps=placement.source_dependencies) as placement_pins, \

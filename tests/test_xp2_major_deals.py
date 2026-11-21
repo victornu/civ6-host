@@ -53,7 +53,7 @@ class MajorDealTests(unittest.TestCase):
         import pefile
         from civ6_host.runtime import execution_images
 
-        image = execution_images.select('xp2-gamecore-current-092abfbb',
+        image = execution_images.select('xp2-gamecore-current-4de40abf',
                                         core_path=execution_images._GAMECORE_PATH)
         pe = pefile.PE(image.path, fast_load=True)
         self.addCleanup(pe.close)
