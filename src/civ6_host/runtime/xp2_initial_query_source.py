@@ -25,7 +25,7 @@ def source(*, execution_image):
     getter = proof["pause"]["current_xp2_provider_getter"]
     rows = proof["public_major_api_registrations"]["registrations"]
     actual = {(row["name"], row["registrar_rva"], row["callback_rva"]) for row in rows}
-    if (selected["profile_id"] != "xp2-gamecore-current-092abfbb"
+    if (selected["profile_id"] != "xp2-gamecore-current-4de40abf"
             or proof["schema"] != "civ6rl.xp2-pause-and-major-api-source-profile.v1"
             or proof["images"]["actual_xp2"]["sha256"] != selected["image_sha256"]
             or proof["images"]["xp2_provider_reference"]["core_sha256"] != selected["reference_core_sha256"]

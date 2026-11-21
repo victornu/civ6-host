@@ -21,7 +21,7 @@ _CORRELATED = ('work/official-capture/xp2-bbg751-correlated-20261104/recovered-e
                '6bdcd32192781f3f92d26ee4632ce2539ccf2a95baa6b25d34f4616f26b1805a')
 _CORRELATED_SOURCE = ('work/official-capture/bbg751-world-A-trade-ui-association/correlated-trade-ui-source.json',
                       'ef2d68a5bea067289924b3b80bffc6526d4e651b09e87458737afd4cdf5b64e4')
-_CORE = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+_CORE = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 _CIVIC_SOURCE = ('work/trade-common-client/xp2-current-trade-civic-hook-source.json',
                  '978c203c768504b9a631bb83224c3c612d418d127c56809d59a2ff31fee9f508')
 _XP1_CIVIC_SOURCE = ('work/trade-common-client/xp1-stock-trade-overview-source.json',

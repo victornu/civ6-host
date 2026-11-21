@@ -37,7 +37,7 @@ _ROUTES = MappingProxyType({
 EVENT_NAMES = MappingProxyType({STAGE1: 'WorldCongressStage1',
     STAGE2: 'WorldCongressStage2', STAGE3: 'WorldCongressStage3',
     FINISHED: 'WorldCongressFinished'})
-_CORE_SHA = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+_CORE_SHA = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 _EXE_SHA = 'd1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe'
 _EMPTY_STATE = MappingProxyType(dict(observer_registered=False,
     state_pointer_nonnull=True, pre_hook=None, post_hook=None,
@@ -143,7 +143,7 @@ def _execution(core):
     from .execution_images import identity
     profile = getattr(core, '_civ6_host_execution_image', None)
     selected = identity(profile)
-    if (selected['profile_id'] != 'xp2-gamecore-current-092abfbb'
+    if (selected['profile_id'] != 'xp2-gamecore-current-4de40abf'
             or selected['image_sha256'] != _CORE_SHA
             or selected['reference_core_sha256'] != XP2_CORE_SHA256
             or Path(selected['path']).resolve() != Path(source()['images']['core']['path']).resolve()):

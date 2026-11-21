@@ -23,7 +23,7 @@ MAX_CHAIN = 256
 
 def source(*, execution_image):
     identity(execution_image)
-    if execution_image.id != "xp2-gamecore-current-092abfbb":
+    if execution_image.id != "xp2-gamecore-current-4de40abf":
         raise ValueError("Statement factory requires the registered current XP2 image")
     proof = load_pinned_json(resolve_path(resource_root()/SOURCE[0]), SOURCE[1])
     if (proof["schema"] != "civ6-host.xp2-war-statement-factory-source.v1"

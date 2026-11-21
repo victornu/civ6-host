@@ -12,8 +12,8 @@ from civ6_host.runtime.paths import resource_root
 
 
 ROOT = resource_root()
-IMAGE = select('xp2-gamecore-current-092abfbb',
-               core_path=known_path('xp2-gamecore-current-092abfbb'))
+IMAGE = select('xp2-gamecore-current-4de40abf',
+               core_path=known_path('xp2-gamecore-current-4de40abf'))
 FIXTURE_PATH = ROOT / number._CURRENT_LOCALE_BODY_PROOF[0]
 EXPORTS = number._EXPORT_RVAS
 

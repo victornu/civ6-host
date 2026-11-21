@@ -20,7 +20,7 @@ from test_xp2_turn_notifications import pending_civilization_render
 
 class GreatWorkTransportTests(unittest.TestCase):
     def graph(self):
-        name = 'xp2-gamecore-current-092abfbb'
+        name = 'xp2-gamecore-current-4de40abf'
         image = select(name, core_path=known_path(name))
         fixtures = plot_fixtures.ImprovementQueriesTests()
         self.addCleanup(fixtures.doCleanups)

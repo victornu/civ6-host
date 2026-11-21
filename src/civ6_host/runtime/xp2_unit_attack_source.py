@@ -17,7 +17,7 @@ from .source_verification import verify_pinned_json_bytes
 
 SOURCE=('work/host-extensions/xp2-unit-attacks-static/source-profile-v1.json',
         '94562a3ba9e6988fde63a146dd1228b2454b5b1dbee93ffc12a25d83756d95e2')
-CURRENT_XP2_IMAGE_SHA = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+CURRENT_XP2_IMAGE_SHA = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 CURRENT_XP2_LIFECYCLE = ('evidence/host-xp2-attack-no-effect-boundary.json',
                          'd4055d8e44b42cf53116b03644f91b8ea9e1e700108417bafa7ea66362275efb')
 CURRENT_XP2_NO_EFFECT = 'native_attack_consumed_without_observable_effect'

@@ -76,7 +76,7 @@ class FoundationLegalityTests(unittest.TestCase):
     def test_source_dependencies_use_registered_current_image_translation(self):
         from civ6_host.runtime.unit_operation_ui_profile import source_dependencies
         profile = execution_images.select(
-            "xp2-gamecore-current-092abfbb", core_path=execution_images._GAMECORE_PATH)
+            "xp2-gamecore-current-4de40abf", core_path=execution_images._GAMECORE_PATH)
         pins = source_dependencies(core_sha256=foundation.XP2_CORE_SHA256,
                                    execution_image=profile)
         self.assertEqual(pins[profile.path], profile.image_sha256)

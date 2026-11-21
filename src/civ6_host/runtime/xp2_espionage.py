@@ -17,7 +17,7 @@ def source_dependencies(*, execution_image=None):
     from .execution_images import ExecutionImageProfile
     if (type(execution_image) is not ExecutionImageProfile
             or execution_image.image_sha256 !=
-            '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'):
+            '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'):
         raise ValueError('Espionage requires the pinned current XP2 execution image')
     from .native import native_saved_espionage as native
     return {row['path']: row['sha256'] for row in native.verify_source().values()}

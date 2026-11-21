@@ -10,7 +10,7 @@ from civ6_host.runtime.xp2_bundle_inputs import XP2_LAN_PROFILE
 from civ6_host.runtime.xp1_session_checkpoint import _validate_save_execution_identity
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 CORE_PATH = (
     r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI"
     r"\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll"

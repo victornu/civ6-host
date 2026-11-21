@@ -21,8 +21,8 @@ PROFILE_PATH = 'work/bbg751-turn-source-scope/war-confirmation/initial-diplomacy
 PROFILE_SHA256 = '92f83b4e4b13b336529ed2f28b6552eb6958d16a5578ba5fea23f7fde5f48055'
 SOURCE_PROFILE_PATH = 'work/bbg751-turn-source-scope/war-confirmation/major-dialogue/source-profile.json'
 SOURCE_PROFILE_SHA256 = 'c174fdd3559007895a8bf1dbdaf0e0cbcf3b0ae8cf807788b34d331dbb856c3f'
-CURRENT_IMAGE_ID = 'xp2-gamecore-current-092abfbb'
-CURRENT_IMAGE_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+CURRENT_IMAGE_ID = 'xp2-gamecore-current-4de40abf'
+CURRENT_IMAGE_SHA256 = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 
 REQUEST_STATEMENT_TYPES = {
     'CHOICE_DECLARE_SURPRISE_WAR': 'DECLARE_SURPRISE_WAR',

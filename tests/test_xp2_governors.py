@@ -127,8 +127,8 @@ class FakeGovernorSession:
 
 class Xp2GovernorCompositionTests(unittest.TestCase):
     def test_source_dependencies_translate_only_selected_current_image(self):
-        profile = select('xp2-gamecore-current-092abfbb',
-            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        profile = select('xp2-gamecore-current-4de40abf',
+            core_path=known_path('xp2-gamecore-current-4de40abf'))
         pins = governor_source.source_dependencies(execution_image=profile)
         image_path = str(Path(profile.path).resolve())
         self.assertEqual(pins[image_path], profile.image_sha256)

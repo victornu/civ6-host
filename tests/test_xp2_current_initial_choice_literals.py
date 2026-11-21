@@ -10,8 +10,8 @@ from civ6_host.runtime.execution_images import select, known_path
 class CurrentInitialChoiceLiteralTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.image = select('xp2-gamecore-current-092abfbb',
-                           core_path=known_path('xp2-gamecore-current-092abfbb'))
+        cls.image = select('xp2-gamecore-current-4de40abf',
+                           core_path=known_path('xp2-gamecore-current-4de40abf'))
         cls.pe = pefile.PE(cls.image.path, fast_load=True)
         cls.base = cls.pe.OPTIONAL_HEADER.ImageBase
 

@@ -11,8 +11,8 @@ from civ6_host.runtime.configuration_profiles import XP1_CORE_SHA256, XP2_CORE_S
 
 LAB = Path(__file__).resolve().parents[2] / 'civ6-rl-lab'
 from civ6_host.runtime.execution_images import known_path, select
-EXECUTION_IMAGE = select('xp2-gamecore-current-092abfbb',
-                         core_path=known_path('xp2-gamecore-current-092abfbb'))
+EXECUTION_IMAGE = select('xp2-gamecore-current-4de40abf',
+                         core_path=known_path('xp2-gamecore-current-4de40abf'))
 
 
 class FoundUnitEventProfilesTests(unittest.TestCase):

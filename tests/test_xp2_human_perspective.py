@@ -39,7 +39,7 @@ class PerspectiveFixture(fixture.Fixture):
     }
 
     def __init__(self):
-        image_id = 'xp2-gamecore-current-092abfbb'
+        image_id = 'xp2-gamecore-current-4de40abf'
         image = select(image_id, core_path=known_path(image_id))
         pillage_source = foundation_event_profile.pillage_source
         original_graph = fixture.XP2ComposedNotifications.graph

@@ -31,7 +31,7 @@ class XP2TradeAdapterTests(unittest.TestCase):
     def test_routes_survive_unavailable_origin_reader_without_empty_substitution(self):
         from civ6_host.runtime.execution_images import select, known_path
         from civ6_host.runtime.configuration_profiles import XP2_CORE_SHA256
-        profile = 'xp2-gamecore-current-092abfbb'
+        profile = 'xp2-gamecore-current-4de40abf'
         image = select(profile, core_path=known_path(profile))
         observation = dict(player_id=0, turn=61)
         routes = dict(native_route_witness=[{'unit_id': 19}])

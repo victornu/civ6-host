@@ -35,8 +35,8 @@ _DATABASE_ROLES = {
     "gameplay": "database_gameplay",
     "localization": "database_localization",
 }
-_CURRENT_XP2_IMAGE_PROFILE = "xp2-gamecore-current-092abfbb"
-_CURRENT_XP2_IMAGE_SHA256 = "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+_CURRENT_XP2_IMAGE_PROFILE = "xp2-gamecore-current-4de40abf"
+_CURRENT_XP2_IMAGE_SHA256 = "4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8"
 _XP2_REFERENCE_CORE_SHA256 = "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c"
 _CURRENT_EXE_SHA256 = "d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe"
 
@@ -640,8 +640,8 @@ def _check_stock_current_engine(reference, origin, candidate, engine, content_pr
             or reference["sha256"] != _XP2_STOCK_PACKAGE[1]):
         raise CapturePackageError("current execution image requires the exact retained stock XP2 package")
     selected = identity(execution_image)
-    if (selected["profile_id"] != "xp2-gamecore-current-092abfbb"
-            or selected["image_sha256"] != "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+    if (selected["profile_id"] != "xp2-gamecore-current-4de40abf"
+            or selected["image_sha256"] != "4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8"
             or selected["reference_core_sha256"] != "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c"
             or engine_path != Path(selected["path"])
             or engine["sha256"] != selected["reference_core_sha256"]

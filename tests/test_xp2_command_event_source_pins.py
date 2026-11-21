@@ -16,7 +16,7 @@ from civ6_host.runtime import xp2_history_event_profile
 from civ6_host.runtime.native import native_event_e660_building_pillaged
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 
 
 class XP2CommandEventSourcePinsTests(unittest.TestCase):

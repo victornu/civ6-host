@@ -29,7 +29,7 @@ KINDS = frozenset((KIND,))
 # pinned at14ff23 ->159050. Do not overwrite the historical registry wholesale.
 CALLBACKS = MappingProxyType({KIND: 0x159960})
 SELECTOR_KEY, POSITION_KEY, VALUE_KEY, STATE_KEY = 0xa1e5a149, 0x8c468e3c, 0xd6fcf3e4, 0xa1fbc372
-_CORE_SHA = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+_CORE_SHA = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 _EXE_SHA = 'd1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe'
 _EMPTY_STATE = MappingProxyType(dict(observer_registered=False,
     state_pointer_nonnull=True, pre_hook=None, post_hook=None, subscriber_count=0, state_flags=0))

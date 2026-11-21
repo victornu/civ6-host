@@ -80,10 +80,16 @@ screens remain explicitly unsupported. See
 `evidence/host-xp2-direct-diplomatic-delegation-t57-native.json` and
 `evidence/host-xp2-direct-denounce-t57-native.json`.
 
-The local XP2 DLL was replaced during a Steam update/repair after the retained
-native witnesses. Its new SHA-256 is `092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f`;
-those witnesses target `324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c`.
-A distinct `xp2-gamecore-current-092abfbb` profile now completes a scoped native
+The local XP2 DLL was replaced by Steam twice after the retained native
+witnesses: first to `092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f`
+(12,941,080 bytes), then to
+`4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8`
+(12,941,592 bytes). The current installed image pin and the `xp2-gamecore-current-4de40abf`
+profile id follow the installed bytes; the witnesses and the 1727 pinned source spans
+target the captured ABI reference `324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c`
+and the earlier installed image, so those source proofs must be re-derived
+(REA/Ghidra) for the new image before any native admission is claimed.
+A distinct `xp2-gamecore-current-4de40abf` profile now completes a scoped native
 continuation through the common Python client: resume the retained GS + BBG 7.5.1
 T24 checkpoint, buy the offered Warrior for 80 gold, advance to T25, select a unit,
 exchange two owned units, save a v2 checkpoint and close. A second process resumes

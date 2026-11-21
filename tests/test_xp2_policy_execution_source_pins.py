@@ -18,7 +18,7 @@ from civ6_host.runtime import xp2_policy_relocation as relocation
 from civ6_host.runtime import a0_policy_unlock
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 
 
 class XP2PolicyExecutionSourcePinsTests(unittest.TestCase):

@@ -13,8 +13,8 @@ class StopBeforeNative(Exception):
 
 class ScriptOperationImageTests(unittest.TestCase):
     def setUp(self):
-        self.image = select('xp2-gamecore-current-092abfbb',
-                            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        self.image = select('xp2-gamecore-current-4de40abf',
+                            core_path=known_path('xp2-gamecore-current-4de40abf'))
 
     def test_submission_forwards_its_core_owned_image_before_allocations(self):
         core = SimpleNamespace(_handle=0x180000000, _civ6_host_execution_image=self.image)

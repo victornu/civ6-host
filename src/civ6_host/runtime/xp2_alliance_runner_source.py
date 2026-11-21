@@ -3,7 +3,7 @@
 SOURCE-ONLY module (orchestrator lane "runner-facts", branch
 feat/xp2-alliance-actions): pins the native runner/transport facts of a
 human MAKE_DEAL conversation on Core092 (GameCore_XP2_FinalRelease.dll,
-sha 092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f)
+sha 4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8)
 plus the official answer path in the loaded XP2 deal view. No native
 execution, no receiver install, no mutation: constants and hashes only.
 File bytes are pure ASCII.

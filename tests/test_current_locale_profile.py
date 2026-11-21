@@ -15,8 +15,8 @@ from civ6_host.runtime.provenance import resource_root
 
 class CurrentLocaleProfileTests(unittest.TestCase):
     def setUp(self):
-        self.image=select('xp2-gamecore-current-092abfbb',
-                          core_path=known_path('xp2-gamecore-current-092abfbb'))
+        self.image=select('xp2-gamecore-current-4de40abf',
+                          core_path=known_path('xp2-gamecore-current-4de40abf'))
         self.directory=Path(self.image.shared_dependencies[0].path).parent
         self.shared=profile_for_shared_dependencies(self.directory,
             actual_image_sha256=self.image.image_sha256,

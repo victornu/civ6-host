@@ -24,12 +24,12 @@ from civ6_host.runtime.native.native_core_context_profiles import (
 )
 
 
-PROFILE_ID = 'xp2-gamecore-current-092abfbb'
+PROFILE_ID = 'xp2-gamecore-current-4de40abf'
 CORE_PATH = (
     r"C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI"
     r"\DLC\Expansion2\Binaries\Win64\GameCore_XP2_FinalRelease.dll"
 )
-CURRENT_SHA256 = '092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f'
+CURRENT_SHA256 = '4de40abf7c739f53c1f3f825863ace84dc220e5a42d87620e56fceaf3fbd4dc8'
 REFERENCE_SHA256 = '324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c'
 
 
@@ -210,7 +210,7 @@ class ExecutionImageTests(unittest.TestCase):
         self.assertEqual(profile.id, PROFILE_ID)
         self.assertEqual(profile.path, CORE_PATH)
         self.assertEqual(profile.image_sha256, CURRENT_SHA256)
-        self.assertEqual(profile.image_size_bytes, 12941080)
+        self.assertEqual(profile.image_size_bytes, 12941592)
         self.assertEqual(profile.reference_core_sha256, REFERENCE_SHA256)
         self.assertNotEqual(profile.image_sha256, profile.reference_core_sha256)
         self.assertTrue(profile.executable)
@@ -384,8 +384,8 @@ class ExecutionImageTests(unittest.TestCase):
     def test_verification_rechecks_current_core_hash_and_size(self):
         profile = select(PROFILE_ID, core_path=CORE_PATH)
         for disk_identity in (
-            ('0' * 64, 12941080),
-            (CURRENT_SHA256, 12941079),
+            ('0' * 64, 12941592),
+            (CURRENT_SHA256, 12941591),
         ):
             with self.subTest(disk_identity=disk_identity):
                 original = execution_images._hash_file_and_size

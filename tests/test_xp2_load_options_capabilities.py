@@ -31,8 +31,8 @@ def rendered_performance():
 class XP2OptionsCapabilityTests(unittest.TestCase):
     def test_performance_selector_uses_captured_abi_with_explicit_runtime_identity(self):
         from civ6_host.runtime.execution_images import select, known_path
-        image=select('xp2-gamecore-current-092abfbb',
-                     core_path=known_path('xp2-gamecore-current-092abfbb'))
+        image=select('xp2-gamecore-current-4de40abf',
+                     core_path=known_path('xp2-gamecore-current-4de40abf'))
         b=self.backend()
         b.profile=NS(core_sha256=image.image_sha256,
                      source_core_sha256=image.reference_core_sha256)

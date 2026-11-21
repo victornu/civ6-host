@@ -185,7 +185,7 @@ Secondary routing and checkpoint comparison have software coverage. Native
 Congress evidence covers the primary player.
 
 The repaired Steam installation has an explicit trial selection on
-`NativeNetworkSession`: `execution_image_profile="xp2-gamecore-current-092abfbb"`.
+`NativeNetworkSession`: `execution_image_profile="xp2-gamecore-current-4de40abf"`.
 It verifies the actual Core and three shared libraries and selects the derived
 BBG host with the current Havok export addresses. Omitting this option preserves
 the historical selection; a changed DLL is never inferred as compatible.
@@ -2079,7 +2079,7 @@ call or a new gameplay interaction.
 On BBG 7.5.1, the opt-in `civ6-host.network-capability-decisions.v33` adds
 `decisions.diplomacy_overview` and `diplomacy_initiate` candidates. It preserves
 the preceding v32 governor fields. The current scope is the explicit
-`xp2-gamecore-current-092abfbb` execution image and exact recovered GS + BBG 7.5.1
+`xp2-gamecore-current-4de40abf` execution image and exact recovered GS + BBG 7.5.1
 bundle; launch requires `governors_diagnostic=True`,
 `diplomacy_overview_diagnostic=True` and the selected war receiver source pin.
 

@@ -9,7 +9,7 @@ from civ6_host.runtime import xp2_statement_factory as factory
 from civ6_host.runtime import xp2_statement_source as statement
 from civ6_host.runtime.execution_images import known_path, select
 
-PROFILE_ID = "xp2-gamecore-current-092abfbb"
+PROFILE_ID = "xp2-gamecore-current-4de40abf"
 IMAGE = select(PROFILE_ID, core_path=known_path(PROFILE_ID))
 BASE = 0x180000000
 BUCKETS = 0x200000000

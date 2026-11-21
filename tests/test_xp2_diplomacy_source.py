@@ -15,8 +15,8 @@ class XP2DiplomacyDisplaySourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.execution_image = execution_images.select(
-            'xp2-gamecore-current-092abfbb',
-            core_path=execution_images.known_path('xp2-gamecore-current-092abfbb'))
+            'xp2-gamecore-current-4de40abf',
+            core_path=execution_images.known_path('xp2-gamecore-current-4de40abf'))
         raw = Path(cls.execution_image.path).read_bytes()
         if hashlib.sha256(raw).hexdigest() != cls.execution_image.image_sha256:
             raise AssertionError('Installed XP2 PE differs from its selected execution image')
@@ -37,7 +37,7 @@ class XP2DiplomacyDisplaySourceTests(unittest.TestCase):
         value = source.verify_live(self.base, self.read,
                                    execution_image=self.execution_image)
         self.assertIs(value, source.source(execution_image=self.execution_image))
-        self.assertEqual(self.execution_image.id, 'xp2-gamecore-current-092abfbb')
+        self.assertEqual(self.execution_image.id, 'xp2-gamecore-current-4de40abf')
         self.assertEqual(value['actual_image']['sha256'], self.execution_image.image_sha256)
         self.assertEqual(value['reference_core_sha256'],
                          self.execution_image.reference_core_sha256)

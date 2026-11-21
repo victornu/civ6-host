@@ -173,7 +173,7 @@ class CurrentSavedLoadImageTests(unittest.TestCase):
         from civ6_host.runtime.gameplay_active_profiles import CURRENT_XP2_CORE_SHA256
         from civ6_host.runtime.native.native_official_bundle import PreparedBundle
 
-        profile_id = 'xp2-gamecore-current-092abfbb'
+        profile_id = 'xp2-gamecore-current-4de40abf'
         image = select(profile_id, core_path=known_path(profile_id))
         actual_content = dict(engine=dict(
             executable_sha256='d1a0cfd439e7451be515f47595cfa0b6b983f56d1faf4ea434a4ce3b21491ebe',

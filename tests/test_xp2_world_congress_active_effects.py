@@ -58,7 +58,7 @@ class ActiveEffectsOwnerTests(unittest.TestCase):
     def test_prepared_source_closure_contains_the_fixed_active_projection(self):
         from civ6_host.runtime.execution_images import known_path,select
         from civ6_host.runtime.xp2_world_congress_review import source_dependencies
-        name='xp2-gamecore-current-092abfbb'
+        name='xp2-gamecore-current-4de40abf'
         pins=source_dependencies(execution_image=select(name,core_path=known_path(name)))
         for digest in (native.SOURCE[1],native.UI_SOURCE[1],native.cards.SOURCE[1],
                        shared.SOURCE[1],shared.NUMERIC_SOURCE[1],cycle.SOURCE[1]):

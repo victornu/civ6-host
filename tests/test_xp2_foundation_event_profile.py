@@ -335,8 +335,8 @@ class XP2FoundationEventProfileTests(unittest.TestCase):
         from civ6_host.runtime.execution_images import known_path, select
 
         graph = turn_notifications.XP2ComposedNotifications().graph()
-        image = select('xp2-gamecore-current-092abfbb',
-            core_path=known_path('xp2-gamecore-current-092abfbb'))
+        image = select('xp2-gamecore-current-4de40abf',
+            core_path=known_path('xp2-gamecore-current-4de40abf'))
         graph.owner.deferred.core._civ6_host_execution_image = image
         proof = query_profiles._xp2_source(execution_image=image)
         query_abi = query_profiles.query_abi(XP2_CORE_SHA256,

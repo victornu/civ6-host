@@ -38,7 +38,7 @@ PROFILE=StatementProfile(record_types_by_kind=MappingProxyType({KIND:132}),
 
 def source(*,execution_image):
     identity(execution_image)
-    if execution_image.id!='xp2-gamecore-current-092abfbb':
+    if execution_image.id!='xp2-gamecore-current-4de40abf':
         raise ValueError('Statement runtime is not admitted')
     p=load_pinned_json(resolve_path(resource_root()/SOURCE[0]),SOURCE[1])
     if (p['actual_image']['sha256']!=execution_image.image_sha256

@@ -529,7 +529,7 @@ load and during session reads.
 
 For a current Gathering Storm LAN capture, set `public_view_players` to the
 human seat IDs to collect, with `input_profile="xp2-lan"` and
-`execution_image_profile="xp2-gamecore-current-092abfbb"`. After reset or a
+`execution_image_profile="xp2-gamecore-current-4de40abf"`. After reset or a
 subsequent accepted reply, `SessionClient.player_view(player_id)` reads that
 seat's observation and revealed map at the reply's exact revision. A defeated
 seat's view becomes unavailable and its previous view file is removed. The

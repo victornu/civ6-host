@@ -31,7 +31,7 @@ import test_xp2_host_slot20_source as legacy
 
 
 def image():
-    name='xp2-gamecore-current-092abfbb'
+    name='xp2-gamecore-current-4de40abf'
     return select(name,core_path=known_path(name))
 
 
